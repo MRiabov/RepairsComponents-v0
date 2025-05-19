@@ -4,7 +4,9 @@ A modular library of repair components for reinforcement learning environments, 
 
 ## Overview
 
-Repairs Components provides a collection of reusable, physics-based repair components for building realistic repair and maintenance simulations. The library is designed to be used with reinforcement learning environments, particularly those built on the MuJoCo physics engine.
+Repairs Components is an open-source library designed to provide a comprehensive set of reusable, physics-based repair components for building realistic repair and maintenance simulations. The library is specifically tailored for use with reinforcement learning environments, particularly those built on the MuJoCo physics engine. By leveraging the power of MuJoCo, Repairs Components enables the creation of highly realistic and interactive simulations, allowing for more effective training and testing of reinforcement learning models.
+
+The library is built around a modular architecture, allowing users to easily integrate and combine different repair components to create complex scenarios. The components themselves are designed to be highly customizable, with a wide range of parameters and settings that can be adjusted to suit specific use cases.
 
 ## Features
 
