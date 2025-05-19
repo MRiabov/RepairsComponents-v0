@@ -4,11 +4,11 @@ Version: 0.1.0
 Summary: A library of repair components for reinforcement learning environments
 Home-page: https://github.com/yourusername/RepairsComponents-v0
 Author: Your Name
-Author-email: Your Name <your.email@example.com>
-Project-URL: Homepage, https://github.com/yourusername/RepairsComponents-v0
+Author-email: Maksym Riabov <maksymriabov2004@gmail.com>
+Project-URL: Homepage, https://github.com/MaksymRiabov/RepairsComponents-v0
 Project-URL: Documentation, https://repairs-components.readthedocs.io/
-Project-URL: Repository, https://github.com/yourusername/RepairsComponents-v0
-Project-URL: Issues, https://github.com/yourusername/RepairsComponents-v0/issues
+Project-URL: Repository, https://github.com/MaksymRiabov/RepairsComponents-v0
+Project-URL: Issues, https://github.com/MaksymRiabov/RepairsComponents-v0/issues
 Classifier: Development Status :: 3 - Alpha
 Classifier: Intended Audience :: Science/Research
 Classifier: License :: OSI Approved :: MIT License
@@ -26,7 +26,6 @@ Requires-Dist: dm_control>=1.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=6.0; extra == "dev"
 Requires-Dist: pytest-cov>=2.0; extra == "dev"
-Requires-Dist: black>=21.12b0; extra == "dev"
 Requires-Dist: isort>=5.10.1; extra == "dev"
 Requires-Dist: mypy>=0.910; extra == "dev"
 Requires-Dist: pylint>=2.12.0; extra == "dev"

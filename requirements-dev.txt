@@ -6,7 +6,7 @@ pytest>=6.0
 pytest-cov>=2.0
 
 # Linting
-black>=21.12b0
+ruff
 isort>=5.10.1
 mypy>=0.910
 pylint>=2.12.0
