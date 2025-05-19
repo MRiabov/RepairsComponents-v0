@@ -1,0 +1,85 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+line_length = 88
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=repairs_components --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["**/__init__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pylint.master]
+load-plugins = "pylint.extensions.docparams"
+
+[project]
+name = "repairs-components"
+version = "0.1.0"
+description = "A library of repair components for reinforcement learning environments"
+readme = "README.md"
+authors = [
+    {name = "Maksym Riabov", email = "maksymriabov2004@gmail.com"},
+]
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.20.0",
+    "mujoco>=2.3.0",
+    "dm_control>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/MaksymRiabov/RepairsComponents-v0"
+Documentation = "https://repairs-components.readthedocs.io/"
+Repository = "https://github.com/MaksymRiabov/RepairsComponents-v0"
+Issues = "https://github.com/MaksymRiabov/RepairsComponents-v0/issues"
+s
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "pytest-cov>=2.0",
+    "isort>=5.10.1",
+    "mypy>=0.910",
+    "pylint>=2.12.0",
+    "sphinx>=4.2.0",
+    "sphinx-rtd-theme>=1.0.0",
+    "sphinx-autodoc-typehints>=1.15.0",
+]
