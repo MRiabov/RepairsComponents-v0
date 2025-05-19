@@ -71,7 +71,7 @@ Homepage = "https://github.com/MaksymRiabov/RepairsComponents-v0"
 Documentation = "https://repairs-components.readthedocs.io/"
 Repository = "https://github.com/MaksymRiabov/RepairsComponents-v0"
 Issues = "https://github.com/MaksymRiabov/RepairsComponents-v0/issues"
-s
+
 [project.optional-dependencies]
 dev = [
     "pytest>=6.0",
