@@ -30,7 +30,7 @@ pip install -e ".[dev]"
 ### Basic Usage
 
 ```python
-import mujoco
+#import mujoco #TODO replace mujoco with Genesis!
 from repairs_components import Screw, BasicSocket, Button
 
 # Create components

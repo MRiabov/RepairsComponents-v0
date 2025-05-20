@@ -77,7 +77,7 @@ Check if the component is attached to a model.
 
 ```python
 from repairs_components import Component
-import mujoco
+#import mujoco #TODO replace mujoco with Genesis!
 
 class CustomComponent(Component):
     def __init__(self, param=1.0, name=None):

@@ -1,6 +1,6 @@
 """Control components like buttons and switches."""
 from typing import Dict, Any, Optional, Callable, Union
-import mujoco
+#import mujoco #TODO replace mujoco with Genesis!
 from .base import Component
 
 

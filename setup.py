@@ -17,8 +17,7 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "numpy>=1.20.0",
-        "mujoco>=2.3.0",
-        "dm_control>=1.0.0",
+        "genesis-sim>=0.1.0",  # Genesis simulator
     ],
     extras_require={
         "dev": [

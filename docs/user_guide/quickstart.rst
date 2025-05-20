@@ -12,7 +12,7 @@ Let's create a simple simulation with a screw and a button:
 
 .. code-block:: python
 
-    import mujoco
+    #import mujoco #TODO replace mujoco with Genesis!
     import numpy as np
     from mujoco import viewer
     from repairs_components import Screw, Button

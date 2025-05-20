@@ -1,7 +1,7 @@
 """Socket components for connecting and fastening."""
 from typing import Dict, Any, Optional, Tuple
 import numpy as np
-import mujoco
+#import mujoco #TODO replace mujoco with Genesis!
 from .base import Component
 
 

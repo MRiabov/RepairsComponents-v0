@@ -70,7 +70,7 @@ Dependencies:
 """
 
 import numpy as np
-import mujoco
+#import mujoco #TODO replace mujoco with Genesis!
 from mujoco import viewer
 
 from repairs_components import Component1, Component2

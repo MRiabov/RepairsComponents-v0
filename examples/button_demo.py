@@ -1,52 +1,68 @@
-"""Example demonstrating the Button component in a simple MuJoCo environment."""
-import numpy as np
-import mujoco
-from mujoco import viewer as mujoco_viewer
-
-# Simple model without any components for testing
-MODEL_XML = """
-<mujoco>
-    <option timestep="0.01"/>
-    
-    <worldbody>
-        <!-- Light and camera -->
-        <light name="light" pos="0 0 4"/>
-        <camera name="fixed" pos="0 -2 1.5" xyaxes="1 0 0 0 0 1"/>
-        
-        <!-- Floor -->
-        <geom name="floor" type="plane" size="2 2 0.1" rgba=".9 .9 .9 1" pos="0 0 0"/>
-        
-        <!-- Simple box for testing -->
-        <body name="box" pos="0 0 0.5">
-            <freejoint/>
-            <geom type="box" size="0.2 0.2 0.2" rgba="0.2 0.6 0.8 1"/>
-        </body>
-    </worldbody>
-</mujoco>
-"""
+"""Example demonstrating the Button component in a simple Genesis environment."""
+import genesis as gs
 
 def main():
-    """Run a simple MuJoCo simulation."""
-    print("Creating model...")
-    model = mujoco.MjModel.from_xml_string(MODEL_XML)
-    print("Creating data...")
-    data = mujoco.MjData(model)
-    print("Model and data created successfully")
+    """Run a simple Genesis simulation with a button and a box."""
+    # Initialize Genesis with CPU backend
+    gs.init(backend='cpu', logging_level='info')
     
-    # Launch the viewer
-    with mujoco_viewer.launch_passive(model, data) as viewer:
-        # Set camera
-        viewer.cam.distance = 3.0
-        viewer.cam.azimuth = 0
-        viewer.cam.elevation = -20
-        
-        # Main simulation loop
-        while viewer.is_running():
-            # Step the simulation
-            mujoco.mj_step(model, data)
-            
-            # Sync the viewer
-            viewer.sync()
+    # Create a scene
+    scene = gs.Scene(
+        show_viewer=False,
+        renderer=gs.renderers.Rasterizer(),
+    )
+    
+    # Add a floor (underscore indicates this is intentionally unused)
+    _ = scene.add_entity(
+        gs.morphs.Plane(size=(2.0, 2.0)),
+        material=gs.materials.Rigid(),
+        surface=gs.surfaces.Plastic(
+            color=(0.9, 0.9, 0.9, 1.0),
+        ),
+    )
+    
+    # Add a box that can interact with the button
+    box = scene.add_entity(
+        gs.morphs.Box(size=(0.2, 0.2, 0.2), pos=(0, 0, 0.5)),
+        material=gs.materials.Rigid(),
+        surface=gs.surfaces.Plastic(
+            color=(0.2, 0.6, 0.8, 1.0),
+        ),
+    )
+    
+    # Add a button (small cylinder)
+    # Store the button reference but don't use it (prefix with _)
+    _button = scene.add_entity(
+        gs.morphs.Cylinder(radius=0.1, height=0.05, pos=(0.5, 0, 0.025)),
+        material=gs.materials.Rigid(static=True),  # Make it static
+        surface=gs.surfaces.Plastic(
+            color=(1.0, 0.0, 0.0, 1.0),  # Red
+        ),
+    )
+    
+    # Add a camera
+    camera = scene.add_camera(
+        res=(1280, 720),
+        pos=(2.0, -2.0, 1.5),
+        lookat=(0.25, 0, 0.5),
+        fov=45,
+        gui=True  # Enable GUI for interactive viewing
+    )
+    
+    # Build the scene
+    scene.build()
+    
+    # Apply initial velocity to the box (using a small impulse)
+    box.add_impulse(impulse=(0.5, 0, 0))
+    
+    # Run the simulation
+    print("Starting simulation. Press Ctrl+C to stop.")
+    try:
+        while True:
+            scene.step()
+            camera.render()
+    except KeyboardInterrupt:
+        print("Simulation stopped by user")
 
 if __name__ == "__main__":
     main()

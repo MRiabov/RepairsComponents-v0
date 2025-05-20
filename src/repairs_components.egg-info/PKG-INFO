@@ -21,8 +21,8 @@ Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
 Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 Requires-Dist: numpy>=1.20.0
-Requires-Dist: mujoco>=2.3.0
-Requires-Dist: dm_control>=1.0.0
+Requires-Dist: genesis-world>=0.2.1
+Requires-Dist: torch
 Provides-Extra: dev
 Requires-Dist: pytest>=6.0; extra == "dev"
 Requires-Dist: pytest-cov>=2.0; extra == "dev"
@@ -38,11 +38,13 @@ Dynamic: requires-python
 
 # Repairs Components
 
-A modular library of repair components for reinforcement learning environments, built on MuJoCo physics.
+A modular library of repair components for reinforcement learning environments, built on MuJoCo physics with support for the Genesis simulator.
 
 ## Overview
 
-Repairs Components provides a collection of reusable, physics-based repair components for building realistic repair and maintenance simulations. The library is designed to be used with reinforcement learning environments, particularly those built on the MuJoCo physics engine.
+Repairs Components is an open-source library designed to provide a comprehensive set of reusable, physics-based repair components for building realistic repair and maintenance simulations. The library is specifically tailored for use with reinforcement learning environments, particularly those built on the MuJoCo physics engine. By leveraging the power of MuJoCo, Repairs Components enables the creation of highly realistic and interactive simulations, allowing for more effective training and testing of reinforcement learning models.
+
+The library is built around a modular architecture, allowing users to easily integrate and combine different repair components to create complex scenarios. The components themselves are designed to be highly customizable, with a wide range of parameters and settings that can be adjusted to suit specific use cases.
 
 ## Features
 
@@ -61,7 +63,8 @@ Repairs Components provides a collection of reusable, physics-based repair compo
 ### Prerequisites
 
 - Python 3.8+
-- MuJoCo 2.3.0+
+- MuJoCo 2.3.0+ (for MuJoCo backend)
+- [Genesis Simulator](https://github.com/Genesis-Embodied-AI/Genesis) (for Genesis backend)
 - pip
 
 ### From Source
@@ -78,13 +81,36 @@ pip install -e ".[dev]"
 # pip install -e .
 ```
 
-## Quick Start
+## Backends
+
+### MuJoCo Backend
+
+The original implementation uses MuJoCo as the physics engine:
 
 ```python
-import mujoco
+#import mujoco #TODO replace mujoco with Genesis!
 from repairs_components import Screw, BasicSocket, LockingSocket
 
 # Create a simple MuJoCo model
+```
+
+### Genesis Backend
+
+For improved performance, you can use the Genesis backend:
+
+```python
+import genesis as gs
+from repairs_components.genesis_component import GenesisComponent
+
+# Initialize Genesis
+gs.init(backend="cpu")
+
+# Create a scene and add components
+```
+
+See [README_GENESIS.md](README_GENESIS.md) for more details on using the Genesis backend.
+
+## Quick Start (MuJoCo)
 model = mujoco.MjModel.from_xml_string("""
 <mujoco>
     <option timestep="0.01"/>

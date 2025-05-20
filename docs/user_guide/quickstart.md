@@ -7,7 +7,7 @@ This guide will walk you through creating a simple simulation using RepairsCompo
 ### Creating Components
 
 ```python
-import mujoco
+#import mujoco #TODO replace mujoco with Genesis!
 from repairs_components import Screw, BasicSocket, Button
 
 # Create a simple MuJoCo model

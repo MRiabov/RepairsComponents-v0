@@ -1,7 +1,7 @@
 """Fastener components like screws, bolts, and nuts."""
 from typing import Dict, Any, Optional
 import numpy as np
-import mujoco
+#import mujoco #TODO replace mujoco with Genesis!
 from .base import Component
 
 

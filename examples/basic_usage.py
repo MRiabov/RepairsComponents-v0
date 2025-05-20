@@ -1,6 +1,6 @@
 """Basic example demonstrating the use of repair components."""
 import numpy as np
-import mujoco
+# import mujoco # TODO remove mujoco!
 from pathlib import Path
 
 from repairs_components import Screw, BasicSocket, LockingSocket

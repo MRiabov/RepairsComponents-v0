@@ -5,6 +5,7 @@ src/repairs_components/__init__.py
 src/repairs_components/base.py
 src/repairs_components/controls.py
 src/repairs_components/fasteners.py
+src/repairs_components/genesis_component.py
 src/repairs_components/sockets.py
 src/repairs_components.egg-info/PKG-INFO
 src/repairs_components.egg-info/SOURCES.txt
