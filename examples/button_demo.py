@@ -33,8 +33,8 @@ def main():
     # Add a button (small cylinder)
     # Store the button reference but don't use it (prefix with _)
     _button = scene.add_entity(
-        gs.morphs.Cylinder(radius=0.1, height=0.05, pos=(0.5, 0, 0.025)),
-        material=gs.materials.Rigid(static=True),  # Make it static
+        gs.morphs.Cylinder(radius=0.1, height=0.05, pos=(0.5, 0, 0.025),fixed=True),
+        material=gs.materials.Rigid(),
         surface=gs.surfaces.Plastic(
             color=(1.0, 0.0, 0.0, 1.0),  # Red
         ),
