@@ -1,6 +1,7 @@
 """Pytest configuration and fixtures."""
+
 import pytest
-#import mujoco #TODO replace mujoco with Genesis!
+# import mujoco #TODO replace mujoco with Genesis!
 
 
 @pytest.fixture
