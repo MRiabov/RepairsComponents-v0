@@ -1,8 +1,15 @@
-"""Socket components for connecting and fastening."""
-from typing import Dict, Any, Optional, Tuple
+"""Socket components for connecting and fastening.
+
+This module provides socket components that can be used with the Genesis physics simulator.
+These components support both MJCF (MuJoCo) and UDRF (Unified Robot Description Format)
+for model definition, with Genesis providing enhanced performance and features.
+"""
+from typing import Dict, Any, Optional, Tuple, TYPE_CHECKING
 import numpy as np
-#import mujoco #TODO replace mujoco with Genesis!
 from .base import Component
+
+if TYPE_CHECKING:
+    from genesis.sim import Model, Data
 
 
 class BasicSocket(Component):
@@ -31,19 +38,23 @@ class BasicSocket(Component):
         self._connection_force = 0.0
     
     def to_mjcf(self) -> str:
-        """Convert the socket to MJCF XML string."""
+        """Convert the socket to MJCF XML string compatible with Genesis.
+        
+        Returns:
+            str: MJCF XML representation of the socket that works with Genesis.
+        """
         # Hexagonal socket geometry
         outer_radius = (self.size + 2 * self.wall_thickness) / 2 / np.cos(np.pi/6)
         inner_radius = self.size / 2 / np.cos(np.pi/6)
         
         return f"""
         <body name="{self.name}">
-            <freejoint/>
+            <freejoint name="{self.name}_joint"/>
             <!-- Outer shell -->
-            <geom type="cylinder" size="{outer_radius/1000} {self.depth/2000}" 
-                  rgba="0.3 0.3 0.3 1"/>
+            <geom name="{self.name}_outer" type="cylinder" size="{outer_radius/1000} {self.depth/2000}" 
+                  rgba="0.3 0.3 0.3 1" mass="0.2"/>
             <!-- Inner socket (hollow) -->
-            <geom type="cylinder" size="{inner_radius/1000} {self.depth/2000}" 
+            <geom name="{self.name}_inner" type="cylinder" size="{inner_radius/1000} {self.depth/2000}" 
                   pos="0 0 0" rgba="0.8 0.8 0.8 0.5" contype="0" conaffinity="0"/>
         </body>
         """
@@ -117,16 +128,21 @@ class LockingSocket(BasicSocket):
         self._release_activated = False
     
     def to_mjcf(self) -> str:
-        """Convert the locking socket to MJCF XML string."""
+        """Convert the locking socket to MJCF XML string compatible with Genesis.
+        
+        Returns:
+            str: MJCF XML representation of the locking socket that works with Genesis.
+        """
         base_xml = super().to_mjcf()
         # Add release mechanism (simplified)
         release_xml = f"""
             <!-- Release mechanism -->
             <site name="{self.name}_release" pos="0 0 {-(self.depth/2 + 2)/1000}" size="0.005"/>
-            <geom type="box" size="0.01 0.01 0.002" 
+            <geom name="{self.name}_release_btn" type="box" size="0.01 0.01 0.002" 
                   pos="0 0 {-(self.depth/2 + 1)/1000}" 
                   rgba="1 0 0 0.5"
-                  group="3"/>
+                  group="3"
+                  mass="0.01"/>
         """
         return base_xml.replace("</body>", f"{release_xml}\n        </body>")
     
