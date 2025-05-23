@@ -193,12 +193,6 @@ def create_color_mapping(label_to_part_type: Dict[int, str]) -> Dict[int, List[f
 # Create mappings
 label_to_part_type = create_part_type_mapping(labels, trimesh_scene)
 
-# Create color mappings
-label_colors = create_color_mapping(label_to_part_type)
-label_colors[0] = [0, 0, 0, 0]  # background (transparent)
-max_label = max(label_colors.keys()) if label_colors else 0
-label_colors_list = [label_colors.get(i, [1, 1, 1, 0.8]) for i in range(max_label + 1)]
-
 print(f"Combined labeled voxel grid shape: {combined.shape}")
 print(f"Unique labels in grid: {np.unique(combined)}")
 
@@ -215,62 +209,27 @@ for name, label in sorted(labels.items(), key=lambda x: x[1]):
         f"  Label {label}: {name} (type: {part_type}, priority: {get_part_priority(part_type)})"
     )
 
-# Create a 3D figure with a dark background for better contrast
+import matplotlib.pyplot as plt
+
+# 3D scatter visualization of integer labels
 fig = plt.figure(figsize=(12, 10))
-ax = fig.add_subplot(111, projection="3d")
-ax.set_facecolor("black")
-fig.patch.set_facecolor("black")
+ax = fig.add_subplot(111, projection='3d')
+ax.set_facecolor('black')
+fig.patch.set_facecolor('black')
 
+# Extract voxel coordinates and labels
+filled = combined > 0
+x, y, z = np.nonzero(filled)
+labels_vals = combined[x, y, z]
 
-# Set axis colors to white for better visibility
-ax.xaxis.pane.set_color("black")
-ax.yaxis.pane.set_color("black")
-ax.zaxis.pane.set_color("black")
-ax.xaxis._axinfo["grid"].update({"color": (0.3, 0.3, 0.3, 0.3)})
-ax.yaxis._axinfo["grid"].update({"color": (0.3, 0.3, 0.3, 0.3)})
-ax.zaxis._axinfo["grid"].update({"color": (0.3, 0.3, 0.3, 0.3)})
+# Use discrete colormap for labels
+cmap = plt.get_cmap('tab10', int(combined.max() + 1))
+sc = ax.scatter(x, y, z, c=labels_vals, cmap=cmap, marker='s', s=6, alpha=0.8)
+plt.colorbar(sc, ax=ax, fraction=0.03, pad=0.04, label='Label')
 
-
-# Plot each label with a different color
-for label in np.unique(combined):
-    if label == 0:
-        continue  # Skip background (transparent)
-
-    # Get the indices for this label
-    idx = np.argwhere(combined == label)
-    if len(idx) == 0:
-        continue
-
-    # Get color for this label from our mapping
-    color = label_colors.get(
-        label, [1, 1, 1, 0.8]
-    )  # default to white if label not found
-
-    # Create a voxel grid for this label
-    mask = np.zeros(combined.shape, dtype=bool)
-    mask[tuple(idx.T)] = True
-
-    # Plot the voxels
-    ax.voxels(mask, facecolors=color, edgecolor="black", linewidth=0.3, alpha=0.8)
-
-# Set labels and title with white text
-ax.set_xlabel("X", color="white")
-ax.set_ylabel("Y", color="white")
-ax.set_title("Voxelized Parts", color="white")
-
-# Set the aspect ratio to be equal
-ax.set_box_aspect(combined.shape)
-
-# Adjust the viewing angle
-ax.view_init(elev=30, azim=45)
-
-# Save the figure with a transparent background
-output_path = "voxel_visualization.png"
-print("saved to ", output_path)
-plt.tight_layout()
-plt.savefig(
-    output_path, dpi=150, bbox_inches="tight", transparent=True, facecolor="black"
-)
-plt.close()
-
-print(f"Saved visualization to {output_path}")
+# Axis styling
+ax.set_xlabel('X', color='white')
+ax.set_ylabel('Y', color='white')
+ax.set_zlabel('Z', color='white')
+ax.set_title('Voxelized Parts (Labels)', color='white')
+plt.show()
