@@ -4,6 +4,7 @@ I want the logic to be as follows:
 connector, solid, fluid, LED, and others are own type of labels. So if the part (the mesh) ends with "@connector" it should be assigned a yellow color, and if a solid, a grey color, and etc.
 
 Most importantly, I should be able to get this logic from the voxelized array, not only displayed in matplotlib.
+Additionally, certain parts are more priority to be displayed over others. For example, a connector should always take precedence over a solid part.
 
 """
 # TODO:  What will happen in this code if two entities overlap? In my case, a connector willl overlap with a part. I want the connector part to always take precedence over all parts, and also it would be cool to have this order in general. How is it currently determined?
