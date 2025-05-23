@@ -33,6 +33,7 @@ PART_TYPE_PRIORITY = {
     "default": 0,  # Lowest priority
 }
 
+
 def extract_part_type(name: str) -> str:
     """Extract part type from object name.
 
@@ -48,12 +49,13 @@ def extract_part_type(name: str) -> str:
             return part_type
     return "default"
 
+
 def get_part_priority(part_type: str) -> int:
     """Get the priority of a part type.
-    
+
     Args:
         part_type: The part type to get priority for
-        
+
     Returns:
         int: The priority of the part type (higher = more important)
     """
@@ -108,7 +110,7 @@ origin = mins
 # Sort meshes by priority (lowest priority first)
 sorted_meshes = sorted(
     trimesh_scene.geometry.items(),
-    key=lambda x: get_part_priority(extract_part_type(x[0]))
+    key=lambda x: get_part_priority(extract_part_type(x[0])),
 )
 
 # Initialize grids
@@ -123,27 +125,27 @@ for i, (name, mesh) in enumerate(sorted_meshes):
     if voxelized is None:
         print(f"Warning: Could not voxelize {name}")
         continue
-        
+
     # Store the points and assign a label
     points = voxelized.points
     label = i + 1
     labels[name] = label
-    
+
     # Get part type
     part_type = extract_part_type(name)
     priority = get_part_priority(part_type)
     print(f"Processing {name} (type: {part_type}, priority: {priority})")
-    
+
     # Convert points to grid indices
     indices = np.floor((points - origin) / voxel_size).astype(int)
     valid = np.all((indices >= 0) & (indices < shape), axis=1)
     indices = indices[valid]
-    
+
     # Update the voxel grid with priority handling
     for idx in indices:
         idx_tuple = tuple(idx)
         current_priority = get_part_priority(part_type_grid[idx_tuple] or "default")
-        
+
         # Only update if this part type has higher or equal priority
         if priority >= current_priority:
             combined[idx_tuple] = label
@@ -200,13 +202,17 @@ print(f"Combined labeled voxel grid shape: {combined.shape}")
 print(f"Unique labels in grid: {np.unique(combined)}")
 
 print("\nPart types in the scene (in order of priority):")
-for part_type in sorted(PART_TYPE_PRIORITY.keys(), key=lambda x: -PART_TYPE_PRIORITY[x]):
+for part_type in sorted(
+    PART_TYPE_PRIORITY.keys(), key=lambda x: -PART_TYPE_PRIORITY[x]
+):
     print(f"  {part_type}: priority {PART_TYPE_PRIORITY[part_type]}")
 
 print("\nAssigned labels and their part types:")
 for name, label in sorted(labels.items(), key=lambda x: x[1]):
     part_type = label_to_part_type[label]
-    print(f"  Label {label}: {name} (type: {part_type}, priority: {get_part_priority(part_type)})")
+    print(
+        f"  Label {label}: {name} (type: {part_type}, priority: {get_part_priority(part_type)})"
+    )
 
 # Create a 3D figure with a dark background for better contrast
 fig = plt.figure(figsize=(12, 10))
@@ -267,30 +273,3 @@ plt.savefig(
 plt.close()
 
 print(f"Saved visualization to {output_path}")
-
-# trimesh_mesh.export("test.obj")
-
-# open3d_mesh = o3d_io.read_triangle_mesh("test.obj")
-
-
-# # Voxelize the open3d mesh
-# voxel_size = 2.0
-# voxel_grid = o3d_geometry.VoxelGrid.create_from_triangle_mesh(
-#     open3d_mesh, voxel_size=voxel_size
-# )
-
-# # Visualize the voxel grid with open3d
-# # open3d.visualization.draw([voxel_grid])
-
-# open3d.visualization.ren
-# o3d_vis.create_window(visible=False)
-# o3d_vis.add_geometry(voxel_grid)
-# o3d_vis.poll_events()
-# o3d_vis.update_renderer()
-
-# # Save to image
-# o3d_vis.capture_screen_image("output_voxel_grid.png")
-# o3d_vis.destroy_window()
-
-
-# ocp_vscode.show([test, test2])
