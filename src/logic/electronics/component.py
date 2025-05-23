@@ -3,11 +3,11 @@ import numpy as np
 
 
 class ElectricalComponent(ABC):
-    def __init__(self, name: str):
+    def __init__(self, name: str, max_load: tuple[float, float] | None = None):
         # Use a list for connections; handle vectorization at the simulation level
         self.connected_to: list[ElectricalComponent] = []
         self.name: str = name  # all names must be unique, to be used later.
-        self.state = None  # Optional: can be used for output, logic state, etc.
+        self.max_load = max_load
 
     def connect(self, other: "ElectricalComponent"):
         self.connected_to.append(other)
