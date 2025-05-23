@@ -2,8 +2,6 @@
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.ruff.format]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -64,7 +62,7 @@ Issues = "https://github.com/MaksymRiabov/RepairsComponents-v0/issues"
 [project.optional-dependencies]
 dev = [
     "pytest>=6.0",
-    "pytest-cov>=2.0",
+    # "pytest-cov>=2.0",
     "isort>=5.10.1",
     "mypy>=0.910",
     "pylint>=2.12.0",

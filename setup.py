@@ -4,7 +4,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="repairs-components",
+    name="repairs_components",
     version="0.1.0",
     author="Your Name",
     author_email="your.email@example.com",
@@ -17,12 +17,12 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "numpy>=1.20.0",
-        "genesis-sim>=0.1.0",  # Genesis simulator
+        "genesis-world>=0.2.0",  # Genesis simulator
     ],
     extras_require={
         "dev": [
             "pytest>=6.0",
-            "black>=21.12b0",
+            "ruff",
             "isort>=5.10.1",
             "mypy>=0.910",
             "pylint>=2.12.0",
