@@ -24,6 +24,14 @@ PART_TYPE_COLORS = {
     "default": [1, 0, 0, 0.8],  # Red (for any other type)
 }
 
+# Define part type priority (higher number = higher priority)
+PART_TYPE_PRIORITY = {
+    "connector": 4,  # Highest priority
+    "LED": 3,
+    "fluid": 2,
+    "solid": 1,
+    "default": 0,  # Lowest priority
+}
 
 def extract_part_type(name: str) -> str:
     """Extract part type from object name.
@@ -39,6 +47,17 @@ def extract_part_type(name: str) -> str:
         if part_type in PART_TYPE_COLORS:
             return part_type
     return "default"
+
+def get_part_priority(part_type: str) -> int:
+    """Get the priority of a part type.
+    
+    Args:
+        part_type: The part type to get priority for
+        
+    Returns:
+        int: The priority of the part type (higher = more important)
+    """
+    return PART_TYPE_PRIORITY.get(part_type, 0)
 
 
 with bd.BuildPart() as test:
@@ -76,10 +95,6 @@ PART_TYPE_COLORS = {
 
 voxel_size = 2.0
 
-# Prepare voxel grids and labels
-voxel_grids = {}
-labels = {}
-
 # Compute the overall bounding box for all meshes
 all_bounds = [mesh.bounds for mesh in trimesh_scene.geometry.values()]
 mins = np.min([b[0] for b in all_bounds], axis=0)
@@ -90,14 +105,52 @@ bbox_size = maxs - mins
 shape = np.ceil(bbox_size / voxel_size).astype(int)
 origin = mins
 
-# Assign unique integer labels and voxelize into the common grid
-voxel_grids = {}
+# Sort meshes by priority (lowest priority first)
+sorted_meshes = sorted(
+    trimesh_scene.geometry.items(),
+    key=lambda x: get_part_priority(extract_part_type(x[0]))
+)
+
+# Initialize grids
+combined = np.zeros(shape, dtype=int)
+part_type_grid = np.full(shape, "", dtype="<U20")  # Empty string means unoccupied
 labels = {}
-for i, (name, mesh) in enumerate(trimesh_scene.geometry.items()):
+
+# Process each mesh in order of increasing priority
+for i, (name, mesh) in enumerate(sorted_meshes):
+    # Voxelize the mesh
     voxelized = trimesh.voxel.creation.voxelize(mesh, pitch=voxel_size)
-    # voxelized.points are the center coordinates of occupied voxels
-    voxel_grids[name] = voxelized.points
-    labels[name] = i + 1
+    if voxelized is None:
+        print(f"Warning: Could not voxelize {name}")
+        continue
+        
+    # Store the points and assign a label
+    points = voxelized.points
+    label = i + 1
+    labels[name] = label
+    
+    # Get part type
+    part_type = extract_part_type(name)
+    priority = get_part_priority(part_type)
+    print(f"Processing {name} (type: {part_type}, priority: {priority})")
+    
+    # Convert points to grid indices
+    indices = np.floor((points - origin) / voxel_size).astype(int)
+    valid = np.all((indices >= 0) & (indices < shape), axis=1)
+    indices = indices[valid]
+    
+    # Update the voxel grid with priority handling
+    for idx in indices:
+        idx_tuple = tuple(idx)
+        current_priority = get_part_priority(part_type_grid[idx_tuple] or "default")
+        
+        # Only update if this part type has higher or equal priority
+        if priority >= current_priority:
+            combined[idx_tuple] = label
+            part_type_grid[idx_tuple] = part_type
+
+# Replace empty strings with 'default' for unoccupied voxels
+part_type_grid[part_type_grid == ""] = "default"
 
 
 def create_part_type_mapping(labels: Dict[str, int], scene: Any) -> Dict[int, str]:
@@ -134,25 +187,8 @@ def create_color_mapping(label_to_part_type: Dict[int, str]) -> Dict[int, List[f
     }
 
 
-# Initialize the combined grid and part type grid
-combined = np.zeros(shape, dtype=int)
-part_type_grid = np.full(shape, "default", dtype="<U20")  # Initialize with default type
-
 # Create mappings
 label_to_part_type = create_part_type_mapping(labels, trimesh_scene)
-
-# Fill the grids
-for name, points in voxel_grids.items():
-    indices = np.floor((points - origin) / voxel_size).astype(int)
-    valid = np.all((indices >= 0) & (indices < shape), axis=1)
-    indices = indices[valid]
-    label = labels[name]
-    combined[indices[:, 0], indices[:, 1], indices[:, 2]] = label
-    part_type = label_to_part_type[label]
-    part_type_grid[indices[:, 0], indices[:, 1], indices[:, 2]] = part_type
-
-print(f"Combined labeled voxel grid shape: {combined.shape}")
-print(f"Unique labels in grid: {np.unique(combined)}")
 
 # Create color mappings
 label_colors = create_color_mapping(label_to_part_type)
@@ -160,10 +196,17 @@ label_colors[0] = [0, 0, 0, 0]  # background (transparent)
 max_label = max(label_colors.keys()) if label_colors else 0
 label_colors_list = [label_colors.get(i, [1, 1, 1, 0.8]) for i in range(max_label + 1)]
 
+print(f"Combined labeled voxel grid shape: {combined.shape}")
+print(f"Unique labels in grid: {np.unique(combined)}")
 
-print("Part types in the scene:")
-for name, part_type in label_to_part_type.items():
-    print(f"  Label {name}: {part_type}")
+print("\nPart types in the scene (in order of priority):")
+for part_type in sorted(PART_TYPE_PRIORITY.keys(), key=lambda x: -PART_TYPE_PRIORITY[x]):
+    print(f"  {part_type}: priority {PART_TYPE_PRIORITY[part_type]}")
+
+print("\nAssigned labels and their part types:")
+for name, label in sorted(labels.items(), key=lambda x: x[1]):
+    part_type = label_to_part_type[label]
+    print(f"  Label {label}: {name} (type: {part_type}, priority: {get_part_priority(part_type)})")
 
 # Create a 3D figure with a dark background for better contrast
 fig = plt.figure(figsize=(12, 10))
