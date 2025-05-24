@@ -6,19 +6,25 @@ import build123d as bd
 
 # Define part type to color mapping (for priority extraction)
 PART_TYPE_COLORS = {
-    "connector": [1, 1, 0, 0.8],
-    "solid": [0.5, 0.5, 0.5, 0.8],
-    "fluid": [0, 0, 1, 0.5],
-    "LED": [0, 1, 0, 0.8],
-    "default": [1, 0, 0, 0.8],
+    "connector": [1, 1, 0, 0.8],  # yellow
+    "LED": [0, 1, 0, 0.8],  # green
+    "switch": [1, 0.25, 0.25, 0.8],
+    "button": [1, 0.2, 0.2, 0.8],
+    "solid": [0.5, 0.5, 0.5, 0.8],  # grey
+    "fastener": [0.58, 0.44, 0.86, 0.8],  # medium purple
+    "fluid": [0, 0, 1, 0.5],  # blue
+    "default": [1, 0, 0, 0.8],  # red
 }
 
 # Map part types to integer labels
 PART_TYPE_LABEL = {
     "connector": 1,
-    "solid": 2,
-    "fluid": 3,
-    "LED": 4,
+    "LED": 2,
+    "fastener": 3,
+    "switch": 4,
+    "button": 5,
+    "solid": 6,
+    "fluid": 7,
     "default": 0,
 }
 
@@ -45,6 +51,21 @@ def export_voxel_grid(parts, voxel_size: float, grid_size=(256, 256, 256)):
         label_to_part_type: Dict[int, str] mapping integer labels back to part types.
     """
     parts_list = list(parts)
+
+    # flatten all compounds.
+    updated_parts_list = []
+    for part in parts_list:
+        if isinstance(part, bd.Compound) and not isinstance(part, bd.Part):
+            assert len(part.children) > 0, (
+                "Compound passed to export voxel is empty. This can't be."
+            )
+            updated_parts_list.extend(
+                [comp_part.move(bd.Pos(part.position)) for comp_part in part.children]
+            )
+        else:
+            updated_parts_list.append(part)
+
+    parts_list = updated_parts_list
     part_types = [extract_part_type(getattr(p, "label", "default")) for p in parts_list]
     meshes = []
     for part in parts_list:

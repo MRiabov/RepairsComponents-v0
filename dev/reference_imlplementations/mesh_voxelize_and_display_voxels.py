@@ -77,9 +77,6 @@ test2.label = "2@solid"
 test.color = bd.Color("blue")
 test2.color = bd.Color("red")
 
-test_comp = bd.Compound((test, test2))
-
-# bd.export_stl(test_comp, "test.stl")
 mesher = bd.Mesher()
 mesher.add_shape((test, test2))
 mesher.write("test.3mf")
@@ -213,9 +210,9 @@ import matplotlib.pyplot as plt
 
 # 3D scatter visualization of integer labels
 fig = plt.figure(figsize=(12, 10))
-ax = fig.add_subplot(111, projection='3d')
-ax.set_facecolor('black')
-fig.patch.set_facecolor('black')
+ax = fig.add_subplot(111, projection="3d")
+ax.set_facecolor("black")
+fig.patch.set_facecolor("black")
 
 # Extract voxel coordinates and labels
 filled = combined > 0
@@ -223,13 +220,13 @@ x, y, z = np.nonzero(filled)
 labels_vals = combined[x, y, z]
 
 # Use discrete colormap for labels
-cmap = plt.get_cmap('tab10', int(combined.max() + 1))
-sc = ax.scatter(x, y, z, c=labels_vals, cmap=cmap, marker='s', s=6, alpha=0.8)
-plt.colorbar(sc, ax=ax, fraction=0.03, pad=0.04, label='Label')
+cmap = plt.get_cmap("tab10", int(combined.max() + 1))
+sc = ax.scatter(x, y, z, c=labels_vals, cmap=cmap, marker="s", s=6, alpha=0.8)
+plt.colorbar(sc, ax=ax, fraction=0.03, pad=0.04, label="Label")
 
 # Axis styling
-ax.set_xlabel('X', color='white')
-ax.set_ylabel('Y', color='white')
-ax.set_zlabel('Z', color='white')
-ax.set_title('Voxelized Parts (Labels)', color='white')
+ax.set_xlabel("X", color="white")
+ax.set_ylabel("Y", color="white")
+ax.set_zlabel("Z", color="white")
+ax.set_title("Voxelized Parts (Labels)", color="white")
 plt.show()

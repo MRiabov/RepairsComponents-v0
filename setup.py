@@ -14,6 +14,7 @@ setup(
     url="https://github.com/yourusername/RepairsComponents-v0",
     packages=find_packages(where="src"),
     package_dir={"": "src"},
+    package_data={"": ["*.stl"]},  # Include any data files if needed
     python_requires=">=3.8",
     install_requires=[
         "numpy>=1.20.0",
