@@ -21,7 +21,7 @@ class Button(Component):
         
         <!-- Pressable part -->
         <body name="{self.name}_top" pos="0 0 {self.button_thickness / 2}">
-          <joint name="{self.name}_press_joint" type="slide" axis="0 0 1" range="-{self.press_range} {self.press_range}"/>
+          <joint name="{self.name}_press_joint" type="slide" axis="0 0 1" range="-{self.press_range} {self.press_range}" stiffness="300" damping="5"/>
           <geom type="cylinder" size="{self.button_radius} {self.press_range}" rgba="1 0 0 1"/>
           
           <!-- Contact site to detect pressing -->
@@ -72,14 +72,14 @@ class Switch(Component):
         # MJCF does not support boolean subtraction, so use a single box for the base
         return f'''
   <body name="{self.name}_base" pos="0 0 0">
-    <geom type="box" size="{base_x/2} {base_y/2} {base_z/2}" rgba="0.4 0.4 0.4 1" contype="0" conaffinity="0"/>
+    <geom type="box" size="{base_x / 2} {base_y / 2} {base_z / 2}" rgba="0.4 0.4 0.4 1" contype="0" conaffinity="0"/>
     <!-- Lever part -->
     <body name="{self.name}_lever" pos="0 0 {lever_pos_z}">
       <joint name="{self.name}_hinge" type="hinge" axis="0 1 0" pos="0 0 0" range="-30 30" damping="1" frictionloss="0.1"/>
-      <geom type="box" size="{lever_length/2} {lever_width/2} {lever_height/2}" rgba="0.8 0.2 0.2 1" contype="1" conaffinity="1"
+      <geom type="box" size="{lever_length / 2} {lever_width / 2} {lever_height / 2}" rgba="0.8 0.2 0.2 1" contype="1" conaffinity="1"
         euler="0 {lever_rot_deg} 0"/>
       <!-- Contact site to detect lever press -->
-      <site name="{self.name}_site" pos="{lever_length/2} 0 {lever_height/2}" size="1"/>
+      <site name="{self.name}_site" pos="{lever_length / 2} 0 {lever_height / 2}" size="1"/>
       <!-- Sensor to read hinge angle -->
       <sensor name="{self.name}_hinge_pos" type="jointpos" joint="{self.name}_hinge"/>
     </body>
