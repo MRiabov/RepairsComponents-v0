@@ -10,11 +10,24 @@ from typing import Dict, Any, Optional, TYPE_CHECKING
 
 import numpy as np
 import genesis
+from build123d import Part, Compound
 
 if TYPE_CHECKING:
     from genesis.sim import Model, Data
 
 
-class Component:
-    def bd_geometry(self, moved_to: tuple[float, float, float]):
-        pass
+class Component(ABC):
+    """Base class for all repair components.
+
+    This class defines the common interface and functionality for all repair components.
+    """
+
+    # required, but not always.
+    def get_mjcf(self) -> str:
+        """Get the MJCF representation of the component."""
+        raise NotImplementedError
+
+    @abstractmethod  # actually required
+    def bd_geometry(self) -> Part | Compound:
+        """Get the build123d geometry of the component."""
+        raise NotImplementedError
