@@ -16,6 +16,11 @@ class ElectricalComponent(ABC):
     def propagate(self, voltage: float, current: float) -> tuple[float, float]:
         pass
 
+    @property
+    @abstractmethod
+    def component_type(self):
+        raise NotImplementedError
+
 
 class ElectricalConsumer(ElectricalComponent):
     @abstractmethod
