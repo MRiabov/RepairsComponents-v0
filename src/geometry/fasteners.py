@@ -5,13 +5,14 @@ Genesis supports MJCF (MuJoCo) format for model definition, allowing for easy mi
 from MuJoCo-based simulations.
 """
 
+import math
 from typing import Optional, TYPE_CHECKING
-from geometry.base import Component
+from src.geometry.base import Component
 from build123d import *
 from dataclasses import dataclass
-
-if TYPE_CHECKING:
-    from genesis.sim import Model, Data  # noqa: F401
+import genesis as gs
+from genesis.engine.entities import RigidEntity
+from genesis.engine.joints import RigidJoint
 
 
 class Fastener(Component):
@@ -37,7 +38,7 @@ class Fastener(Component):
         self.name = name
         self.screwdriver_name = screwdriver_name
 
-    def screw_mjcf(self):
+    def get_mjcf(self):
         """Get MJCF of a screw.
 
         Args:
@@ -102,6 +103,27 @@ class Fastener(Component):
         screw.label = self.name + "@fastener"
 
         return screw
+
+
+def check_fastener_possible_insertion(
+    active_fastener_tip_position: tuple[float, float, float],
+    hole_positions: list[tuple[float, float, float]],
+    connection_threshold: float = 0.75,
+):
+    for hole_position in hole_positions:
+        if (  # TODO: return joint ID.
+            math.dist(active_fastener_tip_position, hole_position)
+            < connection_threshold
+        ):
+            return True
+    return False
+
+
+def activate_connection(
+    scene: gs.Scene, fastener_entity: RigidEntity, activate_joint_name
+):
+    # scene.sim.rigid_solver.get_joint()
+    joint: RigidJoint = fastener_entity.get_joint(activate_joint_name).active
 
 
 # To remove A/B constraint and activate screwdriver constraint
