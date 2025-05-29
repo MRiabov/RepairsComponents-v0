@@ -1,10 +1,13 @@
-from src.logic.electronics.component import ElectricalComponent
+from dataclasses import dataclass, field
 from typing import Dict, List
+from src.logic.electronics.component import ElectricalComponent
 
 
+@dataclass
 class ElectronicsState:
-    def __init__(self, components: dict[str, list[ElectricalComponent]] = {}):
-        self.components = components
+    components: dict[str, ElectricalComponent] = field(default_factory=dict)
+
+    # No need for to_dict() - use dataclasses.asdict() instead
 
     def diff(
         self, other: "ElectronicsState"
@@ -18,13 +21,9 @@ class ElectronicsState:
             - connection_differences: mapping component names to {'added', 'removed'} lists
             - total_changes: int count of all added+removed connections
         """
-        # Flatten name->component maps
-        self_map: Dict[str, ElectricalComponent] = {
-            c.name: c for comps in self.components.values() for c in comps
-        }
-        other_map: Dict[str, ElectricalComponent] = {
-            c.name: c for comps in other.components.values() for c in comps
-        }
+        # Get component maps
+        self_map = self.components
+        other_map = other.components
         conn_diff: Dict[str, Dict[str, List[str]]] = {}
         total_changes = 0
         for name, comp in self_map.items():
@@ -38,13 +37,20 @@ class ElectronicsState:
         return conn_diff, total_changes
 
     def register(self, component: ElectricalComponent):
-        if component.component_type in self.components:
-            assert component.name not in self.components[component.component_type], (
-                f"Component {component.name} already registered"
-            )
-            self.components[component.component_type].append(component)
-        else:
-            self.components[component.component_type] = [component]
+        """Register a new electrical component."""
+        if component.name in self.components:
+            raise ValueError(f"Component {component.name} already registered")
+        self.components[component.name] = component
 
-    def register_contacts(self, contacts: dict[str, tuple[str, str]]):
-        "Register components of body A to bodies B"
+    # def register_contacts(self, contacts: dict[str, tuple[str, str]]):
+    #     "Register components of body A to bodies B"
+
+    def connect(self, name: str, other_name: str):
+        "Connect two components"
+        self.components[name].connect(self.components[other_name])
+        self.components[other_name].connect(self.components[name])
+
+    def clear_connections(self):
+        "Disconnect all connections between a component"
+        for component in self.components.values():
+            component.connected_to = []  # just clear everything.

@@ -9,12 +9,23 @@ from src.geometry.connectors.models.europlug import Europlug
 import ocp_vscode
 from src.processing.voxel_export import export_voxel_grid
 
-
+print("executed")
 if __name__ == "__main__":
-    europlug_male, connector_def_male, europlug_female, connector_def_female = (
-        Europlug().bd_geometry((0, 50, 0), (0, -50, 0))
-    )
-    screw = Fastener("a", "b", name="screw1").bd_geometry().move(Pos(0, 120, 0))
+    (
+        europlug_male,
+        connector_def_male,
+        male_connector_collision_detection_position,
+        europlug_female,
+        connector_def_female,
+        female_connector_collision_detection_position,
+    ) = Europlug().bd_geometry((0, 50, 0), (0, -50, 0))
+    screw, screw_collision_detection_position = Fastener(
+        "a", "b", name="screw1"
+    ).bd_geometry()
+    screw = screw.move(Pos(0, 120, 0))
+    with Locations(screw_collision_detection_position):
+        screw_collision_detection = Sphere(1)
+
     button = Button("button1").bd_geometry().move(Pos(0, 0, 75))
     switch = Switch("switch1").bd_geometry().move(Pos(0, 50, 75))
     ocp_vscode.show(
@@ -25,6 +36,7 @@ if __name__ == "__main__":
         screw,
         button,
         switch,
+        screw_collision_detection,
     )
 
     print("executed")

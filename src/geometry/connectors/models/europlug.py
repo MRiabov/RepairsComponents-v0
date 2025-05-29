@@ -2,6 +2,7 @@ from build123d import *
 from src.geometry.connectors.connectors import Connector
 import ocp_vscode
 import build123d as bd
+import numpy as np
 
 
 # Define the dimensions of the IEC plug
@@ -14,6 +15,8 @@ hole_diameter = 5
 pin_diameter = 4.0
 pin_dist = 19
 pin_len = 19
+
+
 
 
 class Europlug(Connector):
@@ -40,10 +43,14 @@ class Europlug(Connector):
         connector_def = extrude(
             pin_sketch.sketch, pin_len, mode=Mode.ADD, target=connector_def
         )
+        connector_collision_detection_position = np.array(
+            connector_def.center().to_tuple()
+        )
 
         return self.color_and_label(
             plug_part.part.moved(Location(moved_to)),
             connector_def.moved(Location(moved_to)),
+            connector_collision_detection_position,
         )
 
     def bd_geometry_female(self, moved_to: bd.VectorLike):
@@ -71,8 +78,12 @@ class Europlug(Connector):
         connector_def = extrude(
             hole_sketch.sketch, -pin_len - 2, mode=Mode.ADD, target=connector_def
         )
+        connector_collision_detection_position = np.array(
+            connector_def.center().to_tuple()
+        )  # a general rule that should work. # to debug if can't be matched.
 
         return self.color_and_label(
             socket_part.part.moved(Location(moved_to)),
             connector_def.moved(Location(moved_to)),
+            connector_collision_detection_position,
         )
