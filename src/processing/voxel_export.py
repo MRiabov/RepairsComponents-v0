@@ -9,6 +9,7 @@ PART_TYPE_COLORS = {
     "connector": [1, 1, 0, 0.8],  # yellow
     "LED": [0, 1, 0, 0.8],  # green
     "switch": [1, 0.25, 0.25, 0.8],
+    "fastener_markup": [0.8, 0, 0.8, 0.8],  # magenta-like.
     "button": [1, 0.2, 0.2, 0.8],
     "solid": [0.5, 0.5, 0.5, 0.8],  # grey
     "fastener": [0.58, 0.44, 0.86, 0.8],  # medium purple
@@ -21,10 +22,11 @@ PART_TYPE_LABEL = {
     "connector": 1,
     "LED": 2,
     "fastener": 3,
-    "switch": 4,
-    "button": 5,
-    "solid": 6,
-    "fluid": 7,
+    "fastener_markup": 4,  # should be below fastener.
+    "switch": 5,
+    "button": 6,
+    "solid": 7,
+    "fluid": 8,
     "default": 0,
 }
 

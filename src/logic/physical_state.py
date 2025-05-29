@@ -10,22 +10,27 @@ Provides diff methods:
 diff(): combines both into {'fasteners', 'bodies'} with total change count
 """
 
-from types import NoneType
+from dataclasses import dataclass, field
 from src.geometry.fasteners import Fastener
 import math
 
 
+@dataclass
 class PhysicalState:
-    def __init__(self):
-        self.fasteners = []
-        self.connected_parts: dict[str, tuple[str, str] | str | None] = {}
-        self.joint_names: dict[
-            str, tuple[str, str]
-        ] = {}  # two joint names of fasteners fasteners.
+    fasteners: list[Fastener]
+    connected_parts: dict[str, tuple[str, str] | str | None] = field(
+        default_factory=dict
+    )
+    joint_names: dict[str, tuple[str, str]] = field(default_factory=dict)
+    """Two joint names of fasteners."""
 
-        # Rigid body absolute transforms
-        self.positions: dict[str, tuple[float, float, float]] = {}
-        self.rotations: dict[str, tuple[float, float, float, float]] = {}
+    positions: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    "Absolute positions of bodies"
+    rotations: dict[str, tuple[float, float, float, float]] = field(
+        default_factory=dict
+    )
+    "Absolute rotations of bodies"
+    used_tool: str = "gripper"
 
     def register_fastener(self, fastener: Fastener):
         self.fasteners.append(fastener)
@@ -43,20 +48,32 @@ class PhysicalState:
         self.positions[name] = position
         self.rotations[name] = rotation
 
-    def connect(self, fastener_name: str, body_a: str, body_b: str):
+    def connect(self, fastener_name: str, body_a: str, body_b: str | None = None):
         current_fastener_state = self.connected_parts[fastener_name]
-        assert isinstance(current_fastener_state, (NoneType, str))  # not a tuple
-        self.connected_parts.update({fastener_name: (body_a, body_b)})
+        # Check if the current state is not a tuple (i.e., it's either None or a string)
+        assert current_fastener_state is None or isinstance(
+            current_fastener_state, str
+        ), "Cannot connect - fastener is already connected to two bodies"
+        self.connected_parts[fastener_name] = (
+            (body_a, body_b) if body_b is not None else body_a
+        )
 
     def disconnect(self, fastener_name: str, disconnected_body: str):
         current_fastener_state = self.connected_parts[fastener_name]
-        assert isinstance(current_fastener_state, (str, tuple[str, str]))
-        other_body = (
-            current_fastener_state[1]
-            if disconnected_body == current_fastener_state[0]
-            else current_fastener_state[0]
+        # Check if the current state is a tuple (connected to two bodies)
+        assert isinstance(current_fastener_state, tuple), (
+            "Cannot disconnect - fastener is not connected to two bodies"
         )
-        self.connected_parts.update({fastener_name: other_body})
+
+        body_a, body_b = current_fastener_state
+        if body_a == disconnected_body:
+            self.connected_parts[fastener_name] = body_b
+        elif body_b == disconnected_body:
+            self.connected_parts[fastener_name] = body_a
+        else:
+            raise ValueError(
+                f"Body {disconnected_body} is not connected to fastener {fastener_name}"
+            )
 
     def _fastener_diff(
         self, other: "PhysicalState"

@@ -20,6 +20,8 @@ class Fastener(Component):
         self,
         initial_body_a: str,  # how will it be constrained in case of hole?
         initial_body_b: str,
+        a_constraint_active: bool,
+        b_constraint_active: bool,
         name: str,  # just name them by int ids. except special cases.
         thread_pitch: float = 0.5,
         length: float = 10.0,
@@ -37,6 +39,8 @@ class Fastener(Component):
         self.head_height = head_height
         self.name = name
         self.screwdriver_name = screwdriver_name
+        self.a_constraint_active = a_constraint_active
+        self.b_constraint_active = b_constraint_active
 
     def get_mjcf(self):
         """Get MJCF of a screw.
@@ -57,17 +61,19 @@ class Fastener(Component):
                     pos="0 0 {self.length / 2000}" rgba="0.8 0.8 0.8 1" mass="0.1"/>
                 <geom name="{self.name}_head" type="cylinder" size="{self.head_diameter / 2000} {self.head_height / 2000}" 
                     pos="0 0 {(self.length + self.head_height / 2) / 2000}" rgba="0.5 0.5 0.5 1" mass="0.05"/>
+                <body name="{self.name}_tip" pos="0 0 0">
+                    <!-- Tip is located at 0,0,0 -->
+                </body>
             </body>
             
-            <!-- Weld constraints to A and B (both active at spawn) -->
-            <equality name="{self.name}_to_A" active="true">
+            <!-- Weld constraints to A and B (both active at spawn)-->
+            <equality name="{self.name}_to_A" active="{self.a_constraint_active}">
                 <weld body1="{self.name}" body2="{self.initial_body_a}" relpose="true"/>
             </equality>
 
-            <equality name="{self.name}_to_B" active="true">
+            <equality name="{self.name}_to_B" active="{self.b_constraint_active}">
                 <weld body1="{self.name}" body2="{self.initial_body_b}" relpose="true"/>
             </equality>
-
 
             <!-- Equality constraint to attach to screwdriver -->
             <equality name="{self.name}_to_screwdriver" active="false">
@@ -102,28 +108,43 @@ class Fastener(Component):
         screw.color = Color(0.58, 0.44, 0.86, 0.8)
         screw.label = self.name + "@fastener"
 
-        return screw
+        # set collision detection position at the tip of the fastener
+        fastener_collision_detection_position = (
+            shaft.faces().sort_by(Axis.Z).last.center().to_tuple()
+        )
+
+        return screw, fastener_collision_detection_position
+
+
+import numpy as np
 
 
 def check_fastener_possible_insertion(
     active_fastener_tip_position: tuple[float, float, float],
-    hole_positions: list[tuple[float, float, float]],
+    hole_positions: dict[str, tuple[float, float, float]],
     connection_threshold: float = 0.75,
 ):
-    for hole_position in hole_positions:
-        if (  # TODO: return joint ID.
-            math.dist(active_fastener_tip_position, hole_position)
-            < connection_threshold
-        ):
-            return True
-    return False
+    # Convert inputs to numpy arrays
+    tip_pos = np.array(active_fastener_tip_position)
+    hole_names = list(hole_positions.keys())
+    hole_pos_array = np.array(list(hole_positions.values()))
+
+    # Calculate squared distances (avoids sqrt for better performance) # equal to math.dist but without sqrt, just a small trick
+    squared_distances = np.sum((hole_pos_array - tip_pos) ** 2, axis=1)
+
+    # Find the closest hole within threshold
+    within_threshold = squared_distances < (connection_threshold**2)
+    if np.any(within_threshold):
+        # Get the index of the first hole within threshold
+        first_match_idx = np.argmax(within_threshold)
+        return hole_names[first_match_idx]
+    return None
 
 
-def activate_connection(
-    scene: gs.Scene, fastener_entity: RigidEntity, activate_joint_name
-):
+def activate_connection(fastener_entity: RigidEntity, activate_joint_name: str):
     # scene.sim.rigid_solver.get_joint()
-    joint: RigidJoint = fastener_entity.get_joint(activate_joint_name).active
+    joint: RigidJoint = fastener_entity.get_joint(activate_joint_name)
+    joint.active = True
 
 
 # To remove A/B constraint and activate screwdriver constraint
