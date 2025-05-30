@@ -29,6 +29,7 @@ PART_TYPE_LABEL = {
     "fluid": 8,
     "default": 0,
 }
+LABEL_TO_PART_TYPE = {v: k for k, v in PART_TYPE_LABEL.items()}
 
 
 def extract_part_type(name: str) -> str:
@@ -50,7 +51,6 @@ def export_voxel_grid(parts, voxel_size: float, grid_size=(256, 256, 256)):
 
     Returns:
         padded: np.ndarray of shape grid_size, dtype int8; values are part type labels.
-        label_to_part_type: Dict[int, str] mapping integer labels back to part types.
     """
     parts_list = list(parts)
 
@@ -89,7 +89,6 @@ def export_voxel_grid(parts, voxel_size: float, grid_size=(256, 256, 256)):
     grid_dims = np.ceil((maxs - mins) / voxel_size).astype(int)
 
     combined = np.zeros(grid_dims, dtype=np.int8)
-    label_to_part_type = {v: k for k, v in PART_TYPE_LABEL.items()}
 
     for mesh, part_type in zip(meshes, part_types):
         vox = trimesh.voxel.creation.voxelize(mesh, pitch=voxel_size)
@@ -107,4 +106,4 @@ def export_voxel_grid(parts, voxel_size: float, grid_size=(256, 256, 256)):
     padded[:x_dim, :y_dim, :z_dim] = combined[
         : grid_size[0], : grid_size[1], : grid_size[2]
     ]
-    return padded, label_to_part_type
+    return padded
