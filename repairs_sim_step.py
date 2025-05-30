@@ -2,7 +2,7 @@ import genesis as gs
 import json
 import uuid
 
-from src.geometry.base import Component
+from repairs_components.geometry.base import Component
 from logic.electronics import simulator
 import numpy as np
 from dataclasses import asdict
@@ -13,15 +13,15 @@ from genesis.vis.camera import Camera
 
 from geometry.connectors.connectors import check_connections
 
-from src.geometry.fasteners import (
+from repairs_components.geometry.fasteners import (
     activate_connection,
     check_fastener_possible_insertion,
 )
 from logic.electronics.electronics_state import ElectronicsState
 from logic.fluid_state import FluidState
 from logic.physical_state import PhysicalState
-from src.training_utils.sim_state import RepairsSimState
-from src.training_utils.translation import (
+from repairs_components.training_utils.sim_state import RepairsSimState
+from repairs_components.training_utils.translation import (
     translate_genesis_to_python,
     translate_to_genesis_scene,
 )

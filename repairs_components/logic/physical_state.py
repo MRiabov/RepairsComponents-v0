@@ -11,7 +11,7 @@ diff(): combines both into {'fasteners', 'bodies'} with total change count
 """
 
 from dataclasses import dataclass, field
-from src.geometry.fasteners import Fastener
+from repairs_components.geometry.fasteners import Fastener
 import math
 
 

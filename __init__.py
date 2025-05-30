@@ -5,7 +5,7 @@ for building realistic repair and maintenance simulations with MuJoCo.
 """
 
 from src import geometry
-from src.logic import electronics
+from repairs_components.logic import electronics
 
 __version__ = "0.1.0"
 __all__ = [

@@ -1,4 +1,4 @@
-from setuptools import setup
+from setuptools import setup, find_packages
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
@@ -12,14 +12,8 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/yourusername/RepairsComponents-v0",
-    packages=[
-        "repairs_components",
-        "repairs_components.geometry",
-        "repairs_components.logic",
-        "repairs_components.processing",
-        "repairs_components.training_utils",
-    ],
-    package_dir={"repairs_components": "src"},
+    packages=find_packages(where="."),
+    package_dir={"": "."},
     package_data={"": ["*.stl"]},  # Include any data files if needed
     python_requires=">=3.8",
     install_requires=[

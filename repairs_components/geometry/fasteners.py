@@ -7,7 +7,7 @@ from MuJoCo-based simulations.
 
 import math
 from typing import Optional, TYPE_CHECKING
-from src.geometry.base import Component
+from repairs_components.geometry.base import Component
 from build123d import *
 from dataclasses import dataclass
 import genesis as gs

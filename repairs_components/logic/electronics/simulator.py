@@ -1,7 +1,10 @@
 from logic.electronics.resistor import Resistor
 from logic.electronics.led import LED
 from logic.electronics.voltage_source import VoltageSource
-from src.logic.electronics.component import ElectricalComponent, ElectricalConsumer
+from repairs_components.logic.electronics.component import (
+    ElectricalComponent,
+    ElectricalConsumer,
+)
 import numpy as np
 
 

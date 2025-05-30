@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
-from src.logic.electronics.component import ElectricalComponent
+from repairs_components.logic.electronics.component import ElectricalComponent
 
 
 @dataclass

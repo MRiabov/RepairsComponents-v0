@@ -1,8 +1,8 @@
 import pytest
-from src.logic.electronics.led import LED
-from src.logic.electronics.voltage_source import VoltageSource
-from src.logic.electronics.resistor import Resistor
-from src.logic.electronics.simulator import simulate_circuit
+from repairs_components.logic.electronics.led import LED
+from repairs_components.logic.electronics.voltage_source import VoltageSource
+from repairs_components.logic.electronics.resistor import Resistor
+from repairs_components.logic.electronics.simulator import simulate_circuit
 
 # Test LED below forward-voltage threshold
 

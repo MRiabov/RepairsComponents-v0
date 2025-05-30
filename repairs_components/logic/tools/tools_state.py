@@ -1,6 +1,6 @@
-from src.training_utils.sim_state import SimState
+from repairs_components.training_utils.sim_state import SimState
 import numpy as np
-from src.logic.tools.tool import Tool
+from repairs_components.logic.tools.tool import Tool
 
 
 class ToolState(SimState):

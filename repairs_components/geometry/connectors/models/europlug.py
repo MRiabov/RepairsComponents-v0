@@ -1,5 +1,5 @@
 from build123d import *
-from src.geometry.connectors.connectors import Connector
+from repairs_components.geometry.connectors.connectors import Connector
 import ocp_vscode
 import build123d as bd
 import numpy as np

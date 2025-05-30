@@ -1,11 +1,11 @@
 from abc import ABC, abstractmethod
 from typing import Tuple
 from build123d import Compound, Part, RevoluteJoint
-from src.geometry.fasteners import Fastener
-from src.geometry.base import Component
+from repairs_components.geometry.fasteners import Fastener
+from repairs_components.geometry.base import Component
 import numpy as np
 from genesis.vis.camera import Camera
-from src.training_utils.sim_state import RepairsSimState
+from repairs_components.training_utils.sim_state import RepairsSimState
 import genesis as gs
 
 

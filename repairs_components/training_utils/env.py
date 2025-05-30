@@ -12,8 +12,8 @@ from training_utils.translation import (
 )
 from training_utils.reward_calc import calculate_reward
 from build123d import Compound
-from src.training_utils.env_setup import EnvSetup
-from src.processing.voxel_export import export_voxel_grid
+from repairs_components.training_utils.env_setup import EnvSetup
+from repairs_components.processing.voxel_export import export_voxel_grid
 
 
 def gs_rand_float(lower, upper, shape, device):

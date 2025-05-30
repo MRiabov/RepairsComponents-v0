@@ -1,4 +1,4 @@
-from src.logic.electronics.component import ElectricalConsumer
+from repairs_components.logic.electronics.component import ElectricalConsumer
 
 
 class LED(ElectricalConsumer):

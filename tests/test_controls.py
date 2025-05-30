@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import Mock
 
-# from src.geometry.electrical.controls.controls import
+# from repairs_components.geometry.electrical.controls.controls import
 
 
 # def test_button_initialization():

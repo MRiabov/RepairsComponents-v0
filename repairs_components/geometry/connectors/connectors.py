@@ -3,12 +3,12 @@ import os
 
 from build123d import Compound, Part, VectorLike, Color
 from genesis import gs
-from src.logic.electronics.component import ElectricalComponent
+from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np
 
 import src.geometry.connectors.models as models
 
-from src.geometry.connectors.models import europlug, round
+from repairs_components.geometry.connectors.models import europlug, round
 from abc import ABC, abstractmethod
 
 

@@ -5,7 +5,7 @@ which demonstrates how things should be - e.g. in an electronics circuit, a cert
 lamps must be ignited when the power is supplied, which does not happen at the moment
 """
 
-from src.training_utils.sim_state import RepairsSimState
+from repairs_components.training_utils.sim_state import RepairsSimState
 
 
 # TODO: get the actual values from the mujoco state.

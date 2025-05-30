@@ -1,6 +1,6 @@
 from build123d import *
 import ocp_vscode
-from src.geometry.b123d_utils import add_fastener_markup
+from repairs_components.geometry.b123d_utils import add_fastener_markup
 from build123d import Vector
 
 # with BuildPart() as test:

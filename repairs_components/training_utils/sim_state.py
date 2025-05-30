@@ -4,10 +4,10 @@ import json
 from pathlib import Path
 import uuid
 import numpy as np
-from src.logic.electronics.electronics_state import ElectronicsState
-from src.logic.physical_state import PhysicalState
-from src.logic.fluid_state import FluidState
-from src.logic.tools.tools_state import ToolState
+from repairs_components.logic.electronics.electronics_state import ElectronicsState
+from repairs_components.logic.physical_state import PhysicalState
+from repairs_components.logic.fluid_state import FluidState
+from repairs_components.logic.tools.tools_state import ToolState
 
 
 @dataclass

@@ -1,14 +1,14 @@
 from build123d import Pos, Locations, Sphere
-from src.geometry.electrical.controls.controls import Button, Switch
-from src.geometry.fasteners import Fastener
+from repairs_components.geometry.electrical.controls.controls import Button, Switch
+from repairs_components.geometry.fasteners import Fastener
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap
-from src.processing.voxel_export import PART_TYPE_COLORS
-from src.geometry.connectors.models.europlug import Europlug
+from repairs_components.processing.voxel_export import PART_TYPE_COLORS
+from repairs_components.geometry.connectors.models.europlug import Europlug
 import ocp_vscode
-from src.processing.voxel_export import export_voxel_grid
-from src.processing import voxel_export
+from repairs_components.processing.voxel_export import export_voxel_grid
+from repairs_components.processing import voxel_export
 
 print("executed")
 if __name__ == "__main__":

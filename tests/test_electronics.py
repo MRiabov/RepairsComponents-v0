@@ -1,12 +1,12 @@
 import pytest
-from src.logic.electronics.voltage_source import VoltageSource
-from src.logic.electronics.resistor import Resistor
-from src.logic.electronics.motor import Motor
-from src.logic.electronics.led import LED
-from src.logic.electronics.button import Button
-from src.logic.electronics.gates import AndGate, OrGate, NotGate
-from src.logic.electronics.simulator import simulate_circuit
-from src.logic.electronics.wire import Wire
+from repairs_components.logic.electronics.voltage_source import VoltageSource
+from repairs_components.logic.electronics.resistor import Resistor
+from repairs_components.logic.electronics.motor import Motor
+from repairs_components.logic.electronics.led import LED
+from repairs_components.logic.electronics.button import Button
+from repairs_components.logic.electronics.gates import AndGate, OrGate, NotGate
+from repairs_components.logic.electronics.simulator import simulate_circuit
+from repairs_components.logic.electronics.wire import Wire
 
 
 # Test 1: Simple series circuit: VoltageSource -> Resistor -> LED

@@ -3,16 +3,16 @@ import genesis as gs
 import tempfile
 
 from genesis.engine.entities.rigid_entity.rigid_link import RigidLink
-from src.geometry.base import Component
+from repairs_components.geometry.base import Component
 from genesis.engine.entities import RigidEntity
-from src.logic.electronics.electronics_state import ElectronicsState
-from src.logic.physical_state import PhysicalState
-from src.logic.fluid_state import FluidState
-from src.geometry.connectors.connectors import Connector
-from src.logic.electronics.component import ElectricalComponent
+from repairs_components.logic.electronics.electronics_state import ElectronicsState
+from repairs_components.logic.physical_state import PhysicalState
+from repairs_components.logic.fluid_state import FluidState
+from repairs_components.geometry.connectors.connectors import Connector
+from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np
-from src.training_utils.sim_state import RepairsSimState
-from src.logic.tools.screwdriver import Screwdriver
+from repairs_components.training_utils.sim_state import RepairsSimState
+from repairs_components.logic.tools.screwdriver import Screwdriver
 
 
 def translate_to_genesis_scene(
