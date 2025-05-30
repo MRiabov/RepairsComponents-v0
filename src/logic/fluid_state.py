@@ -1,18 +1,20 @@
-from typing import Dict, Optional, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, Tuple
 
 
+@dataclass
 class FluidState:
     """Tracks fluid presence using index-based sensors."""
 
-    def __init__(
-        self,
-        positions: Dict[int, Tuple[float, float, float]],
-        present: Optional[Dict[int, bool]] = None,
-    ):
-        # Map sensor index to position
-        self.positions = positions
-        # Map sensor index to presence
-        self.present = {i: False for i in positions} if present is None else present
+    positions: Dict[int, Tuple[float, float, float]]
+    present: Dict[int, bool] = field(default_factory=dict)
+
+    def __post_init__(self):
+        # Initialize present dict if not provided
+        if not self.present:
+            self.present = {i: False for i in self.positions}
+
+        # No need for to_dict() - use dataclasses.asdict() instead
 
     def set_presence(self, index: int, present: bool) -> None:
         """Mark sensor at index as having fluid present or absent."""

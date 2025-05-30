@@ -1,8 +1,9 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+from geometry.base import Component
 import numpy as np
 
 
-class ElectricalComponent(ABC):
+class ElectricalComponent(Component):
     def __init__(self, name: str, max_load: tuple[float, float] | None = None):
         # Use a list for connections; handle vectorization at the simulation level
         self.connected_to: list[ElectricalComponent] = []
