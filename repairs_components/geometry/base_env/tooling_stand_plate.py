@@ -1,4 +1,5 @@
 from build123d import *  # noqa: F403
+from genesis.vis.camera import Camera
 import numpy as np
 import torch
 import torchvision
@@ -12,7 +13,7 @@ import build123d
 
 import genesis as gs
 
-WORKING_SPACE_SIZE = (128, 128, 128)  # cm
+WORKING_SPACE_SIZE = (64, 64, 64)  # cm
 
 
 # Note: here Y is depth, X is length and Z is height.
@@ -93,35 +94,6 @@ def plate_env_bd_geometry():
         ):
             Box(WORKING_SPACE_SIZE[0], WORKING_SPACE_SIZE[1], STAND_PLATE_HEIGHT)
 
-    # guard rails removed for simplicity of AABB collision detecition..
-    # # Left wall
-    # with Locations(
-    #     (
-    #         -STAND_PLATE_WIDTH / 2 + GUARD_WALL_THICKNESS / 2,
-    #         0,
-    #         STAND_PLATE_HEIGHT + GUARD_WALL_HEIGHT / 2,
-    #     )
-    # ):
-    #     Box(GUARD_WALL_THICKNESS, STAND_PLATE_DEPTH, GUARD_WALL_HEIGHT)
-    # Right wall
-    # with Locations(
-    #     (
-    #         STAND_PLATE_WIDTH / 2 - GUARD_WALL_THICKNESS / 2,
-    #         0,
-    #         STAND_PLATE_HEIGHT + GUARD_WALL_HEIGHT / 2,
-    #     )
-    # ):
-    #     Box(GUARD_WALL_THICKNESS, STAND_PLATE_DEPTH, GUARD_WALL_HEIGHT)
-    # # Back wall
-    # with Locations(
-    #     (
-    #         0,
-    #         STAND_PLATE_DEPTH / 2 - GUARD_WALL_THICKNESS / 2,
-    #         STAND_PLATE_HEIGHT + GUARD_WALL_HEIGHT / 2,
-    #     )
-    # ):
-    #     Box(STAND_PLATE_WIDTH, GUARD_WALL_THICKNESS, GUARD_WALL_HEIGHT)
-
     # # on the top of the stand plate
     plate_env_export = scale(plate_env.part, 0.01)  # convert to mm.
     export_gltf(
@@ -134,14 +106,14 @@ def plate_env_bd_geometry():
 
 
 def genesis_setup():
-    # for debug
+    # NOTE: in genesis, the YZ is swapped compared to build123d, so define in XZY.
     import genesis as gs
 
     gs.init(theme="light")
     scene = gs.Scene(show_viewer=False)
 
     # Add plane
-    # plane = scene.add_entity(gs.morphs.Plane())
+    plane = scene.add_entity(gs.morphs.Plane())
 
     # Add mesh with proper scale and position
     # Add mesh with multiple lights and better camera position
@@ -149,27 +121,61 @@ def genesis_setup():
         gs.morphs.Mesh(
             file="/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
             scale=1,  # Use 1.0 scale since we're working in cm
-            pos=(0.05, 0.15, 0.1),
+            pos=(0, 0, 0.1),
+            euler=(90, 0, 0),  # Rotate 90 degrees around X axis
         ),
         surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 1)),  # Add color material
     )
 
     # Add box for reference
-    box = scene.add_entity(gs.morphs.Box(pos=(0.7, 0.1, 0.1), size=(0.1, 0.1, 0.1)))
+
+    franka = scene.add_entity(
+        gs.morphs.MJCF(
+            file="xml/franka_emika_panda/panda.xml",
+            pos=(0.3, STAND_PLATE_DEPTH / 100 / 2, 0.20),
+        ),
+    )
 
     # Set up camera with proper position and lookat
     camera_1 = scene.add_camera(
+        # pos=(1, 2.5, 3.5),
         pos=(1, 2.5, 3.5),  # Position camera further away and above
-        lookat=(0, 0, 0),  # Look at the center of the scene
+        lookat=(
+            0.64 / 2,
+            0.64 / 2 + STAND_PLATE_DEPTH / 100,
+            0.3,
+        ),  # Look at the center of the working pos
         res=(1024, 1024),
     )
 
+    camera_2 = scene.add_camera(
+        pos=(-2.5, 1.5, 1.5),  # second camera from the other side
+        lookat=(
+            0.64 / 2,
+            0.64 / 2 + STAND_PLATE_DEPTH / 100,
+            0.3,
+        ),  # Look at the center of the working pos
+        res=(1024, 1024),
+    )
+    entities = {
+        "plane": plane,
+        "franka_arm": franka,
+        "tooling_stand": tooling_stand,
+    }
+
     scene.build()
-    rgb, depth, _segmentation, normal = camera_1.render(
+    return (scene, [camera_1, camera_2], entities)
+
+
+def render_and_save(camera_1: Camera, camera_2: Camera):
+    "Util to debug"
+    rgb_1, depth_1, _segmentation, normal_1 = camera_1.render(
         rgb=True, depth=True, segmentation=False, normal=True
     )
-
-    print(scene.entities)
+    # Render from camera_2
+    rgb_2, depth_2, _segmentation_2, normal_2 = camera_2.render(
+        rgb=True, depth=True, segmentation=False, normal=True
+    )
 
     # save images
     # Create output directory if it doesn't exist
@@ -177,35 +183,44 @@ def genesis_setup():
 
     # Save RGB image (convert from float [0,1] to uint8 [0,255])
 
-    # Transpose from HWC to CHW
-    rgb_uint8 = np.transpose(rgb, (2, 0, 1))
-    # Save using PIL
-    from PIL import Image
+    # Function to save images for a camera
 
-    Image.fromarray(np.transpose(rgb_uint8, (1, 2, 0))).save("renders/rgb.png")
-
-    # Save depth (normalize to [0,1] for visualization)
-    if depth is not None:
-        depth_normalized = (depth - depth.min()) / (depth.max() - depth.min() + 1e-6)
-        depth_uint8 = (depth_normalized * 255).astype(np.uint8)
-        # Save using PIL
-        Image.fromarray(depth_uint8).save("renders/depth.png")
-
-    # Save normal map (convert from [-1,1] to [0,1])
-    if normal is not None:
-        normal_normalized = normal * 0.5 + 0.5
-        normal_uint8 = (normal_normalized * 255).astype(np.uint8)
+    def save_camera_renders(rgb, depth, normal, camera_name):
+        # Save RGB image (convert from float [0,1] to uint8 [0,255])
         # Transpose from HWC to CHW
-        normal_uint8 = np.transpose(normal_uint8, (2, 0, 1))
+        rgb_uint8 = np.transpose(rgb, (2, 0, 1))
         # Save using PIL
-        Image.fromarray(np.transpose(normal_uint8, (1, 2, 0))).save(
-            "renders/normal.png"
+        Image.fromarray(np.transpose(rgb_uint8, (1, 2, 0))).save(
+            f"renders/rgb_{camera_name}.png"
         )
 
-    print("Renders saved to 'renders/' directory")
+        # Save depth (normalize to [0,1] for visualization)
+        if depth is not None:  # normalisation is desirable.
+            depth_normalized = (depth - depth.min()) / (
+                depth.max() - depth.min() + 1e-6
+            )
+            depth_uint8 = (depth_normalized * 255).astype(np.uint8)
+            # Save using PIL
+            Image.fromarray(depth_uint8).save(f"renders/depth_{camera_name}.png")
+
+        # Save normal map (convert from [-1,1] to [0,1])
+        if normal is not None:
+            normal_normalized = normal * 0.5 + 0.5
+            normal_uint8 = (normal_normalized * 255).astype(np.uint8)
+            # Transpose from HWC to CHW
+            normal_uint8 = np.transpose(normal_uint8, (2, 0, 1))
+            # Save using PIL
+            Image.fromarray(np.transpose(normal_uint8, (1, 2, 0))).save(
+                f"renders/normal_{camera_name}.png"
+            )
+
+    # Save renders from both cameras
+    save_camera_renders(rgb_1, depth_1, normal_1, "camera1")
+    save_camera_renders(rgb_2, depth_2, normal_2, "camera2")
+    print("Saved camera outputs!")
 
 
-plate_env_bd_geometry()
-render_genesis = True
-if render_genesis:
-    genesis_setup()
+# plate_env_bd_geometry()
+# render_genesis = True
+# if render_genesis:
+#     genesis_setup()
