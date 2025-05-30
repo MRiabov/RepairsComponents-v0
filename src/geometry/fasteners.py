@@ -12,17 +12,17 @@ from build123d import *
 from dataclasses import dataclass
 import genesis as gs
 from genesis.engine.entities import RigidEntity
-from genesis.engine.joints import RigidJoint
 
 
 class Fastener(Component):
     def __init__(
         self,
-        initial_body_a: str,  # how will it be constrained in case of hole?
-        initial_body_b: str,
-        a_constraint_active: bool,
-        b_constraint_active: bool,
         name: str,  # just name them by int ids. except special cases.
+        constraint_a_active: bool,
+        constraint_b_active: bool,
+        initial_body_a: str
+        | None = None,  # how will it be constrained in case of hole?
+        initial_body_b: str | None = None,
         thread_pitch: float = 0.5,
         length: float = 10.0,
         diameter: float = 3.0,
@@ -39,8 +39,8 @@ class Fastener(Component):
         self.head_height = head_height
         self.name = name
         self.screwdriver_name = screwdriver_name
-        self.a_constraint_active = a_constraint_active
-        self.b_constraint_active = b_constraint_active
+        self.a_constraint_active = constraint_a_active
+        self.b_constraint_active = constraint_b_active
 
     def get_mjcf(self):
         """Get MJCF of a screw.
@@ -104,6 +104,12 @@ class Fastener(Component):
                     height=self.head_height,
                     align=(Align.CENTER, Align.CENTER, Align.MIN),
                 )
+            head.faces().filter_by(Axis.Z).sort_by(Axis.Z).last
+
+            CylindricalJoint("fastener_joint_a", to_part=None, axis=Axis.Z)
+            CylindricalJoint("fastener_joint_b", to_part=None, axis=Axis.Z)
+            CylindricalJoint("fastener_joint_tip", to_part=None, axis=Axis.Z)
+
         screw = screw.part
         screw.color = Color(0.58, 0.44, 0.86, 0.8)
         screw.label = self.name + "@fastener"
