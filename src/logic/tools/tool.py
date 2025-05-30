@@ -1,0 +1,16 @@
+from abc import abstractmethod
+import numpy as np
+from geometry.base import Component
+from dataclasses import dataclass
+
+
+@dataclass
+class Tool(Component):
+    name: str
+    action_shape: int = 2
+    active: bool = False
+
+    @abstractmethod
+    def step(self, action: np.ndarray):
+        """Step the tool with the given action."""
+        raise NotImplementedError
