@@ -1,4 +1,4 @@
-from build123d import Pos
+from build123d import Pos, Locations, Sphere
 from src.geometry.electrical.controls.controls import Button, Switch
 from src.geometry.fasteners import Fastener
 import matplotlib.pyplot as plt
@@ -8,6 +8,7 @@ from src.processing.voxel_export import PART_TYPE_COLORS
 from src.geometry.connectors.models.europlug import Europlug
 import ocp_vscode
 from src.processing.voxel_export import export_voxel_grid
+from src.processing import voxel_export
 
 print("executed")
 if __name__ == "__main__":
@@ -40,7 +41,7 @@ if __name__ == "__main__":
     )
 
     print("executed")
-    padded, label_to_part_type = export_voxel_grid(
+    padded = export_voxel_grid(
         (
             europlug_male,
             connector_def_male,
@@ -52,6 +53,7 @@ if __name__ == "__main__":
         ),
         1,
     )
+
     # NOTE: Compound(children=[...]) preserves labels, colors and constraints, while Compound(objs) does not
     # you can use Compound after all.
 
@@ -59,8 +61,8 @@ if __name__ == "__main__":
 
     # Prepare color list (order: 0, 1, 2, 3, 4)
     color_list = [
-        PART_TYPE_COLORS[label_to_part_type.get(i, "default")]
-        for i in range(max(label_to_part_type.keys()) + 1)
+        PART_TYPE_COLORS[voxel_export.LABEL_TO_PART_TYPE.get(i, "default")]
+        for i in range(max(voxel_export.LABEL_TO_PART_TYPE.keys()) + 1)
     ]
     cmap = ListedColormap([c[:3] for c in color_list], name="part_types")
     alpha = np.array([c[3] for c in color_list])

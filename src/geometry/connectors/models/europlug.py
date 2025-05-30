@@ -17,8 +17,6 @@ pin_dist = 19
 pin_len = 19
 
 
-
-
 class Europlug(Connector):
     def bd_geometry_male(self, moved_to: bd.VectorLike):
         """

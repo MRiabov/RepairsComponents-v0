@@ -4,6 +4,8 @@ import pickle
 import shutil
 from importlib import metadata
 
+from training_utils.env_setup import EnvSetup
+
 try:
     try:
         if metadata.version("rsl-rl"):
@@ -117,6 +119,7 @@ def main():
     )
 
     env = RepairsEnv(
+        env_setup=EnvSetup(),  # TODO: a mechanism for picking the envs at random. Or having them precompiled.
         num_envs=args.num_envs,
         env_cfg=env_cfg,
         obs_cfg=obs_cfg,

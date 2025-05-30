@@ -6,6 +6,7 @@ from src.logic.electronics.simulator import simulate_circuit
 
 # Test LED below forward-voltage threshold
 
+
 def test_led_below_threshold():
     v = VoltageSource(1.5, "v1")
     r = Resistor(100, "r1")
@@ -15,7 +16,9 @@ def test_led_below_threshold():
     results = simulate_circuit([v, r, led])
     assert results[0]["brightness"] == pytest.approx(0.0)
 
+
 # Test LED above threshold
+
 
 def test_led_above_threshold():
     v = VoltageSource(5.0, "v1")
@@ -27,7 +30,9 @@ def test_led_above_threshold():
     # I = (5 - 2)/100 = 0.03 A
     assert results[0]["brightness"] == pytest.approx(0.03, rel=1e-6)
 
+
 # Test non-linear behavior (forward-voltage creates non-linear I-V)
+
 
 def test_led_nonlinear_behavior():
     def run(v_supply):
@@ -42,4 +47,4 @@ def test_led_nonlinear_behavior():
     b6 = run(6.0)
     assert b6 > b5
     # Not strictly proportional to supply: (b6/b5) != (6/5)
-    assert abs((b6 / b5) - (6/5)) > 0.01
+    assert abs((b6 / b5) - (6 / 5)) > 0.01

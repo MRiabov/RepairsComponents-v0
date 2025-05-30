@@ -4,11 +4,11 @@ from src.geometry.electrical.consumers.led import Led
 from src.logic.electronics.wire import Wire
 from src.logic.electronics.voltage_source import VoltageSource
 from src.logic.electronics.resistor import Resistor
-from src.logic.electronics.lightbulb import Lightbulb
+from src.logic.electronics.led import LED
 
 # from src.logic.electronics.connector import Connector
 from src.logic.electronics.simulator import simulate_circuit
-from src.geometry.connectors.connectors import get_socket_by_type
+from src.geometry.connectors.connectors import get_socket_mesh_by_type
 import genesis as gs
 
 import sys

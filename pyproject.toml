@@ -27,7 +27,7 @@ ignore_missing_imports = true
 load-plugins = "pylint.extensions.docparams"
 
 [project]
-name = "repairs-components"
+name = "repairs_components"
 version = "0.1.0"
 description = "A library of repair components for reinforcement learning environments"
 readme = "README.md"

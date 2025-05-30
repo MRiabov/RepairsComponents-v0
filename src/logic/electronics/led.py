@@ -1,11 +1,13 @@
 from src.logic.electronics.component import ElectricalConsumer
 
+
 class LED(ElectricalConsumer):
     """
     LED with forward-voltage threshold behavior.
     Brightness ∝ current once V > forward_voltage.
     TODO: add max-load test (if exceeded, LED should break).
     """
+
     def __init__(self, forward_voltage: float, name: str = None):
         super().__init__(name)
         self.forward_voltage = forward_voltage
@@ -25,5 +27,6 @@ class LED(ElectricalConsumer):
             "type": "led",
             "brightness": self.current,
             "power": (voltage - self.forward_voltage) * self.current
-                     if voltage > self.forward_voltage else 0.0
+            if voltage > self.forward_voltage
+            else 0.0,
         }

@@ -8,6 +8,7 @@
 		}
 	],
 	"settings": {
-		"python.languageServer": "None"
+		"python.languageServer": "None",
+		"editor.defaultFormatter": "charliermarsh.ruff"
 	}
 }
