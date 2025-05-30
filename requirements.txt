@@ -4,3 +4,4 @@ torch
 build123d
 ocp_vscode
 vtk
+libigl==2.5.1

@@ -1,10 +1,13 @@
 from build123d import *  # noqa: F403
-
-# noqa: F405
+import numpy as np
 import torch
 import torchvision
+from PIL import Image
+
+# noqa: F405
 import os
-import ocp_vscode
+
+# import ocp_vscode
 import build123d
 
 import genesis as gs
@@ -120,9 +123,14 @@ def plate_env_bd_geometry():
     #     Box(STAND_PLATE_WIDTH, GUARD_WALL_THICKNESS, GUARD_WALL_HEIGHT)
 
     # # on the top of the stand plate
-
-    export_gltf(plate_env.part, "geom_exports/tooling_stands/tool_stand_plate.gltf")
-    ocp_vscode.show(plate_env.part)
+    plate_env_export = scale(plate_env.part, 0.01)  # convert to mm.
+    export_gltf(
+        plate_env_export,
+        "/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
+        unit=Unit.M,
+    )
+    # ocp_vscode.show(plate_env.part)
+    print("exported gltf")
 
 
 def genesis_setup():
@@ -130,37 +138,69 @@ def genesis_setup():
     import genesis as gs
 
     gs.init(theme="light")
-    scene = gs.Scene()
-    plane = scene.add_entity(gs.morphs.Plane())
-    scene.add_entity(gs.morphs.Mesh())
+    scene = gs.Scene(show_viewer=False)
 
-    camera_1 = scene.add_camera()
-    # camera_2 = scene.add_camera()
+    # Add plane
+    # plane = scene.add_entity(gs.morphs.Plane())
+
+    # Add mesh with proper scale and position
+    # Add mesh with multiple lights and better camera position
+    tooling_stand = scene.add_entity(
+        gs.morphs.Mesh(
+            file="/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
+            scale=1,  # Use 1.0 scale since we're working in cm
+            pos=(0.05, 0.15, 0.1),
+        ),
+        surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 1)),  # Add color material
+    )
+
+    # Add box for reference
+    box = scene.add_entity(gs.morphs.Box(pos=(0.7, 0.1, 0.1), size=(0.1, 0.1, 0.1)))
+
+    # Set up camera with proper position and lookat
+    camera_1 = scene.add_camera(
+        pos=(1, 2.5, 3.5),  # Position camera further away and above
+        lookat=(0, 0, 0),  # Look at the center of the scene
+        res=(1024, 1024),
+    )
+
+    scene.build()
     rgb, depth, _segmentation, normal = camera_1.render(
         rgb=True, depth=True, segmentation=False, normal=True
     )
+
+    print(scene.entities)
+
     # save images
     # Create output directory if it doesn't exist
     os.makedirs("renders", exist_ok=True)
 
     # Save RGB image (convert from float [0,1] to uint8 [0,255])
-    rgb_uint8 = (rgb * 255).byte().permute(2, 0, 1)  # HWC to CHW
-    torchvision.io.write_png(rgb_uint8, "renders/rgb.png")
+
+    # Transpose from HWC to CHW
+    rgb_uint8 = np.transpose(rgb, (2, 0, 1))
+    # Save using PIL
+    from PIL import Image
+
+    Image.fromarray(np.transpose(rgb_uint8, (1, 2, 0))).save("renders/rgb.png")
 
     # Save depth (normalize to [0,1] for visualization)
     if depth is not None:
         depth_normalized = (depth - depth.min()) / (depth.max() - depth.min() + 1e-6)
-        depth_uint8 = (depth_normalized * 255).byte()
-        torchvision.io.write_png(
-            depth_uint8.unsqueeze(0), "renders/depth.png"
-        )  # Add channel dim
+        depth_uint8 = (depth_normalized * 255).astype(np.uint8)
+        # Save using PIL
+        Image.fromarray(depth_uint8).save("renders/depth.png")
 
     # Save normal map (convert from [-1,1] to [0,1])
     if normal is not None:
-        normal_uint8 = (
-            ((normal * 0.5 + 0.5) * 255).byte().permute(2, 0, 1)
-        )  # HWC to CHW
-        torchvision.io.write_png(normal_uint8, "renders/normal.png")
+        normal_normalized = normal * 0.5 + 0.5
+        normal_uint8 = (normal_normalized * 255).astype(np.uint8)
+        # Transpose from HWC to CHW
+        normal_uint8 = np.transpose(normal_uint8, (2, 0, 1))
+        # Save using PIL
+        Image.fromarray(np.transpose(normal_uint8, (1, 2, 0))).save(
+            "renders/normal.png"
+        )
 
     print("Renders saved to 'renders/' directory")
 
