@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-from training_utils.sim_state import RepairsSimState
-from build123d import Compound, Pos
+from build123d import Compound, Part, Pos
 import numpy as np
 
 
@@ -9,9 +8,8 @@ class Task(ABC):
     def perturb_desired_state(
         self,
         compound: Compound,
-        desired_state: RepairsSimState,
         env_size=(640, 640, 640),
-    ) -> RepairsSimState:
+    ) -> Compound:
         """Perturb the desired state of the task."""
 
         bbox = compound.bounding_box()
@@ -32,98 +30,160 @@ class Task(ABC):
 
         # Move the compound by the random offset
         compound = compound.move(Pos(*random_offset))
+        # TODO also perturb the RepairsSimState, correspondingly to the compound... or not get it at all.
+
+        return compound
 
     @abstractmethod
-    def perturb_initial_state(
-        self, compound: Compound, initial_state: RepairsSimState
-    ) -> RepairsSimState:
+    def perturb_initial_state(self, compound: Compound) -> Compound:
         raise NotImplementedError
 
 
 class AssembleTask(Task):
     def perturb_desired_state(
-        self,
-        compound: Compound,
-        desired_state: RepairsSimState,
-        env_size=(640, 640, 640),
-    ) -> RepairsSimState:
-        return super().perturb_desired_state(compound, desired_state, env_size)
+        self, compound: Compound, env_size=(640, 640, 640)
+    ) -> Compound:
+        return super().perturb_desired_state(compound, env_size)
 
     def _get_stable_orientation(self, aabb_size):
-        """Determine the most stable orientation based on AABB dimensions."""
+        """Determine the most stable orientation for a part based on its AABB dimensions.
+
+        This method ensures that elongated parts are oriented with their longest dimension
+        vertically for better stability during the disassembled state.
+
+        Args:
+            aabb_size: The size of the part's axis-aligned bounding box (x, y, z)
+
+        Returns:
+            tuple: (rotation_axis, angle), up_axis where:
+                - rotation_axis: 3D vector (x, y, z) for the rotation axis
+                - angle: Rotation angle in radians
+                - up_axis: Indicates which axis is vertical (0=x, 1=y, 2=z)
+        """
         dims = np.array(aabb_size)
         aspect_ratios = dims / np.mean(dims)
 
         if np.any(aspect_ratios > 1.3):
             up_axis = np.argmax(dims)
-            if up_axis == 0:
-                return (0, np.pi / 2, 0), up_axis
-            elif up_axis == 1:
-                return (np.pi / 2, 0, 0), up_axis
-        return (0, 0, 0), 2  # Default to Z-up
+            if up_axis == 0:  # X is up
+                return (0, 0, 1), np.pi / 2, up_axis  # Rotate 90° around Z to make X up
+            elif up_axis == 1:  # Y is up
+                return (1, 0, 0), np.pi / 2, up_axis  # Rotate 90° around X to make Y up
+        return (0, 0, 1), 0.0, 2  # Default to Z-up, no rotation needed
 
-    def _pack_2d(self, rectangles, bin_width, bin_height):
-        """Simple 2D bin packing using bottom-left heuristic."""
-        packed = []
+    def _get_random_position(self, part_info, used_rectangles, bin_width, bin_height):
+        """Find a random non-overlapping position for a part within the bin.
+
+        Args:
+            part_info: Dictionary containing part dimensions and other info
+            used_rectangles: List of already placed rectangles (x1, y1, x2, y2)
+            bin_width: Width of the packing area
+            bin_height: Height of the packing area
+
+        Returns:
+            tuple: (x, y) position if found, None if no valid position found
+        """
+        w, h = part_info["proj_width"], part_info["proj_height"]
+        max_attempts = 100
+
+        for _ in range(max_attempts):
+            # Try random positions
+            x = np.random.uniform(0, bin_width - w)
+            y = np.random.uniform(0, bin_height - h)
+
+            new_rect = (x, y, x + w, y + h)
+
+            # Check for overlaps with existing rectangles
+            overlap = False
+            for placed in used_rectangles:
+                if not (
+                    new_rect[2] <= placed[0]  # New rect is to the left
+                    or new_rect[0] >= placed[2]  # New rect is to the right
+                    or new_rect[3] <= placed[1]  # New rect is above
+                    or new_rect[1] >= placed[3]
+                ):  # New rect is below
+                    overlap = True
+                    break
+
+            if not overlap:
+                return x, y
+
+        return None  # No valid position found after max_attempts
+
+    def _pack_2d(self, part_infos, bin_width, bin_height):
+        """Randomly pack parts in 2D space without overlaps.
+
+        This method tries to place each part at a random position within the bin
+        while ensuring no overlaps with already placed parts. Parts are processed
+        in random order to increase variation in the resulting layouts.
+
+        Args:
+            part_infos: List of part information dictionaries
+            bin_width: Width of the packing area
+            bin_height: Height of the packing area
+
+        Returns:
+            list: List of tuples (x, y, part_info, w, h) for placed parts
+        """
+        placed = []
         used_rectangles = []
 
-        for w, h, part in rectangles:
-            best_score = float("inf")
-            best_pos = None
+        # Shuffle parts to get different layouts each time
+        part_infos = part_infos.copy()
+        np.random.shuffle(part_infos)
 
-            for x in range(0, bin_width - int(w) + 1, 10):
-                for y in range(0, bin_height - int(h) + 1, 10):
-                    new_rect = (x, y, x + w, y + h)
-
-                    if x + w > bin_width or y + h > bin_height:
-                        continue
-
-                    overlap = False
-                    for placed in used_rectangles:
-                        if not (
-                            new_rect[2] <= placed[0]
-                            or new_rect[0] >= placed[2]
-                            or new_rect[3] <= placed[1]
-                            or new_rect[1] >= placed[3]
-                        ):
-                            overlap = True
-                            break
-
-                    if not overlap:
-                        score = x + y
-                        if score < best_score:
-                            best_score = score
-                            best_pos = (x, y)
-
-            if best_pos is not None:
-                x, y = best_pos
-                packed.append((x, y, part, w, h))
+        for part_info in part_infos:
+            pos = self._get_random_position(
+                part_info, used_rectangles, bin_width, bin_height
+            )
+            if pos is not None:
+                x, y = pos
+                w, h = part_info["proj_width"], part_info["proj_height"]
+                placed.append((x, y, part_info, w, h))
                 used_rectangles.append((x, y, x + w, y + h))
 
-        return packed
+        return placed
 
     def perturb_initial_state(
-        self, compound: Compound, initial_state: RepairsSimState
-    ) -> RepairsSimState:
-        """Randomly disassemble the compound into individual parts."""
-        parts = compound.solids()
+        self, compound: Compound, env_size=(1000, 1000, 1000)
+    ) -> Compound:
+        """Randomly disassemble the compound into individual parts with non-overlapping positions.
+
+        This method takes a compound object representing an assembled model and disassembles it
+        by placing each part in a random but valid position within the environment. Parts are
+        oriented for stability and positioned to avoid overlaps, creating a realistic disassembled
+        state for robotic manipulation training.
+
+        Args:
+            compound: The assembled compound to disassemble
+            initial_state: The current simulation state to modify
+            env_size: Size of the environment (x, y, z) in millimeters
+
+        Returns:
+            RepairsSimState: The modified simulation state with disassembled parts
+        """
+        # parts = compound.solids()
+        parts = filter(
+            lambda x: isinstance(x, Part), compound.descendants
+        )  # should filter only for solids, connectors, buttons, etc later.
         part_info = []
 
-        # Calculate AABBs and determine stable orientations
+        # Calculate AABBs and determine stable orientations for each part
         for part in parts:
             bbox = part.bounding_box()
             aabb_min = np.array(bbox.min.to_tuple())
             aabb_max = np.array(bbox.max.to_tuple())
             aabb_size = aabb_max - aabb_min
 
-            rotation, up_axis = self._get_stable_orientation(aabb_size)
+            # Get stable orientation (longest dimension up if significantly elongated)
+            (rotation_axis, angle, up_axis) = self._get_stable_orientation(aabb_size)
 
-            # Project AABB onto ground plane
+            # Project AABB onto ground plane based on up axis
             if up_axis == 0:  # X is up
                 proj_width, proj_height = aabb_size[1], aabb_size[2]
             elif up_axis == 1:  # Y is up
                 proj_width, proj_height = aabb_size[0], aabb_size[2]
-            else:  # Z is up
+            else:  # Z is up (default)
                 proj_width, proj_height = aabb_size[0], aabb_size[1]
 
             part_info.append(
@@ -131,48 +191,79 @@ class AssembleTask(Task):
                     "part": part,
                     "aabb_min": aabb_min,
                     "aabb_size": aabb_size,
-                    "rotation": rotation,
+                    "rotation_axis": rotation_axis,
+                    "rotation_angle": angle,
                     "up_axis": up_axis,
                     "proj_width": proj_width,
                     "proj_height": proj_height,
                 }
             )
 
-        # Sort by area (largest first)
-        part_info.sort(key=lambda x: -(x["proj_width"] * x["proj_height"]))
+        # Use environment size for packing area with some margin
+        bin_width, bin_height = (
+            env_size[0] * 0.8,
+            env_size[1] * 0.8,
+        )  # 80% of environment size
 
-        # Pack parts
-        rectangles = [
-            (info["proj_width"], info["proj_height"], info) for info in part_info
-        ]
+        # Pack parts with random positions
+        packed = self._pack_2d(part_info, bin_width, bin_height)
 
-        bin_width, bin_height = 600, 600  # Adjust as needed
-        packed = self._pack_2d(rectangles, bin_width, bin_height)
+        if not packed:
+            raise ValueError("Failed to find valid positions for all parts")
 
-        # Position parts
+        # Position parts in the environment
         for x, y, info, w, h in packed:
             aabb_min = info["aabb_min"]
             aabb_size = info["aabb_size"]
-            rotation = info["rotation"]
+            rotation_axis = info["rotation_axis"]
+            rotation_angle = info["rotation_angle"]
             up_axis = info["up_axis"]
 
-            # Center in bin
-            pos_x = x + w / 2 - bin_width / 2
-            pos_y = y + h / 2 - bin_height / 2
+            # Calculate center position in the bin with some random jitter
+            jitter_x = np.random.uniform(-50, 50)  # ±50mm jitter
+            jitter_y = np.random.uniform(-50, 50)
 
-            # Position on ground
+            # Calculate position ensuring parts stay within environment bounds
+            half_env_x = env_size[0] / 2
+            half_env_y = env_size[1] / 2
+
+            # Calculate centered position with jitter, ensuring parts stay within bounds
+            pos_x = max(
+                -half_env_x + w / 2,
+                min(half_env_x - w / 2, x + w / 2 - bin_width / 2 + jitter_x),
+            )
+            pos_y = max(
+                -half_env_y + h / 2,
+                min(half_env_y - h / 2, y + h / 2 - bin_height / 2 + jitter_y),
+            )
+
+            # Position on ground with proper height based on orientation
+            # The height should be half the size in the up direction since we're centering
             if up_axis == 0:  # X is up
-                pos = Pos(pos_x, pos_y, aabb_min[0] + aabb_size[0] / 2)
+                height = aabb_size[0] / 2
+                pos = Pos(pos_x, pos_y, height)
             elif up_axis == 1:  # Y is up
-                pos = Pos(pos_x, pos_y, aabb_min[1] + aabb_size[1] / 2)
-            else:  # Z is up
-                pos = Pos(pos_x, pos_y, aabb_min[2] + aabb_size[2] / 2)
+                height = aabb_size[1] / 2
+                pos = Pos(pos_x, pos_y, height)
+            else:  # Z is up (default)
+                height = aabb_size[2] / 2
+                pos = Pos(pos_x, pos_y, height)
 
-            # Apply transformation
-            info["part"] = info["part"].rotate(*rotation).move(pos)
+            # Apply transformation to part
+            if abs(rotation_angle) > 1e-6:  # Only rotate if angle is not zero
+                from build123d import Axis
+
+                # Create an axis of rotation at the part's center
+                rotation_axis_obj = Axis(
+                    origin=info["part"].center(), direction=rotation_axis
+                )
+                info["part"] = info["part"].rotate(
+                    rotation_axis_obj, rotation_angle * 180 / np.pi
+                )  # Convert to degrees
+            info["part"] = info["part"].move(pos)
 
         # Rebuild compound with new part positions
         # Note: You'll need to implement this part based on your compound structure
         # For example: compound = Compound(children=[info['part'] for info in part_info])
-
-        return initial_state
+        new_compound = Compound(children=[info["part"] for info in part_info])
+        return new_compound
