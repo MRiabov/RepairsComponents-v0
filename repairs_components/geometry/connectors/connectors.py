@@ -6,7 +6,7 @@ from genesis import gs
 from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np
 
-import src.geometry.connectors.models as models
+import repairs_components.geometry.connectors.models as models
 
 from repairs_components.geometry.connectors.models import europlug, round
 from abc import ABC, abstractmethod
@@ -57,10 +57,22 @@ def get_socket_bd_geometry_by_type(connector_type: str):
 
 
 class Connector(ElectricalComponent):
-    name = "connector"  # abstract
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        raise NotImplementedError
 
-    def get_mjcf(self, connector_position: np.ndarray, density: float):
+    @property
+    @abstractmethod
+    def connector_pos_relative_to_center(self) -> tuple[float, float, float]:
+        raise NotImplementedError
+
+    def get_mjcf(
+        self, connector_position: np.ndarray | None = None, density: float = 1000
+    ):
         "This defines a generic mjcf for a connector with a connector position."
+        if connector_position is None:
+            connector_position = self.connector_pos_relative_to_center
         return f"""<mujoco>
         <asset>
             <mesh name="{self.name}" file="geom_exports/electronics/connectors/{self.name}.gltf"/>

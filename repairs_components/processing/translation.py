@@ -17,14 +17,12 @@ from repairs_components.logic.tools.screwdriver import Screwdriver
 
 
 def translate_to_genesis_scene(
-    scene: gs.Scene,
-    b123d_assembly: Compound,
-    sim_state: RepairsSimState,
-    connector_positions: dict[str, np.ndarray],  # for positions of connectors.
+    scene: gs.Scene, b123d_assembly: Compound, sim_state: RepairsSimState
 ):
     assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
 
     hex_to_name: dict[str, str] = {}
+    gs_entities: dict[str, RigidEntity] = {}
 
     # translate each child into genesis entities
     for child in b123d_assembly.children:
@@ -42,11 +40,10 @@ def translate_to_genesis_scene(
             if part_type == "solid":
                 export_gltf(child, gltf_path)
                 mesh = gs.morphs.Mesh(file=gltf_path)
+
             elif part_type == "connector":
                 connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
-                mjcf = connector.get_mjcf(
-                    connector_position=connector_positions[label], density=1000
-                )
+                mjcf = connector.get_mjcf()
                 with tempfile.NamedTemporaryFile(
                     suffix=label + ".xml", mode="w", encoding="utf-8", delete=False
                 ) as tmp2:
@@ -60,9 +57,7 @@ def translate_to_genesis_scene(
             connector: ElectricalComponent = sim_state.electronics_state.components[
                 label
             ]  # type: ignore
-            mjcf = connector.get_mjcf(
-                connector_position=connector_positions[label], density=1000
-            )
+            mjcf = connector.get_mjcf()
             with tempfile.NamedTemporaryFile(
                 suffix=label + ".xml", mode="w", encoding="utf-8", delete=False
             ) as tmp2:
@@ -76,8 +71,9 @@ def translate_to_genesis_scene(
             )
 
         hex_to_name[new_entity.uid] = label
+        gs_entities[label] = new_entity
 
-    return scene, hex_to_name
+    return scene, hex_to_name, gs_entities
 
 
 def translate_genesis_to_python(  # translate to sim state, really.

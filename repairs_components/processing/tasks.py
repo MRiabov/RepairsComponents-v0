@@ -38,6 +38,7 @@ class Task(ABC):
 
     @abstractmethod
     def perturb_initial_state(self, compound: Compound) -> Compound:
+        "Perturb initial state; return the compound and the new positions of bodies in the compound."
         raise NotImplementedError
 
 

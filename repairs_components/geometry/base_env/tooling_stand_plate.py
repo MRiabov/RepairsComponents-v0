@@ -49,6 +49,9 @@ MAGNET_DEPTH = 0.3  # cm
 ALIGNMENT_PIN_DIAMETER = 0.4  # cm
 ALIGNMENT_PIN_HEIGHT = 0.8  # cm
 
+# for exporting the environment; moved as the center of the parts.
+SCENE_CENTER = (0, 20 + STAND_PLATE_DEPTH / 2, STAND_PLATE_HEIGHT / 2)
+
 
 def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
     with BuildPart() as plate_env:
@@ -104,12 +107,8 @@ def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
     return plate_env.part
 
 
-def genesis_setup():
+def genesis_setup(scene=gs.Scene(show_viewer=False)):
     # NOTE: in genesis, the YZ is swapped compared to build123d, so define in XZY.
-    import genesis as gs
-
-    gs.init(theme="light")
-    scene = gs.Scene(show_viewer=False)
 
     # Add plane
     plane = scene.add_entity(gs.morphs.Plane())
@@ -125,7 +124,6 @@ def genesis_setup():
         ),
         surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 1)),  # Add color material
     )
-    # tooling_stand.set_pos((0, 0, 0), zero_velocity = True)
 
     # Add box for reference
 
@@ -163,12 +161,13 @@ def genesis_setup():
         "tooling_stand": tooling_stand,
     }
 
-    scene.build()
     return (scene, [camera_1, camera_2], entities)
 
 
-def render_and_save(camera_1: Camera, camera_2: Camera):
+def render_and_save(scene: gs.Scene, camera_1: Camera, camera_2: Camera):
     "Util to debug"
+    scene.build()
+
     rgb_1, depth_1, _segmentation, normal_1 = camera_1.render(
         rgb=True, depth=True, segmentation=False, normal=True
     )
@@ -223,4 +222,5 @@ def render_and_save(camera_1: Camera, camera_2: Camera):
 # plate_env_bd_geometry()
 # render_genesis = True
 # if render_genesis:
+#     gs.init(theme="light")
 #     genesis_setup()

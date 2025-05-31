@@ -70,9 +70,9 @@ class RepairsEnv(gym.Env):
 
         # Add custom components to the scene
         initial_b123d_assembly, self.current_sim_state, aux, self.cameras = (
-            env_setup.starting_state(self.scene)
+            env_setup.starting_state_geom(self.scene)
         )
-        desired_b123d_assembly, self.desired_state, _ = env_setup.desired_state(
+        desired_b123d_assembly, self.desired_state, _ = env_setup.desired_state_geom(
             self.scene
         )
         self.initial_voxel_grid = export_voxel_grid(
