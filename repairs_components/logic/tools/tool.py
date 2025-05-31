@@ -1,6 +1,6 @@
 from abc import abstractmethod
 import numpy as np
-from geometry.base import Component
+from repairs_components.geometry.base import Component
 from dataclasses import dataclass
 
 
@@ -11,6 +11,6 @@ class Tool(Component):
     active: bool = False
 
     @abstractmethod
-    def step(self, action: np.ndarray):
+    def step(self, action: np.ndarray, state: dict):
         """Step the tool with the given action."""
         raise NotImplementedError

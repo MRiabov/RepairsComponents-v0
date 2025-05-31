@@ -1,17 +1,18 @@
-from build123d import Compound, export_gltf
+from build123d import Compound, Part, RevoluteJoint, export_gltf
 import genesis as gs
 import tempfile
 
 from genesis.engine.entities.rigid_entity.rigid_link import RigidLink
 from repairs_components.geometry.base import Component
 from genesis.engine.entities import RigidEntity
+from repairs_components.geometry.fasteners import Fastener
 from repairs_components.logic.electronics.electronics_state import ElectronicsState
 from repairs_components.logic.physical_state import PhysicalState
 from repairs_components.logic.fluid_state import FluidState
 from repairs_components.geometry.connectors.connectors import Connector
 from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np
-from repairs_components.training_utils.sim_state import RepairsSimState
+from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.tools.screwdriver import Screwdriver
 
 
@@ -75,7 +76,7 @@ def translate_to_genesis_scene(
     return scene, hex_to_name
 
 
-def translate_genesis_to_python(
+def translate_genesis_to_python(  # translate to sim state, really.
     scene: gs.Scene,
     hex_to_name: dict[str, str],
     sim_state: RepairsSimState,
@@ -167,3 +168,58 @@ def get_fastener_hole_positions(entity: RigidEntity):
             fastener_hole_pos = link.get_pos()  # not sure how to get the env.
             fastener_hole_positions.update({link.name[:-3]: fastener_hole_pos})
     return fastener_hole_positions
+
+
+def translate_compound_to_sim_state(b123d_compound: Compound) -> RepairsSimState:
+    "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
+    sim_state = RepairsSimState()
+    for part in b123d_compound.descendants:
+        part: Part
+
+        if part.label:  # only parts with labels are expected.
+            assert "@" in part.label, "part must annotate type."
+            # physical state
+            if part.label.endswith("@solid"):
+                sim_state.physical_state.register_body(
+                    name=part.label,
+                    position=part.position.to_tuple(),
+                    rotation=part.rotation.to_tuple(),
+                )
+            elif part.label.endswith(
+                "@fastener"
+            ):  # collect constraints, get labels of bodies,
+                # collect constraints (in build123d named joints)
+                joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
+                joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
+                joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
+
+                # are active
+                constraint_a_active = joint_a.connected_to is not None
+                constraint_b_active = joint_b.connected_to is not None
+
+                # if active, get connected to names
+                initial_body_a = (
+                    joint_a.connected_to.parent if constraint_a_active else None
+                )
+                initial_body_b = (
+                    joint_b.connected_to.parent if constraint_b_active else None
+                )
+
+                # collect names of bodies(?)
+                assert initial_body_a.label and initial_body_a.label, (
+                    "Constrained parts must be labeled"
+                )
+                sim_state.physical_state.register_fastener(
+                    Fastener(
+                        initial_body_a=initial_body_a.label
+                        if constraint_a_active
+                        else None,
+                        initial_body_b=initial_body_b.label
+                        if constraint_b_active
+                        else None,
+                        constraint_a_active=constraint_a_active,
+                        constraint_b_active=constraint_b_active,
+                        name=part.label,
+                    )
+                )
+    return sim_state

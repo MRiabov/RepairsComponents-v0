@@ -5,12 +5,20 @@ from repairs_components.geometry.fasteners import Fastener
 from repairs_components.geometry.base import Component
 import numpy as np
 from genesis.vis.camera import Camera
-from repairs_components.training_utils.sim_state import RepairsSimState
+from repairs_components.training_utils.sim_state_global import RepairsSimState
 import genesis as gs
+from repairs_components.geometry.base_env.tooling_stand_plate import (
+    genesis_setup,
+    plate_env_bd_geometry,
+    render_and_save,
+)
 
 
 class EnvSetup(ABC):
     "A setup for a single problem to solve"
+
+    STANDARD_ENV_SIZE = (64, 64, 64)
+    BOTTOM_CENTER_OF_PLATE = (0, STANDARD_ENV_SIZE[1] / 2 + 20, 20)
 
     @abstractmethod
     def starting_state(
@@ -40,55 +48,11 @@ class EnvSetup(ABC):
         """Get a default randomized environment for the simulation."""
         raise NotImplementedError  # TODO
 
-    def create_state(self, b123d_compound: Compound) -> RepairsSimState:
-        "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
-        sim_state = RepairsSimState()
-        for part in b123d_compound.descendants:
-            part: Part
+    def get_default_b123d_env(self):
+        return plate_env_bd_geometry()
 
-            if part.label:  # only parts with labels are expected.
-                assert "@" in part.label, "part must annotate type."
-                # physical state
-                if part.label.endswith("@solid"):
-                    sim_state.physical_state.register_body(
-                        name=part.label,
-                        position=part.position.to_tuple(),
-                        rotation=part.rotation.to_tuple(),
-                    )
-                elif part.label.endswith(
-                    "@fastener"
-                ):  # collect constraints, get labels of bodies,
-                    # collect constraints (in build123d named joints)
-                    joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
-                    joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
-                    joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
+    def get_default_genesis_scene(self):
+        return genesis_setup()
 
-                    # are active
-                    constraint_a_active = joint_a.connected_to is not None
-                    constraint_b_active = joint_b.connected_to is not None
-
-                    # if active, get connected to names
-                    initial_body_a = (
-                        joint_a.connected_to.parent if constraint_a_active else None
-                    )
-                    initial_body_b = (
-                        joint_b.connected_to.parent if constraint_b_active else None
-                    )
-
-                    # collect names of bodies(?)
-                    assert initial_body_a.label and initial_body_a.label, (
-                        "Constrained parts must be labeled"
-                    )
-                    sim_state.physical_state.register_fastener(
-                        Fastener(
-                            initial_body_a=initial_body_a.label
-                            if constraint_a_active
-                            else None,
-                            initial_body_b=initial_body_b.label
-                            if constraint_b_active
-                            else None,
-                            constraint_a_active=constraint_a_active,
-                            constraint_b_active=constraint_b_active,
-                            name=part.label,
-                        )
-                    )
+    def _debug_render(self, camera_1: Camera, camera_2: Camera):
+        render_and_save(camera_1, camera_2)

@@ -1,10 +1,13 @@
 from repairs_components.training_utils.sim_state import SimState
 import numpy as np
 from repairs_components.logic.tools.tool import Tool
+from dataclasses import dataclass
+from repairs_components.logic.tools.gripper import Gripper
 
 
+@dataclass
 class ToolState(SimState):
-    current_tool: Tool
+    current_tool: Tool = Gripper()
 
     def diff(self, other: "ToolState") -> tuple[dict[str, np.ndarray], int]:
         """Compute differences in tool state between two states."""

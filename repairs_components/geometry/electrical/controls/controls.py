@@ -1,7 +1,7 @@
 """Control components like buttons and switches."""
 
 from dataclasses import dataclass
-from geometry.base import Component
+from repairs_components.geometry.base import Component
 from build123d import *
 
 

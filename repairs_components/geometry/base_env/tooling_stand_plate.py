@@ -8,8 +8,6 @@ from PIL import Image
 # noqa: F405
 import os
 
-# import ocp_vscode
-import build123d
 
 import genesis as gs
 
@@ -52,7 +50,7 @@ ALIGNMENT_PIN_DIAMETER = 0.4  # cm
 ALIGNMENT_PIN_HEIGHT = 0.8  # cm
 
 
-def plate_env_bd_geometry():
+def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
     with BuildPart() as plate_env:
         # stand plate
         with Locations((0, 0, STAND_PLATE_HEIGHT / 2)):
@@ -103,6 +101,7 @@ def plate_env_bd_geometry():
     )
     # ocp_vscode.show(plate_env.part)
     print("exported gltf")
+    return plate_env.part
 
 
 def genesis_setup():

@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from geometry.base import Component
+from repairs_components.geometry.base import Component
 import numpy as np
 
 

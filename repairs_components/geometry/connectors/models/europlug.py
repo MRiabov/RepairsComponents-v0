@@ -45,9 +45,11 @@ class Europlug(Connector):
             connector_def.center().to_tuple()
         )
 
-        return self.color_and_label(
-            plug_part.part.moved(Location(moved_to)),
-            connector_def.moved(Location(moved_to)),
+        return (
+            self.color_and_label(
+                plug_part.part.moved(Location(moved_to)),
+                connector_def.moved(Location(moved_to)),
+            ),
             connector_collision_detection_position,
         )
 

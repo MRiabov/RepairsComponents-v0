@@ -13,7 +13,7 @@ Give the reward whenever:
 In the end, if the environment is timed out, give penalty for half of the completed tasks.
 """
 
-from repairs_components.training_utils.sim_state import RepairsSimState
+from repairs_components.training_utils.sim_state_global import RepairsSimState
 import numpy as np
 
 

@@ -11,7 +11,7 @@ from build123d import Compound
 from genesis.vis.camera import Camera
 
 
-from geometry.connectors.connectors import check_connections
+from repairs_components.geometry.connectors.connectors import check_connections
 
 from repairs_components.geometry.fasteners import (
     activate_connection,
@@ -20,7 +20,7 @@ from repairs_components.geometry.fasteners import (
 from logic.electronics.electronics_state import ElectronicsState
 from logic.fluid_state import FluidState
 from logic.physical_state import PhysicalState
-from repairs_components.training_utils.sim_state import RepairsSimState
+from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.training_utils.translation import (
     translate_genesis_to_python,
     translate_to_genesis_scene,

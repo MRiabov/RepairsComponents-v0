@@ -1,10 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
 from repairs_components.logic.electronics.component import ElectricalComponent
+from repairs_components.training_utils.sim_state import SimState
 
 
 @dataclass
-class ElectronicsState:
+class ElectronicsState(SimState):
     components: dict[str, ElectricalComponent] = field(default_factory=dict)
 
     # No need for to_dict() - use dataclasses.asdict() instead
