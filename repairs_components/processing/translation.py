@@ -20,7 +20,7 @@ def translate_to_genesis_scene(
     scene: gs.Scene,
     b123d_assembly: Compound,
     sim_state: RepairsSimState,
-    aux: dict[str, np.ndarray],  # for positions of connectors.
+    connector_positions: dict[str, np.ndarray],  # for positions of connectors.
 ):
     assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
 
@@ -44,7 +44,9 @@ def translate_to_genesis_scene(
                 mesh = gs.morphs.Mesh(file=gltf_path)
             elif part_type == "connector":
                 connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
-                mjcf = connector.get_mjcf(aux[label], 1000)
+                mjcf = connector.get_mjcf(
+                    connector_position=connector_positions[label], density=1000
+                )
                 with tempfile.NamedTemporaryFile(
                     suffix=label + ".xml", mode="w", encoding="utf-8", delete=False
                 ) as tmp2:
@@ -58,7 +60,9 @@ def translate_to_genesis_scene(
             connector: ElectricalComponent = sim_state.electronics_state.components[
                 label
             ]  # type: ignore
-            mjcf = connector.get_mjcf(aux[label], 1000)
+            mjcf = connector.get_mjcf(
+                connector_position=connector_positions[label], density=1000
+            )
             with tempfile.NamedTemporaryFile(
                 suffix=label + ".xml", mode="w", encoding="utf-8", delete=False
             ) as tmp2:

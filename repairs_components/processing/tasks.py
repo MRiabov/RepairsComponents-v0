@@ -4,6 +4,8 @@ import numpy as np
 
 
 class Task(ABC):
+    "A task class that pertubs the geometry of a compound to create more diverse tasks."
+
     @abstractmethod
     def perturb_desired_state(
         self,
@@ -40,6 +42,11 @@ class Task(ABC):
 
 
 class AssembleTask(Task):
+    """A task class that pertubs the geometry of a compound to create more diverse tasks.
+
+    This class in particular disassembles any Compound to separate parts and positions them on the flat surface.
+    It also ensures stable orientation of prolonged parts, e.g. in a table, legs would lie flat on the ground."""
+
     def perturb_desired_state(
         self, compound: Compound, env_size=(640, 640, 640)
     ) -> Compound:

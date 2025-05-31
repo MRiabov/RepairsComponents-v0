@@ -8,7 +8,7 @@ from PIL import Image
 # noqa: F405
 import os
 
-
+from genesis.engine.entities import RigidEntity
 import genesis as gs
 
 WORKING_SPACE_SIZE = (64, 64, 64)  # cm
@@ -116,7 +116,7 @@ def genesis_setup():
 
     # Add mesh with proper scale and position
     # Add mesh with multiple lights and better camera position
-    tooling_stand = scene.add_entity(
+    tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(
             file="/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
             scale=1,  # Use 1.0 scale since we're working in cm
@@ -125,6 +125,7 @@ def genesis_setup():
         ),
         surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 1)),  # Add color material
     )
+    # tooling_stand.set_pos((0, 0, 0), zero_velocity = True)
 
     # Add box for reference
 

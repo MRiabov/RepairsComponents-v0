@@ -81,7 +81,7 @@ def export_voxel_grid(parts, voxel_size: float, grid_size=(256, 256, 256)):
 
     if not meshes:
         padded = np.zeros(grid_size, dtype=np.int8)
-        return padded, {v: k for k, v in PART_TYPE_LABEL.items()}
+        return padded
 
     bounds = np.stack([m.bounds for m in meshes])  # shape (n, 2, 3)
     mins = bounds[:, 0, :].min(axis=0)
