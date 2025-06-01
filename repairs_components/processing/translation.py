@@ -1,4 +1,4 @@
-from build123d import Compound, Part, RevoluteJoint, Unit, export_gltf
+from build123d import CenterOf, Compound, Part, RevoluteJoint, Unit, export_gltf, Pos
 import genesis as gs
 import tempfile
 
@@ -39,7 +39,13 @@ def translate_to_genesis_scene(
             gltf_path = tmp.name
             tmp.close()
             if part_type == "solid":
-                export_gltf(child, gltf_path, unit=Unit.CM)
+                # move gltf to 0,0,0 on center... later will be replaced back to it's original position.
+                # this is done to have a 0,0,0 origin for the mesh, which will be useful for physical state translation
+                export_gltf(
+                    child.moved(Pos(-child.center(CenterOf.BOUNDING_BOX))),
+                    gltf_path,
+                    unit=Unit.CM,
+                )
                 mesh = gs.morphs.Mesh(file=gltf_path)
             elif part_type == "connector":
                 connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
@@ -117,6 +123,9 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     fluid_state_pos_checks: dict[str, bool] = {}
 
+    # NOTE for future: genesis is in meters, while build123d and physical state is in cm.
+    # xyz seems to be equal.
+
     for entity in entities:
         real_name = hex_to_name[str(entity.uid)]
 
@@ -178,51 +187,51 @@ def translate_compound_to_sim_state(b123d_compound: Compound) -> RepairsSimState
     sim_state = RepairsSimState()
     for part in b123d_compound.descendants:
         part: Part
+        assert part.label, f"Part must have a label. Failed at position {part.position}"
+        assert "@" in part.label, "Part must annotate type."
+        # physical state
+        if part.label.endswith("@solid"):
+            sim_state.physical_state.register_body(
+                name=part.label,
+                # position=part.position.to_tuple(), # this isn't always true
+                position=part.center(CenterOf.BOUNDING_BOX).to_tuple(),
+                rotation=part.location.orientation.to_tuple(),
+            )
+        elif part.label.endswith(
+            "@fastener"
+        ):  # collect constraints, get labels of bodies,
+            # collect constraints (in build123d named joints)
+            joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
+            joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
+            joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
 
-        if part.label:  # only parts with labels are expected.
-            assert "@" in part.label, "part must annotate type."
-            # physical state
-            if part.label.endswith("@solid"):
-                sim_state.physical_state.register_body(
+            # are active
+            constraint_a_active = joint_a.connected_to is not None
+            constraint_b_active = joint_b.connected_to is not None
+
+            # if active, get connected to names
+            initial_body_a = (
+                joint_a.connected_to.parent if constraint_a_active else None
+            )
+            initial_body_b = (
+                joint_b.connected_to.parent if constraint_b_active else None
+            )
+
+            # collect names of bodies(?)
+            assert initial_body_a.label and initial_body_a.label, (
+                "Constrained parts must be labeled"
+            )
+            sim_state.physical_state.register_fastener(
+                Fastener(
+                    initial_body_a=initial_body_a.label
+                    if constraint_a_active
+                    else None,
+                    initial_body_b=initial_body_b.label
+                    if constraint_b_active
+                    else None,
+                    constraint_a_active=constraint_a_active,
+                    constraint_b_active=constraint_b_active,
                     name=part.label,
-                    position=part.position.to_tuple(),
-                    rotation=part.location.orientation.to_tuple(),
                 )
-            elif part.label.endswith(
-                "@fastener"
-            ):  # collect constraints, get labels of bodies,
-                # collect constraints (in build123d named joints)
-                joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
-                joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
-                joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
-
-                # are active
-                constraint_a_active = joint_a.connected_to is not None
-                constraint_b_active = joint_b.connected_to is not None
-
-                # if active, get connected to names
-                initial_body_a = (
-                    joint_a.connected_to.parent if constraint_a_active else None
-                )
-                initial_body_b = (
-                    joint_b.connected_to.parent if constraint_b_active else None
-                )
-
-                # collect names of bodies(?)
-                assert initial_body_a.label and initial_body_a.label, (
-                    "Constrained parts must be labeled"
-                )
-                sim_state.physical_state.register_fastener(
-                    Fastener(
-                        initial_body_a=initial_body_a.label
-                        if constraint_a_active
-                        else None,
-                        initial_body_b=initial_body_b.label
-                        if constraint_b_active
-                        else None,
-                        constraint_a_active=constraint_a_active,
-                        constraint_b_active=constraint_b_active,
-                        name=part.label,
-                    )
-                )
+            )
     return sim_state

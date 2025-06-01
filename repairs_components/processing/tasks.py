@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from build123d import Compound, Part, Pos
+from build123d import Compound, Location, Part, Pos
 import numpy as np
 
 
@@ -10,34 +10,71 @@ class Task(ABC):
     def perturb_desired_state(
         self,
         compound: Compound,
-        env_size=(640, 640, 640),
+        env_size=(64, 64, 64),  # cm
     ) -> Compound:
-        """Perturb the desired state of the task."""
-
+        """Perturb the desired state of the task. Only move in x and y directions, the minimum of Z axis should be kept at 0."""
+        # Get the bounding box of the original compound
         bbox = compound.bounding_box()
         aabb_min = np.array(bbox.min.to_tuple())
-        aabb_size = np.array(bbox.size.to_tuple())
+        aabb_max = np.array(bbox.max.to_tuple())
+        size = aabb_max - aabb_min
 
         # Calculate the required margin to keep 5 units from each side
         margin = 5
-        min_pos = margin - aabb_min  # Minimum position to move to maintain margin
-        max_pos = np.array(env_size) - aabb_size - aabb_min - margin  # Maximum position
 
-        assert (max_pos > 0).all(), "Compound is too large for the environment."
-
-        # Generate random offset within the movable range
-        random_offset = np.random.uniform(
-            np.minimum(min_pos, max_pos), np.maximum(min_pos, max_pos)
+        # Calculate min and max positions in XY plane
+        min_xy = np.array([margin, margin])
+        max_xy = np.array(
+            [env_size[0] - size[0] - margin, env_size[1] - size[1] - margin]
         )
 
-        # Move the compound by the random offset
-        compound = compound.move(Pos(*random_offset))
-        # TODO also perturb the RepairsSimState, correspondingly to the compound... or not get it at all.
+        # Ensure the part fits in the environment
+        if np.any(max_xy < min_xy):
+            raise ValueError("Compound is too large for the environment.")
 
-        return compound
+        # Generate random position within the valid range
+        target_xy = np.random.uniform(min_xy, max_xy)
+
+        # Calculate the offset needed to move the compound
+        # We want the new position to be at target_xy in XY plane
+        # and have the bottom of the bounding box at Z=0
+        offset = np.array([
+            target_xy[0] - aabb_min[0],  # Move to target X
+            target_xy[1] - aabb_min[1],  # Move to target Y
+            -aabb_min[2]                 # Move up to make Z-min = 0
+        ])
+        
+        print(f"Original bbox: min={aabb_min}, max={aabb_max}")
+        print(f"Target position: {target_xy}")
+        print(f"Moving by offset: {offset}")
+        
+        # Move the entire compound as a single unit
+        result = compound.moved(Location(offset))
+        
+        # Debug: Check the resulting position
+        result_bbox = result.bounding_box()
+        print(f"Resulting bbox: min={result_bbox.min}, max={result_bbox.max}")
+
+        # Verify the result meets our requirements
+        result_bbox = result.bounding_box()
+        result_min = np.array(result_bbox.min.to_tuple())
+        result_max = np.array(result_bbox.max.to_tuple())
+
+        # Check Z-min is at 0 (within floating point tolerance)
+        assert np.allclose(result_min[2], 0, atol=1e-6), (
+            f"Z-min should be 0, got {result_min[2]}"
+        )
+        # Check dimensions are preserved (within floating point tolerance)
+        assert np.allclose(result_max - result_min, size, atol=1e-6), (
+            f"Dimensions should be preserved as {size}, got {result_max - result_min}"
+        )
+
+        return result
 
     @abstractmethod
-    def perturb_initial_state(self, compound: Compound) -> Compound:
+    def perturb_initial_state(
+        self, compound: Compound, env_size: tuple[float, float, float]
+    ) -> Compound:
         "Perturb initial state; return the compound and the new positions of bodies in the compound."
         raise NotImplementedError
 
@@ -49,7 +86,7 @@ class AssembleTask(Task):
     It also ensures stable orientation of prolonged parts, e.g. in a table, legs would lie flat on the ground."""
 
     def perturb_desired_state(
-        self, compound: Compound, env_size=(640, 640, 640)
+        self, compound: Compound, env_size=(64, 64, 64)
     ) -> Compound:
         return super().perturb_desired_state(compound, env_size)
 

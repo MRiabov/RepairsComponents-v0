@@ -36,9 +36,12 @@ def main():
 
 
 if __name__ == "__main__":
-    gs.init(backend=gs.cpu)
+    gs.init(backend=gs.cuda)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
+    b123d_logger = logging.getLogger("build123d")
+    b123d_logger.disabled = True
+
     main()

@@ -21,7 +21,7 @@ def test_perturb_initial_state():
     """Test that parts are properly disassembled within bounds."""
     task = AssembleTask()
     compound = create_test_compound()
-    env_size = (500, 500, 500)  # 50cm x 50cm x 50cm environment
+    env_size = (640, 640, 640)  # 50cm x 50cm x 50cm environment
 
     # Run the disassembly
     new_compound = task.perturb_initial_state(compound, env_size)
@@ -57,7 +57,7 @@ def debug_perturb_and_vis():
 
     task = AssembleTask()
     compound = create_test_compound()
-    env_size = (500, 500, 500)  # 50cm x 50cm x 50cm environment
+    env_size = (64, 64, 64)  # 50cm x 50cm x 50cm environment
 
     # Run the disassembly
     new_compound = task.perturb_initial_state(compound, env_size)
@@ -66,6 +66,38 @@ def debug_perturb_and_vis():
             bd.Box(*env_size)
     vis_bounding_box.part.color = bd.Color(0.2, 0.2, 0.2, 0.2)
     show(new_compound, vis_bounding_box.part)
+
+
+def test_perturb_desired_state():
+    """Test that perturb_desired_state moves the part to the desired location and sets Z-min to 0."""
+    task = AssembleTask()
+    
+    # Create a box at (10, 10, 10) with size (5, 5, 5)
+    box = Box(5, 5, 5).move(Pos(10, 10, 10))
+    
+    # Store the original position for verification
+    original_bbox = box.bounding_box()
+    original_min = np.array(original_bbox.min.to_tuple())
+    
+    # Perturb the desired state
+    env_size = (64, 64, 64)  # Large enough environment
+    result = task.perturb_desired_state(box, env_size)
+    
+    # Verify the result
+    result_bbox = result.bounding_box()
+    result_min = np.array(result_bbox.min.to_tuple())
+    result_max = np.array(result_bbox.max.to_tuple())
+    
+    # The box should be moved in XY and have Z-min at 0
+    assert np.allclose(result_min[2], 0), f"Z-min should be 0, got {result_min[2]}"
+    
+    # The dimensions should be preserved
+    assert np.allclose(result_max - result_min, [5, 5, 5]), \
+        f"Box dimensions should be preserved as (5,5,5), got {result_max - result_min}"
+    
+    # The XY position should be different from original
+    assert not np.allclose(result_min[:2], original_min[:2]), \
+        "XY position should be different after perturbation"
 
 
 if __name__ == "__main__":

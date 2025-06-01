@@ -17,7 +17,7 @@ import math
 
 @dataclass
 class PhysicalState:
-    fasteners: list[Fastener]
+    fasteners: list[Fastener] = field(default_factory=list)
     connected_parts: dict[str, tuple[str, str] | str | None] = field(
         default_factory=dict
     )
@@ -45,6 +45,10 @@ class PhysicalState:
         rotation: tuple[float, float, float, float],
     ):
         """Register a rigid body with position and rotation."""
+        assert name not in self.positions, f"Body {name} already registered"
+        assert position[2] >= 0, (
+            f"Body {name} is below the base plate. Position: {position}"
+        )
         self.positions[name] = position
         self.rotations[name] = rotation
 

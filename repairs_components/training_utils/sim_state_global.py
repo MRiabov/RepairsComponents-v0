@@ -1,4 +1,4 @@
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 import json
 from pathlib import Path
 import uuid
@@ -14,10 +14,10 @@ from repairs_components.training_utils.sim_state import SimState
 class RepairsSimState(SimState):
     "A convenience sim state class to put diff logic out of a step function"
 
-    electronics_state: ElectronicsState = ElectronicsState()
-    physical_state: PhysicalState = PhysicalState([])
-    fluid_state: FluidState = FluidState({})
-    tool_state: ToolState = ToolState()
+    electronics_state: ElectronicsState = field(default_factory=ElectronicsState)
+    physical_state: PhysicalState = field(default_factory=PhysicalState)
+    fluid_state: FluidState = field(default_factory=FluidState)
+    tool_state: ToolState = field(default_factory=ToolState)
 
     def diff(self, other: "RepairsSimState"):
         electronics_diff, electronics_diff_count = self.electronics_state.diff(

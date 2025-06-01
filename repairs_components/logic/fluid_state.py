@@ -1,13 +1,12 @@
 from dataclasses import dataclass, field
-from typing import Dict, Tuple
 
 
 @dataclass
 class FluidState:
     """Tracks fluid presence using index-based sensors."""
 
-    positions: Dict[int, Tuple[float, float, float]]
-    present: Dict[int, bool] = field(default_factory=dict)
+    positions: dict[int, tuple[float, float, float]] = field(default_factory=dict)
+    present: dict[int, bool] = field(default_factory=dict)
 
     def __post_init__(self):
         # Initialize present dict if not provided
@@ -22,12 +21,12 @@ class FluidState:
             raise KeyError(f"Unknown sensor index: {index}")
         self.present[index] = present
 
-    def diff(self, other: "FluidState") -> Tuple[Dict[int, Dict[str, bool]], int]:
+    def diff(self, other: "FluidState") -> tuple[dict[int, dict[str, bool]], int]:
         """Compute differences in fluid presence between two states.
 
         Returns a dict mapping index to {'from': bool, 'to': bool}, and total changes count.
         """
-        changes: Dict[int, Dict[str, bool]] = {}
+        changes: dict[int, dict[str, bool]] = {}
         total = 0
         for idx, state in self.present.items():
             other_state = other.present.get(idx, False)
@@ -37,7 +36,7 @@ class FluidState:
         return changes, total
 
     def register_sensor(
-        self, index: int, position: Tuple[float, float, float], present: bool = False
+        self, index: int, position: tuple[float, float, float], present: bool = False
     ):
         """Add a new sensor with index and position."""
         if index in self.positions:

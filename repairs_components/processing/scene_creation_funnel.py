@@ -46,9 +46,11 @@ def create_random_scenes(
         for env_i in range(num_scenes_per_task):
             index = task_idx * num_scenes_per_task + env_i
             starting_scene_geom_ = starting_state_geom(
-                env_setup, task
+                env_setup, task, env_size=(64, 64, 64)
             )  # create task... in a for loop...
-            desired_state_geom_ = desired_state_geom(env_setup, task)
+            desired_state_geom_ = desired_state_geom(
+                env_setup, task, env_size=(64, 64, 64)
+            )
 
             # voxelize both
             starting_voxel_grid = export_voxel_grid(
@@ -83,11 +85,14 @@ def create_random_scenes(
 
     # move parts to their necessary positions # yes, this could be batched, but idgaf
     for gs_entity_name, gs_entity in gs_entities.items():
-        positions = torch.zeros(len(gs_entities), 3)
+        positions = torch.zeros((len(gs_entities), 3))
 
         for env_i, starting_sim_state in enumerate(starting_sim_states):
-            positions[env_i] = torch.tensor(
-                starting_sim_state.physical_state.positions[gs_entity_name]
+            positions[env_i] = (
+                torch.tensor(
+                    starting_sim_state.physical_state.positions[gs_entity_name]
+                )
+                / 100  # cm to meters
             )
         # No need to move because the position is already centered.
         # positions = positions + torch.tensor(tooling_stand_plate.SCENE_CENTER) / 100
@@ -98,8 +103,11 @@ def create_random_scenes(
         ((e.get_AABB()[:, 0] <= 1).all() and (e.get_AABB()[:, 1] >= -1).all())
         for e in first_desired_scene.entities
     ), "Entities are out of expected bounds, likely a misconfiguration."
+    assert all(
+        (e.get_AABB()[:, :, 2] >= 0).all() for e in gs_entities.values()
+    ), "Entities are below the base plate."
 
-    print(gs_entities["box@solid"].get_AABB())
+    print("gs_entities['box@solid'].get_AABB():", gs_entities["box@solid"].get_AABB())
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
     return (
@@ -112,27 +120,28 @@ def create_random_scenes(
         voxel_grids_desired,
     )
 
-def starting_state_geom(env_setup: EnvSetup, task: Task) -> Compound:
+def starting_state_geom(
+    env_setup: EnvSetup, task: Task, env_size=(64, 64, 64)
+) -> Compound:
     """
     Perturb the starting state based on the starting state geom.
 
     Args:
         sim: The simulation object to be set up.
     """
-    return task.perturb_initial_state(env_setup.desired_state_geom())
+    return task.perturb_initial_state(env_setup.desired_state_geom(), env_size=env_size)
 
 
-def desired_state_geom(env_setup: EnvSetup, task: Task) -> Compound:
+def desired_state_geom(
+    env_setup: EnvSetup, task: Task, env_size=(64, 64, 64)
+) -> Compound:
     """
     Perturb the desired state based on the starting state geom.
 
     Args:
         sim: The simulation object to be set up.
     """
-    desired_state_geom_ = env_setup.desired_state_geom()
-    desired_state_geom_ = task.perturb_desired_state(desired_state_geom_)
-
-    return desired_state_geom_
+    return task.perturb_desired_state(env_setup.desired_state_geom(), env_size=env_size)
 
 
 def add_base_env_to_geom(
@@ -186,7 +195,7 @@ def add_base_scene_geometry(scene: gs.Scene):
     plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
     return scene, [camera_1, camera_2]
 
-
+# TODO why not used?
 def normalize_to_center(compound: Compound) -> Compound:
     bbox = compound.bounding_box()
     center = bbox.center()
