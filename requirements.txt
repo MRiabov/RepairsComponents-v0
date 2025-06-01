@@ -1,7 +1,11 @@
-numpy>=1.20.0
+numpy==1.26.4
 genesis-world
 torch
-build123d
+build123d==0.9.1
 ocp_vscode
 vtk
 libigl==2.5.1
+trimesh
+#constrained as of 2025-06-01
+
+#also `sudo apt install libgl1-mesa-dev`

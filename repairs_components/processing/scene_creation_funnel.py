@@ -89,10 +89,17 @@ def create_random_scenes(
             positions[env_i] = torch.tensor(
                 starting_sim_state.physical_state.positions[gs_entity_name]
             )
-        positions = positions + tooling_stand_plate.SCENE_CENTER
+        # No need to move because the position is already centered.
+        # positions = positions + torch.tensor(tooling_stand_plate.SCENE_CENTER) / 100
         gs_entity.set_pos(
             positions, envs_idx=torch.arange(len(tasks) * num_scenes_per_task)
         )
+    assert all(
+        ((e.get_AABB()[:, 0] <= 1).all() and (e.get_AABB()[:, 1] >= -1).all())
+        for e in first_desired_scene.entities
+    ), "Entities are out of expected bounds, likely a misconfiguration."
+
+    print(gs_entities["box@solid"].get_AABB())
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
     return (
@@ -140,11 +147,12 @@ def add_base_env_to_geom(
 
 
 def add_base_scene_geometry(scene: gs.Scene):
+    # NOTE: the tooling stand is repositioned to 0,0,-0.1 to position all parts on the very center of scene.
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(
             file="geom_exports/tooling_stands/tool_stand_plate.gltf",
             scale=1,  # Use 1.0 scale since we're working in cm
-            pos=(0, 0, 0.1),
+            pos=(0, -(0.64 / 2 + 0.2), -0.2),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
         ),
         surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 1)),  # Add color material
@@ -154,21 +162,32 @@ def add_base_scene_geometry(scene: gs.Scene):
         # pos=(1, 2.5, 3.5),
         pos=(1, 2.5, 3.5),  # Position camera further away and above
         lookat=(
-            0.64 / 2,
-            0.64 / 2 + tooling_stand_plate.STAND_PLATE_DEPTH / 100,
-            0.3,
+            0,
+            0,
+            0.2,
         ),  # Look at the center of the working pos
+        # lookat=(
+        #     0.64 / 2,
+        #     0.64 / 2 + tooling_stand_plate.STAND_PLATE_DEPTH / 100,
+        #     0.3,
+        # ),  # Look at the center of the working pos
         res=(1024, 1024),
     )
 
     camera_2 = scene.add_camera(
         pos=(-2.5, 1.5, 1.5),  # second camera from the other side
         lookat=(
-            0.64 / 2,
-            0.64 / 2 + tooling_stand_plate.STAND_PLATE_DEPTH / 100,
-            0.3,
+            0,
+            0,
+            0.2,
         ),  # Look at the center of the working pos
         res=(1024, 1024),
     )
-    plane = scene.add_entity(gs.morphs.Plane())
+    plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
     return scene, [camera_1, camera_2]
+
+
+def normalize_to_center(compound: Compound) -> Compound:
+    bbox = compound.bounding_box()
+    center = bbox.center()
+    return compound.move(Pos(-center.x, -center.y, -center.z / 2))

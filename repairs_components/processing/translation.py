@@ -1,4 +1,4 @@
-from build123d import Compound, Part, RevoluteJoint, export_gltf
+from build123d import Compound, Part, RevoluteJoint, Unit, export_gltf
 import genesis as gs
 import tempfile
 
@@ -39,7 +39,7 @@ def translate_to_genesis_scene(
             gltf_path = tmp.name
             tmp.close()
             if part_type == "solid":
-                export_gltf(child, gltf_path)
+                export_gltf(child, gltf_path, unit=Unit.CM)
                 mesh = gs.morphs.Mesh(file=gltf_path)
             elif part_type == "connector":
                 connector: Connector = sim_state.electronics_state.components[label]  # type: ignore

@@ -50,7 +50,7 @@ ALIGNMENT_PIN_DIAMETER = 0.4  # cm
 ALIGNMENT_PIN_HEIGHT = 0.8  # cm
 
 # for exporting the environment; moved as the center of the parts.
-SCENE_CENTER = (0, 20 + STAND_PLATE_DEPTH / 2, STAND_PLATE_HEIGHT / 2)
+SCENE_CENTER = (0, 20 + STAND_PLATE_DEPTH / 2, STAND_PLATE_HEIGHT)
 
 
 def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
@@ -166,7 +166,8 @@ def genesis_setup(scene: gs.Scene):
 
 def render_and_save(scene: gs.Scene, camera_1: Camera, camera_2: Camera):
     "Util to debug"
-    scene.build()
+    if not scene.is_built:
+        scene.build()
 
     rgb_1, depth_1, _segmentation, normal_1 = camera_1.render(
         rgb=True, depth=True, segmentation=False, normal=True
