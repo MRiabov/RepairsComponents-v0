@@ -1,8 +1,10 @@
+import logging
 import numpy as np
 import trimesh
 import tempfile
 import os
 import build123d as bd
+from build123d import Compound, Part
 
 # Define part type to color mapping (for priority extraction)
 PART_TYPE_COLORS = {
@@ -32,32 +34,33 @@ PART_TYPE_LABEL = {
 LABEL_TO_PART_TYPE = {v: k for k, v in PART_TYPE_LABEL.items()}
 
 
-def extract_part_type(name: str) -> str:
-    if "@" in name:
-        pt = name.split("@")[-1].lower()
-        if pt in PART_TYPE_COLORS:
-            return pt
+def extract_part_type(label: str) -> str:
+    assert "@" in label, 'Expected "@" in the name.'
+    pt = label.split("@")[-1].lower()
+    if pt in PART_TYPE_COLORS:
+        return pt
+    logging.warning(f"Unknown part type for name: {label}")
     return "default"
 
 
-def export_voxel_grid(parts, voxel_size: float, grid_size=(256, 256, 256)):
+def export_voxel_grid(compound: Compound, voxel_size: float, grid_size=(256, 256, 256)):
     """
     Voxelize an iterable of build123d Parts into a 3D int8 label grid.
 
     Args:
-        parts: iterable of build123d Parts; each part should have .label with '@type'.
+        compound: iterable of build123d Parts; each part should have .label with '@type'.
         voxel_size: size of each voxel.
         grid_size: target output grid size; result is zero-padded to this shape.
 
     Returns:
         padded: np.ndarray of shape grid_size, dtype int8; values are part type labels.
     """
-    parts_list = list(parts)
+    parts_list = compound.children
 
     # flatten all compounds.
     updated_parts_list = []
     for part in parts_list:
-        if isinstance(part, bd.Compound) and not isinstance(part, bd.Part):
+        if isinstance(part, Compound) and not isinstance(part, Part):
             assert len(part.children) > 0, (
                 "Compound passed to export voxel is empty. This can't be."
             )
@@ -68,7 +71,7 @@ def export_voxel_grid(parts, voxel_size: float, grid_size=(256, 256, 256)):
             updated_parts_list.append(part)
 
     parts_list = updated_parts_list
-    part_types = [extract_part_type(getattr(p, "label", "default")) for p in parts_list]
+    part_types = [extract_part_type(p.label) for p in parts_list]
     meshes = []
     for part in parts_list:
         tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".stl")

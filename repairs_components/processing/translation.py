@@ -12,6 +12,7 @@ from repairs_components.logic.fluid_state import FluidState
 from repairs_components.geometry.connectors.connectors import Connector
 from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np
+from repairs_components.processing.voxel_export import PART_TYPE_COLORS
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.tools.screwdriver import Screwdriver
 
@@ -40,7 +41,6 @@ def translate_to_genesis_scene(
             if part_type == "solid":
                 export_gltf(child, gltf_path)
                 mesh = gs.morphs.Mesh(file=gltf_path)
-
             elif part_type == "connector":
                 connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
                 mjcf = connector.get_mjcf()
@@ -51,7 +51,10 @@ def translate_to_genesis_scene(
                     tmp2_path = tmp2.name
                 mesh = gs.morphs.MJCF(file=tmp2_path, name=label, links_to_keep=True)
             new_entity = scene.add_entity(
-                mesh, surface=gs.surfaces.Plastic(*child.color.to_tuple())
+                mesh,
+                surface=gs.surfaces.Plastic(
+                    color=tuple(PART_TYPE_COLORS[part_type][:3])
+                ),
             )
         elif part_type in ("button", "led", "switch"):
             connector: ElectricalComponent = sim_state.electronics_state.components[
@@ -183,7 +186,7 @@ def translate_compound_to_sim_state(b123d_compound: Compound) -> RepairsSimState
                 sim_state.physical_state.register_body(
                     name=part.label,
                     position=part.position.to_tuple(),
-                    rotation=part.rotation.to_tuple(),
+                    rotation=part.location.orientation.to_tuple(),
                 )
             elif part.label.endswith(
                 "@fastener"

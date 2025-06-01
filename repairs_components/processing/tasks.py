@@ -171,8 +171,8 @@ class AssembleTask(Task):
             RepairsSimState: The modified simulation state with disassembled parts
         """
         # parts = compound.solids()
-        parts = filter(
-            lambda x: isinstance(x, Part), compound.descendants
+        parts = list(
+            filter(lambda x: isinstance(x, Part), compound.descendants)
         )  # should filter only for solids, connectors, buttons, etc later.
         part_info = []
 
@@ -216,8 +216,7 @@ class AssembleTask(Task):
         # Pack parts with random positions
         packed = self._pack_2d(part_info, bin_width, bin_height)
 
-        if not packed:
-            raise ValueError("Failed to find valid positions for all parts")
+        assert packed, ValueError("Failed to find valid positions for all parts")
 
         # Position parts in the environment
         for x, y, info, w, h in packed:

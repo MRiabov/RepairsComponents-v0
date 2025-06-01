@@ -107,7 +107,7 @@ def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
     return plate_env.part
 
 
-def genesis_setup(scene=gs.Scene(show_viewer=False)):
+def genesis_setup(scene: gs.Scene):
     # NOTE: in genesis, the YZ is swapped compared to build123d, so define in XZY.
 
     # Add plane

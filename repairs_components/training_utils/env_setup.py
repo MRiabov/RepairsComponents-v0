@@ -36,5 +36,5 @@ class EnvSetup(ABC):
     def get_default_genesis_scene(self):
         return genesis_setup()
 
-    def _debug_render(self, camera_1: Camera, camera_2: Camera):
-        render_and_save(camera_1, camera_2)
+    def _debug_render(self, scene: gs.Scene, camera_1: Camera, camera_2: Camera):
+        render_and_save(scene, camera_1, camera_2)

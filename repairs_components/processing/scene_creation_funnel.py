@@ -5,7 +5,6 @@ Order:
 2. starting_state_geom
 """
 
-import genesis as gs
 from genesis.engine.entities import RigidEntity
 from repairs_components.geometry.base_env import tooling_stand_plate
 from repairs_components.processing.voxel_export import export_voxel_grid
@@ -21,13 +20,14 @@ from repairs_components.geometry.base_env.tooling_stand_plate import (
     plate_env_bd_geometry,
 )
 import torch
+import genesis as gs
 
 
 def create_random_scenes(
     empty_scene: gs.Scene,
     env_setup: EnvSetup,
     tasks: list[Task],
-    num_scenes_per_task: int=128,
+    num_scenes_per_task: int = 128,
 ):
     """`create_random_scenes` is a general, high_level function responsible for processing of the entire 
     funnel, and is the only method users should call from `scene_creation_funnel`."""
@@ -76,7 +76,7 @@ def create_random_scenes(
     )
 
     # initiate cameras and others in genesis scene:
-    add_base_scene_geometry(first_desired_scene)
+    first_desired_scene, cameras = add_base_scene_geometry(first_desired_scene)
 
     # build a single scene... but batched
     first_desired_scene.build(n_envs=num_scenes_per_task * len(tasks))
@@ -95,7 +95,15 @@ def create_random_scenes(
         )
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
-
+    return (
+        first_desired_scene,
+        cameras,
+        gs_entities,
+        starting_sim_states,
+        desired_sim_states,
+        voxel_grids_initial,
+        voxel_grids_desired,
+    )
 
 def starting_state_geom(env_setup: EnvSetup, task: Task) -> Compound:
     """
@@ -114,7 +122,10 @@ def desired_state_geom(env_setup: EnvSetup, task: Task) -> Compound:
     Args:
         sim: The simulation object to be set up.
     """
-    return task.perturb_desired_state(env_setup.desired_state_geom())
+    desired_state_geom_ = env_setup.desired_state_geom()
+    desired_state_geom_ = task.perturb_desired_state(desired_state_geom_)
+
+    return desired_state_geom_
 
 
 def add_base_env_to_geom(
@@ -131,7 +142,7 @@ def add_base_env_to_geom(
 def add_base_scene_geometry(scene: gs.Scene):
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(
-            file="/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
+            file="geom_exports/tooling_stands/tool_stand_plate.gltf",
             scale=1,  # Use 1.0 scale since we're working in cm
             pos=(0, 0, 0.1),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis

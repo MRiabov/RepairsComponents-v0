@@ -1,14 +1,15 @@
 {
 	"folders": [
 		{
-			"path": "../Repairs-v0"
+			"path": "."
 		},
 		{
-			"path": "."
+			"path": "../Repairs-v0"
 		}
 	],
 	"settings": {
 		"python.languageServer": "None",
-		"editor.defaultFormatter": "charliermarsh.ruff"
+		"editor.defaultFormatter": "charliermarsh.ruff",
+		"makefile.configureOnOpen": false
 	}
 }

@@ -5,56 +5,7 @@ from build123d import Compound, Part, VectorLike, Color
 from genesis import gs
 from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np
-
-import repairs_components.geometry.connectors.models as models
-
-from repairs_components.geometry.connectors.models import europlug, round
 from abc import ABC, abstractmethod
-
-
-def get_socket_mesh_by_type(connector_type: str):
-    assert connector_type in [
-        "europlug",
-        "XT60",
-        "round_laptop_female",
-        "round_laptop_male",
-    ]
-
-    return gs.morphs.MJCF(
-        file="geom_exports/electronics/connectors/" + connector_type + ".xml"
-    )  # note: these mjcf files are simply meshes + connection site.
-
-    # site = np.array([0, 0, 0])
-    # return gs.morphs.Mesh(
-    #     file="geom_exports/electronics/connectors/" + connector_type + ".gltf"
-    # )
-
-
-def get_socket_bd_geometry_by_type(connector_type: str):
-    assert connector_type in [
-        "iec13_male",
-        "iec13_female",
-        "XT60_male",
-        "XT60_female",
-        "round_laptop_female",
-        "round_laptop_male",
-    ]
-    geom: Part | Compound
-    match connector_type:
-        case "iec13_male":
-            geom = iec13iec_plug_male()
-        case "iec13_female":
-            geom = iec13.iec_plug_female()
-        case "XT60_male":
-            geom = round.round_plug()
-        case "XT60_female":
-            geom = round.round_socket()
-        case "round_laptop_female":
-            geom = round.round_plug()
-        case "round_laptop_male":
-            geom = round.round_socket()
-    return geom
-
 
 class Connector(ElectricalComponent):
     @property
@@ -200,3 +151,48 @@ def check_connections(
 
     # Convert indices back to keys
     return [(male_keys[i], female_keys[j]) for i, j in idx_pairs]
+
+
+def get_socket_mesh_by_type(connector_type: str):
+    assert connector_type in [
+        "europlug",
+        "XT60",
+        "round_laptop_female",
+        "round_laptop_male",
+    ]
+
+    return gs.morphs.MJCF(
+        file="geom_exports/electronics/connectors/" + connector_type + ".xml"
+    )  # note: these mjcf files are simply meshes + connection site.
+
+    # site = np.array([0, 0, 0])
+    # return gs.morphs.Mesh(
+    #     file="geom_exports/electronics/connectors/" + connector_type + ".gltf"
+    # )
+
+
+# note: it may be useful to call it like this... but probably not.
+# def get_socket_bd_geometry_by_type(connector_type: str):
+#     assert connector_type in [
+#         "iec13_male",
+#         "iec13_female",
+#         "XT60_male",
+#         "XT60_female",
+#         "round_laptop_female",
+#         "round_laptop_male",
+#     ]
+#     geom: Part | Compound
+#     match connector_type:
+#         case "iec13_male":
+#             geom = iec13iec_plug_male()
+#         case "iec13_female":
+#             geom = iec13.iec_plug_female()
+#         case "XT60_male":
+#             geom = round.round_plug()
+#         case "XT60_female":
+#             geom = round.round_socket()
+#         case "round_laptop_female":
+#             geom = round.round_plug()
+#         case "round_laptop_male":
+#             geom = round.round_socket()
+#     return geom
