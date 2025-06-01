@@ -235,3 +235,9 @@ def translate_compound_to_sim_state(b123d_compound: Compound) -> RepairsSimState
                 )
             )
     return sim_state
+
+
+# I think you've identified the issue correctly, and yes, now that I've increased the box dim, I can see it, however...
+# However the gltf 0,0,0 export is expected? Later it should be adjusted for during the translation to genesis, specifically during this:@scene_creation_funnel.py#L87-101 . And we store starting_sim_state.physical_state.positions, which should be relative to 0,0,0 in gltf, this makes it easier to track.
+
+# So there is a bug somewhere here.

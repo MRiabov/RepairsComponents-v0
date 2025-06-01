@@ -10,7 +10,7 @@ class MoveBoxSetup(EnvSetup):
     def desired_state_geom(self) -> Compound:
         with BuildPart() as box:
             with Locations((10, 0, 10)):
-                Box(10, 10, 10)
+                Box(25, 25, 25)
 
         box.part.label = "box@solid"
 

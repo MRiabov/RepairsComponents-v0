@@ -29,7 +29,7 @@ def create_random_scenes(
     tasks: list[Task],
     num_scenes_per_task: int = 128,
 ):
-    """`create_random_scenes` is a general, high_level function responsible for processing of the entire 
+    """`create_random_scenes` is a general, high_level function responsible for processing of the entire
     funnel, and is the only method users should call from `scene_creation_funnel`."""
     # note: ideally, `build` would, of course, happen async.
     voxel_grids_initial = torch.zeros(
@@ -73,7 +73,7 @@ def create_random_scenes(
 
     # for starting scene, move it to an appropriate position #no, not here...
     # create a FIRST genesis scene for starting state from desired state; it is to be discarded, however.
-    first_desired_scene, hex_to_name, gs_entities = translate_to_genesis_scene(
+    first_desired_scene, hex_to_name, initial_gs_entities = translate_to_genesis_scene(
         empty_scene, desired_state_geom_, desired_sim_state
     )
 
@@ -84,8 +84,8 @@ def create_random_scenes(
     first_desired_scene.build(n_envs=num_scenes_per_task * len(tasks))
 
     # move parts to their necessary positions # yes, this could be batched, but idgaf
-    for gs_entity_name, gs_entity in gs_entities.items():
-        positions = torch.zeros((len(gs_entities), 3))
+    for gs_entity_name, gs_entity in initial_gs_entities.items():
+        positions = torch.zeros((len(initial_gs_entities), 3))
 
         for env_i, starting_sim_state in enumerate(starting_sim_states):
             positions[env_i] = (
@@ -104,21 +104,25 @@ def create_random_scenes(
         for e in first_desired_scene.entities
     ), "Entities are out of expected bounds, likely a misconfiguration."
     assert all(
-        (e.get_AABB()[:, :, 2] >= 0).all() for e in gs_entities.values()
+        (e.get_AABB()[:, :, 2] >= 0).all() for e in initial_gs_entities.values()
     ), "Entities are below the base plate."
 
-    print("gs_entities['box@solid'].get_AABB():", gs_entities["box@solid"].get_AABB())
+    print(
+        "gs_entities['box@solid'].get_AABB():",
+        initial_gs_entities["box@solid"].get_AABB(),
+    )
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
     return (
         first_desired_scene,
         cameras,
-        gs_entities,
+        initial_gs_entities,
         starting_sim_states,
         desired_sim_states,
         voxel_grids_initial,
         voxel_grids_desired,
     )
+
 
 def starting_state_geom(
     env_setup: EnvSetup, task: Task, env_size=(64, 64, 64)
@@ -166,6 +170,13 @@ def add_base_scene_geometry(scene: gs.Scene):
         ),
         surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 1)),  # Add color material
     )
+    franka = scene.add_entity(
+        gs.morphs.MJCF(
+            file="xml/franka_emika_panda/panda.xml",
+            pos=(0.3, -(0.64 / 2 + 0.2 / 2), 0),
+        ),
+    )  # franka arm standing on the correct place in the assembly.
+
     # Set up camera with proper position and lookat
     camera_1 = scene.add_camera(
         # pos=(1, 2.5, 3.5),
@@ -194,6 +205,7 @@ def add_base_scene_geometry(scene: gs.Scene):
     )
     plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
     return scene, [camera_1, camera_2]
+
 
 # TODO why not used?
 def normalize_to_center(compound: Compound) -> Compound:
