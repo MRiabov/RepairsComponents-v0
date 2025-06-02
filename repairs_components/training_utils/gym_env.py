@@ -8,6 +8,7 @@ from typing import List, Any
 
 from repairs_sim_step import step_repairs
 from repairs_components.training_utils.final_reward_calc import calculate_reward
+from repairs_components.training_utils.motion_planning import execute_straight_line_trajectory
 
 # todo: change to progressive reward calc once it's ready ^
 from build123d import Compound
@@ -27,6 +28,9 @@ class RepairsEnv(gym.Env):
         env_setup: EnvSetup,
         tasks: List[Task],
         num_envs: int,
+        # FIXME: this isn't a settable parameter. it is len(tasks)*num_scenes_per_task
+        # or actually, it could be( should be). number of parallel environments to simulate
+        # and the num_scenes per task is the feed-in repetitions of training pipeline.
         env_cfg: dict,
         obs_cfg: dict,
         reward_cfg: dict,
@@ -117,10 +121,10 @@ class RepairsEnv(gym.Env):
         # These values are robot-specific and affect the stiffness and damping
         # of the robot's joints during control
         self.franka.set_dofs_kp(
-            np.array([4500, 4500, 3500, 3500, 2000, 2000, 2000, 100, 100]),
+            kp=np.array([4500, 4500, 3500, 3500, 2000, 2000, 2000, 100, 100]),
         )
         self.franka.set_dofs_kv(
-            np.array([450, 450, 350, 350, 200, 200, 200, 10, 10]),
+            kv=np.array([450, 450, 350, 350, 200, 200, 200, 10, 10]),
         )
 
         # Set force limits for each joint (in Nm for rotational joints, N for prismatic)
@@ -151,39 +155,16 @@ class RepairsEnv(gym.Env):
         quat = action[:, 3:7]  # Quaternion: [w, x, y, z] # probably xyz
         gripper = action[:, 7]  # Gripper command: 0 (close) or 1 (open) # probably not
 
-        # Get the end-effector link
-        end_effector = self.franka.get_link("hand")
-
-        # For each environment, plan and execute path
-        for env_idx in range(self.num_envs):
-            # Compute inverse kinematics for target pose
-            qpos = self.franka.inverse_kinematics(
-                link=end_effector,
-                pos=pos[env_idx],
-                quat=quat[env_idx],
-                envs_idx=torch.tensor([env_idx], device=self.device),
-            )
-
-            # Set gripper position based on action
-            if gripper[env_idx] > 0.5:  # Open
-                qpos[-2:] = 0.04
-            else:  # Close
-                qpos[-2:] = 0.0
-
-            # Plan a path to the target position
-            path = self.franka.plan_path(
-                qpos_goal=qpos,
-                num_waypoints=50,
-                envs_idx=torch.tensor([env_idx], device=self.device),
-            )
-
-            # Execute the planned path
-            for waypoint in path:
-                self.franka.control_dofs_position(
-                    position=waypoint,
-                    envs_idx=torch.tensor([env_idx], device=self.device),
-                )
-                self.scene.step()
+        # Execute the motion planning trajectory using our dedicated module
+        execute_straight_line_trajectory(
+            franka=self.franka, 
+            scene=self.scene, 
+            pos=pos, 
+            quat=quat, 
+            gripper=gripper, 
+            keypoint_distance=0.1,  # 10cm as suggested
+            num_steps_between_keypoints=10
+        )
 
         # Allow the robot to reach the last waypoint
         for _ in range(20):
@@ -201,13 +182,14 @@ class RepairsEnv(gym.Env):
         # Capture observations from cameras
         obs = []
         for camera in self.cameras:
-            rgb = camera.render()
-            depth = camera.render(depth=True)
-            segmentation = camera.render(segmentation=True)
+            rgb, depth, _segmentation, normal = camera.render(
+                rgb=True, depth=True, segmentation=False, normal=True
+            )
 
             # Combine all camera observations
-            camera_obs = torch.cat(
-                [rgb, depth, segmentation], dim=-1
+            camera_obs = torch.tensor(
+                np.concatenate([rgb, depth[:, :, None], normal], axis=-1),
+                device=self.device,
             )  # Combine along channel dimension
             obs.append(camera_obs)
 
@@ -242,8 +224,7 @@ class RepairsEnv(gym.Env):
             dof_pos = self.default_dof_pos.expand(len(envs_idx), -1)
             self.franka.set_dofs_position(
                 position=dof_pos,
-                dofs_idx_local=self.dof_idx,
-                zero_velocity=True,
+                # dofs_idx_local=self.dof_idx,
                 envs_idx=envs_idx,
             )
 
@@ -266,16 +247,24 @@ class RepairsEnv(gym.Env):
 
                 # Set positions of all objects in this environment
                 for name, entity in self.gs_entities.items():
+                    if name.endswith(
+                        "@control"
+                    ):  # don't explicitly reset franka arm...
+                        # maybe it's worth returning franka explicitly instead.
+                        continue
                     # Get position from the simulation state
                     pos = (
                         torch.tensor(
-                            self.starting_sim_states[
-                                random_scene_idx
-                            ].physical_state.positions[name]
+                            [
+                                self.starting_sim_states[
+                                    random_scene_idx
+                                ].physical_state.positions[name]
+                            ]
                         )
                         / 100
                     )  # Convert from cm to meters
-
+                    # TODO !! this has to be generated with batching. for now, just expand the dim of pos.
+                    # generated specifically with task initial state perturbation (!or loaded from a dataloader.)
                     # Set the position for this entity in this environment
                     entity.set_pos(
                         pos, envs_idx=torch.tensor([env_idx], device=self.device)
@@ -292,18 +281,20 @@ class RepairsEnv(gym.Env):
             info: Additional information
         """
         # Reset all environments
-        idxs = torch.arange(self.num_envs, device=self.device)
+        idxs = torch.arange(self.num_envs - 1, device=self.device)
         self.reset_idx(idxs)
 
         # Get initial observations
         obs = []
         for camera in self.cameras:
-            rgb = camera.render()
-            depth = camera.render(depth=True)
-            segmentation = camera.render(segmentation=True)
+            rgb, depth, _segmentation, normal = camera.render(
+                rgb=True, depth=True, normal=True
+            )
 
             # Combine all camera observations
-            camera_obs = torch.cat([rgb, depth, segmentation], dim=-1)
+            camera_obs = torch.tensor(
+                np.concatenate([rgb, depth[:, :, None], normal], axis=-1)
+            )
             obs.append(camera_obs)
 
         # Stack all camera observations
