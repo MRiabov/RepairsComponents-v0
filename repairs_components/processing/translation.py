@@ -3,12 +3,7 @@ import genesis as gs
 import tempfile
 
 from genesis.engine.entities.rigid_entity.rigid_link import RigidLink
-from repairs_components.geometry.base import Component
 from genesis.engine.entities import RigidEntity
-from repairs_components.geometry.fasteners import Fastener
-from repairs_components.logic.electronics.electronics_state import ElectronicsState
-from repairs_components.logic.physical_state import PhysicalState
-from repairs_components.logic.fluid_state import FluidState
 from repairs_components.geometry.connectors.connectors import Connector
 from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np

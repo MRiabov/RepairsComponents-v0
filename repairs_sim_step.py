@@ -3,7 +3,7 @@ import json
 import uuid
 
 from repairs_components.geometry.base import Component
-from logic.electronics import simulator
+from repairs_components.logic.electronics import simulator
 import numpy as np
 from dataclasses import asdict
 from pathlib import Path
@@ -17,15 +17,15 @@ from repairs_components.geometry.fasteners import (
     activate_connection,
     check_fastener_possible_insertion,
 )
-from logic.electronics.electronics_state import ElectronicsState
-from logic.fluid_state import FluidState
-from logic.physical_state import PhysicalState
+from repairs_components.logic.electronics.electronics_state import ElectronicsState
+from repairs_components.logic.fluid_state import FluidState
+from repairs_components.logic.physical_state import PhysicalState
 from repairs_components.training_utils.sim_state_global import RepairsSimState
-from repairs_components.training_utils.translation import (
+from repairs_components.processing.translation import (
     translate_genesis_to_python,
     translate_to_genesis_scene,
 )
-
+import torch
 
 def step_repairs(
     scene: gs.Scene,

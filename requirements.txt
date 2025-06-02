@@ -6,6 +6,7 @@ ocp_vscode
 vtk
 libigl==2.5.1
 trimesh
+gymnasium
 #constrained as of 2025-06-01
 
 #also `sudo apt install libgl1-mesa-dev`

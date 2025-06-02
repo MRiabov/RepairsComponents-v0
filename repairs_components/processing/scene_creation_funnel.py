@@ -79,7 +79,7 @@ def create_random_scenes(
     )
 
     # initiate cameras and others in genesis scene:
-    first_desired_scene, cameras = add_base_scene_geometry(first_desired_scene)
+    first_desired_scene, cameras, franka = add_base_scene_geometry(first_desired_scene)
 
     # build a single scene... but batched
     first_desired_scene.build(n_envs=num_scenes_per_task * len(tasks))
@@ -112,6 +112,8 @@ def create_random_scenes(
         "gs_entities['box@solid'].get_AABB():",
         initial_gs_entities["box@solid"].get_AABB(),
     )
+    # Add franka to gs_entities
+    initial_gs_entities["franka@control"] = franka
     # to have gs_entities positions updated in visuals too, update the visual states.
     first_desired_scene.visualizer.update_visual_states()
 
@@ -208,7 +210,7 @@ def add_base_scene_geometry(scene: gs.Scene):
         res=(1024, 1024),
     )
     plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
-    return scene, [camera_1, camera_2]
+    return scene, [camera_1, camera_2], franka
 
 
 # TODO why not used?

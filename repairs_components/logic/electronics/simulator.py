@@ -1,6 +1,6 @@
-from logic.electronics.resistor import Resistor
-from logic.electronics.led import LED
-from logic.electronics.voltage_source import VoltageSource
+from repairs_components.logic.electronics.resistor import Resistor
+from repairs_components.logic.electronics.led import LED
+from repairs_components.logic.electronics.voltage_source import VoltageSource
 from repairs_components.logic.electronics.component import (
     ElectricalComponent,
     ElectricalConsumer,

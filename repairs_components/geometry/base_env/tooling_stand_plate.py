@@ -168,6 +168,8 @@ def render_and_save(scene: gs.Scene, camera_1: Camera, camera_2: Camera):
     "Util to debug"
     if not scene.is_built:
         scene.build()
+    # update to match definitely match physics to image.
+    scene.visualizer.update()
 
     rgb_1, depth_1, _segmentation, normal_1 = camera_1.render(
         rgb=True, depth=True, segmentation=False, normal=True
