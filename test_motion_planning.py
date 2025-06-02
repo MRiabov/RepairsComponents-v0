@@ -2,7 +2,6 @@ import torch
 import genesis as gs
 from repairs_components.training_utils.motion_planning import (
     execute_straight_line_trajectory,
-    plan_linear_trajectory,
 )
 import numpy as np
 import time
@@ -67,43 +66,43 @@ def test_motion_planning():
     # Define a constant orientation (pointing downward)
     orientation = torch.tensor([1.0, 0.0, 0.0, 0.0], device=device)  # w, x, y, z
 
-    # Get the end effector link
-    end_effector = franka.get_link("hand")
-
     # Execute motion planning for each segment of the square
     print("Executing square trajectory...")
 
-    for i in range(len(positions) - 1):
-        # Create batched tensors for position and orientation
-        pos_batch = torch.zeros((num_envs, 3), device=device)
-        quat_batch = torch.zeros((num_envs, 4), device=device)
-        gripper_batch = torch.zeros(num_envs, device=device)
+    # Initialize current position to the first point
+    current_pos = positions[0].clone()
 
+    # Create batched tensors for position and orientation
+    pos_batch = torch.zeros((num_envs, 3), device=device)
+    quat_batch = torch.zeros((num_envs, 4), device=device)
+    gripper_batch = torch.zeros(num_envs, device=device)
+
+    for target_pos in positions:
         # Set the target position and orientation
-        pos_batch[0] = positions[i + 1]
-        quat_batch[0] = orientation
+        pos_batch = target_pos
+        quat_batch = orientation  # still always downward
 
-        print(f"Moving to point {i + 1}: {positions[i + 1]}")
+        # Update current position for the next iteration
+        current_pos.copy_(target_pos)
+
+        print(f"Moving to point {target_pos}")
 
         # Execute the trajectory
         execute_straight_line_trajectory(
             franka=franka,
             scene=scene,
-            pos=pos_batch,
-            quat=quat_batch,
+            target_pos=pos_batch,
+            target_quat=quat_batch,
             gripper=gripper_batch,
             keypoint_distance=0.05,  # 5cm between keypoints for smoother motion
             num_steps_between_keypoints=20,
             camera=cam,
         )
 
-        # Render a frame after reaching the target
-        cam.render()
-
-    # Additional cooldown steps to allow robot to settle
-    for _ in range(20):
-        scene.step()
-        cam.render()
+    # # Additional cooldown steps to allow robot to settle
+    # for _ in range(20):
+    #     scene.step()
+    #     cam.render()
 
     # Stop recording and save video
     cam.stop_recording(

@@ -157,13 +157,13 @@ class RepairsEnv(gym.Env):
 
         # Execute the motion planning trajectory using our dedicated module
         execute_straight_line_trajectory(
-            franka=self.franka, 
-            scene=self.scene, 
-            pos=pos, 
-            quat=quat, 
-            gripper=gripper, 
+            franka=self.franka,
+            scene=self.scene,
+            target_pos=pos,
+            target_quat=quat,
+            gripper=gripper,
             keypoint_distance=0.1,  # 10cm as suggested
-            num_steps_between_keypoints=10
+            num_steps_between_keypoints=10,
         )
 
         # Allow the robot to reach the last waypoint
