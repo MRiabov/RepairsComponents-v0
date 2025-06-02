@@ -48,6 +48,7 @@ def create_random_scenes(
             starting_scene_geom_ = starting_state_geom(
                 env_setup, task, env_size=(64, 64, 64)
             )  # create task... in a for loop...
+            # note: at the moment the starting scene goes out of bounds a little, but whatever, it'll only generalize better.
             desired_state_geom_ = desired_state_geom(
                 env_setup, task, env_size=(64, 64, 64)
             )
@@ -111,6 +112,8 @@ def create_random_scenes(
         "gs_entities['box@solid'].get_AABB():",
         initial_gs_entities["box@solid"].get_AABB(),
     )
+    # to have gs_entities positions updated in visuals too, update the visual states.
+    first_desired_scene.visualizer.update_visual_states()
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
     return (
@@ -168,7 +171,8 @@ def add_base_scene_geometry(scene: gs.Scene):
             pos=(0, -(0.64 / 2 + 0.2), -0.2),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
         ),
-        surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 1)),  # Add color material
+        surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 0.3)),  # Add color material
+        # 0.3 alpha for debug.
     )
     franka = scene.add_entity(
         gs.morphs.MJCF(

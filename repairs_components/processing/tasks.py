@@ -190,7 +190,7 @@ class AssembleTask(Task):
         return placed
 
     def perturb_initial_state(
-        self, compound: Compound, env_size=(1000, 1000, 1000)
+        self, compound: Compound, env_size=(64, 64, 64)
     ) -> Compound:
         """Randomly disassemble the compound into individual parts with non-overlapping positions.
 

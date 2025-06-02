@@ -41,12 +41,15 @@ def translate_to_genesis_scene(
             if part_type == "solid":
                 # move gltf to 0,0,0 on center... later will be replaced back to it's original position.
                 # this is done to have a 0,0,0 origin for the mesh, which will be useful for physical state translation
+                center = child.center(CenterOf.BOUNDING_BOX)
                 export_gltf(
-                    child.moved(Pos(-child.center(CenterOf.BOUNDING_BOX))),
+                    child.moved(Pos(-center)),
                     gltf_path,
                     unit=Unit.CM,
                 )
-                mesh = gs.morphs.Mesh(file=gltf_path)
+                mesh = gs.morphs.Mesh(file=gltf_path)  # pos=center.to_tuple()
+                # technically, the `pos` should not do nothing, because it will be overriden by set_pos later.
+                # however it does? I don't see my object later.
             elif part_type == "connector":
                 connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
                 mjcf = connector.get_mjcf()
