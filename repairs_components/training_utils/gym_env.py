@@ -8,7 +8,9 @@ from typing import List, Any
 
 from repairs_sim_step import step_repairs
 from repairs_components.training_utils.final_reward_calc import calculate_reward
-from repairs_components.training_utils.motion_planning import execute_straight_line_trajectory
+from repairs_components.training_utils.motion_planning import (
+    execute_straight_line_trajectory,
+)
 
 # todo: change to progressive reward calc once it's ready ^
 from build123d import Compound
@@ -152,8 +154,8 @@ class RepairsEnv(gym.Env):
         """
         # Extract position and orientation from action
         pos = action[:, :3]  # Position: [x, y, z]
-        quat = action[:, 3:7]  # Quaternion: [w, x, y, z] # probably xyz
-        gripper = action[:, 7]  # Gripper command: 0 (close) or 1 (open) # probably not
+        quat = action[:, 3:7]  # Quaternion: [w, x, y, z]
+        gripper_force = action[:, 7:8]  # gripper positions (open/closed.)
 
         # Execute the motion planning trajectory using our dedicated module
         execute_straight_line_trajectory(
@@ -161,14 +163,10 @@ class RepairsEnv(gym.Env):
             scene=self.scene,
             target_pos=pos,
             target_quat=quat,
-            gripper=gripper,
+            gripper_force=gripper_force,
             keypoint_distance=0.1,  # 10cm as suggested
             num_steps_between_keypoints=10,
         )
-
-        # Allow the robot to reach the last waypoint
-        for _ in range(20):
-            self.scene.step()
 
         # Update the current simulation state based on the scene
         success, total_diff_left, self.current_sim_state, diff = step_repairs(

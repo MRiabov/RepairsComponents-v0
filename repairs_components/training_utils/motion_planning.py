@@ -9,7 +9,7 @@ def execute_straight_line_trajectory(
     scene: gs.Scene,
     target_pos: torch.Tensor,
     target_quat: torch.Tensor,
-    gripper: torch.Tensor,
+    gripper_force: torch.Tensor,
     keypoint_distance=0.1,
     num_steps_between_keypoints=10,
     camera: Camera | None = None,
@@ -28,7 +28,7 @@ def execute_straight_line_trajectory(
         scene: The simulation scene
         pos: Target position tensor with shape (num_envs, 3)
         quat: Target orientation quaternion tensor with shape (num_envs, 4)
-        gripper: Gripper command tensor with shape (num_envs,) - 0 for close, 1 for open
+        gripper_force: Force in newtons applied to gripper fingers.
         keypoint_distance: Distance between keypoints in meters (default: 0.1m or 10cm)
         num_steps_between_keypoints: Number of interpolation steps between keypoints
 
@@ -36,9 +36,6 @@ def execute_straight_line_trajectory(
         None: The function directly executes the trajectory in the simulation
     """
     device = target_pos.device
-
-    # Get the current joint positions
-    current_state = franka.get_dofs_position()
 
     current_end_effector_pos = torch.tensor(franka.get_link("hand").pos, device=device)
     current_end_effector_quat = torch.tensor(
@@ -60,14 +57,17 @@ def execute_straight_line_trajectory(
             # init_qpos=current_state,
         )
         franka.control_dofs_position(keypoint_ik)
+        franka.control_dofs_force(gripper_force, dofs_idx_local=[7, 8])
         scene.step()
         if camera is not None:
             camera.render()
-    for i in range(100):
+
+    # let dry-run for 80 steps.
+    for _ in range(100):
         scene.step()  # let it actually run.
         franka.control_dofs_position(keypoint_ik)  # set at the last point.
+        franka.control_dofs_force(gripper_force, dofs_idx_local=[7, 8])
         if camera is not None:
             camera.render()
 
-    1 + 1  # nothing, just a debug stopping point
     print(franka.get_links_pos()[:, 7])  # hand.

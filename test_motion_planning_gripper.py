@@ -55,13 +55,11 @@ def test_motion_planning():
             [0.4, 0.0, height], device=device
         ),  # Start position (slightly in front of robot)
         torch.tensor([-0.75, -0.75, height], device=device),  # Bottom left corner
-        torch.tensor([0.75, -0.75, height], device=device),  # Bottom right corner
-        torch.tensor([0.75, 0.75, height], device=device),  # Top right corner
-        torch.tensor([-0.75, 0.75, height], device=device),  # Top left corner
-        torch.tensor(
-            [-0.75, -0.75, height], device=device
-        ),  # Back to bottom left (complete the square)
-    ]
+        torch.tensor([-0.75, -0.75, height], device=device),  # Bottom left corner
+        torch.tensor([-0.75, -0.75, height], device=device),  # Bottom left corner
+        torch.tensor([-0.75, -0.75, height], device=device),  # Bottom left corner
+        torch.tensor([-0.75, -0.75, height], device=device),  # Bottom left corner
+    ]  # do not move, but move only gripper.
     gripper_forces = torch.tensor(
         [[-1, -1], [-1, -1], [-1, -1], [1, 1], [1, 1], [1, 1]]
     )
@@ -79,7 +77,7 @@ def test_motion_planning():
     pos_batch = torch.zeros((num_envs, 3), device=device)
     quat_batch = torch.zeros((num_envs, 4), device=device)
 
-    for target_pos, gripper_force in zip(positions, gripper_forces):
+    for target_pos, force in zip(positions, gripper_forces):
         # Set the target position and orientation
         pos_batch = target_pos
         quat_batch = orientation  # still always downward
@@ -95,7 +93,7 @@ def test_motion_planning():
             scene=scene,
             target_pos=pos_batch,
             target_quat=quat_batch,
-            gripper_force=gripper_force[None],
+            gripper_force=force[None],
             keypoint_distance=0.05,  # 5cm between keypoints for smoother motion
             num_steps_between_keypoints=20,
             camera=cam,
@@ -103,11 +101,13 @@ def test_motion_planning():
 
     # Stop recording and save video
     cam.stop_recording(
-        save_to_filename="/workspace/RepairsComponents-v0/motion_planning_test.mp4",
+        save_to_filename="/workspace/RepairsComponents-v0/motion_planning_test_gripper.mp4",
         fps=50,
     )
 
-    print("Motion planning test completed. Video saved to motion_planning_test.mp4")
+    print(
+        "Motion planning test completed. Video saved to motion_planning_test_gripper.mp4"
+    )
 
 
 if __name__ == "__main__":
