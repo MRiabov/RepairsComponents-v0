@@ -34,118 +34,84 @@ def execute_straight_line_trajectory(
     Returns:
         None: The function directly executes the trajectory in the simulation
     """
-    # Get the number of environments from the position tensor
-    num_envs = pos.shape[0]
     device = pos.device
 
     # Get the current joint positions
     current_state = franka.get_dofs_position()
     end_effector = franka.get_link("hand")
 
-    # Execute the trajectory for each environment separately (batch issue workaround)
-    for env_idx in range(num_envs):
-        # Get the current joint positions for this environment
-        current_qpos = current_state[env_idx].clone()
+    current_qpos = current_state.clone()
 
-        # Get the current end-effector pose
-        # Create a full tensor with zeros for all environments
-        all_envs_qpos = torch.zeros((num_envs, current_qpos.shape[0]), device=device)
-        # Set the position for the current environment
-        all_envs_qpos[env_idx] = current_qpos
+    # Get the current end-effector pose
+    current_pos = end_effector.pos
+    current_quat = end_effector.quat
 
-        # # Get the position and orientation of the end effector for all environments
-        # all_pos = [
-        #     link.pos for link in franka.links
-        # ]  # note: this is a hacky workaround. you can just get_links("hand"), although need to know the exact name.
-        # all_quat = [link.quat for link in franka.links]
+    # Target end-effector pose
+    target_pos = pos
+    target_quat = quat
 
-        # Extract the data for the current environment
-        current_pos = end_effector.pos
-        current_quat = end_effector.quat
+    # Calculate the distance between current and target positions
+    distance = torch.norm(target_pos - torch.from_numpy(current_pos).cuda())
 
-        # Target end-effector pose
-        target_pos = pos[env_idx]
-        target_quat = quat[env_idx]
+    # Calculate number of keypoints needed
+    num_keypoints = max(int(distance / keypoint_distance) + 1, 2)
 
-        # Calculate the distance between current and target positions
-        distance = torch.norm(target_pos - torch.from_numpy(current_pos).cuda())
+    # Generate evenly spaced keypoints along the straight line
+    alphas = torch.linspace(0, 1, num_keypoints, device=device)
 
-        # Calculate number of keypoints needed
-        num_keypoints = max(int(distance / keypoint_distance) + 1, 2)
+    # Initialize list to store joint configurations for keypoints
+    keypoint_qpos = []
 
-        # Generate evenly spaced keypoints along the straight line
-        alphas = torch.linspace(0, 1, num_keypoints, device=device)
+    # Compute IK for each keypoint
+    prev_qpos = current_qpos
+    for alpha in alphas:
+        # Interpolate position
+        keypoint_pos = torch.from_numpy(current_pos).cuda() + alpha * (
+            target_pos - torch.from_numpy(current_pos).cuda()
+        )
 
-        # Initialize list to store joint configurations for keypoints
-        keypoint_qpos = []
+        # Interpolate orientation (simple linear interpolation - could use slerp for better results)
+        keypoint_quat = (1 - alpha) * torch.from_numpy(
+            current_quat
+        ).cuda() + alpha * target_quat
+        keypoint_quat = keypoint_quat / torch.norm(
+            keypoint_quat
+        )  # Normalize quaternion
 
-        # Compute IK for each keypoint
-        prev_qpos = current_qpos
-        for alpha in alphas:
-            # Interpolate position
-            keypoint_pos = torch.from_numpy(current_pos).cuda() + alpha * (
-                target_pos - torch.from_numpy(current_pos).cuda()
-            )
+        # Compute IK for all environments (but we only care about the current one)
+        keypoint_ik = franka.inverse_kinematics(
+            link=end_effector,
+            pos=keypoint_pos,
+            quat=keypoint_quat,
+            init_qpos=prev_qpos,
+        )
 
-            # Interpolate orientation (simple linear interpolation - could use slerp for better results)
-            keypoint_quat = (1 - alpha) * torch.from_numpy(
-                current_quat
-            ).cuda() + alpha * target_quat
-            keypoint_quat = keypoint_quat / torch.norm(
-                keypoint_quat
-            )  # Normalize quaternion
+        # Store the solution and use it as initial guess for next keypoint
+        keypoint_qpos.append(keypoint_ik)
+        prev_qpos = keypoint_ik
 
-            # Create full batch tensors for position and orientation
-            batch_pos = torch.zeros((num_envs, 3), device=device)
-            batch_quat = torch.zeros((num_envs, 4), device=device)
-            batch_init_qpos = torch.zeros((num_envs, prev_qpos.shape[0]), device=device)
+    # Set gripper position for the final keypoint
+    if gripper > 0.5:  # Open
+        keypoint_qpos[-1][-2:] = 0.04
+    else:  # Close
+        keypoint_qpos[-1][-2:] = 0.0
 
-            # Set values for the current environment
-            batch_pos[env_idx] = keypoint_pos
-            batch_quat[env_idx] = keypoint_quat
-            batch_init_qpos[env_idx] = prev_qpos
+    # Execute the trajectory by interpolating between keypoints
+    for i in range(len(keypoint_qpos) - 1):
+        start_qpos = keypoint_qpos[i]
+        end_qpos = keypoint_qpos[i + 1]
 
-            # Compute IK for all environments (but we only care about the current one)
-            keypoint_ik = franka.inverse_kinematics(
-                link=end_effector,
-                pos=batch_pos,
-                quat=batch_quat,
-                init_qpos=batch_init_qpos,
-            )
+        # Linear interpolation between keypoints
+        for t in range(num_steps_between_keypoints):
+            beta = t / num_steps_between_keypoints
+            interp_qpos = (1 - beta) * start_qpos + beta * end_qpos
 
-            # Store the solution and use it as initial guess for next keypoint
-            keypoint_ik = keypoint_ik[env_idx]  # Extract this environment's solution
-            keypoint_qpos.append(keypoint_ik)
-            prev_qpos = keypoint_ik
-
-        # Set gripper position for the final keypoint
-        if gripper[env_idx] > 0.5:  # Open
-            keypoint_qpos[-1][-2:] = 0.04
-        else:  # Close
-            keypoint_qpos[-1][-2:] = 0.0
-
-        # Execute the trajectory by interpolating between keypoints
-        for i in range(len(keypoint_qpos) - 1):
-            start_qpos = keypoint_qpos[i]
-            end_qpos = keypoint_qpos[i + 1]
-
-            # Linear interpolation between keypoints
-            for t in range(num_steps_between_keypoints):
-                beta = t / num_steps_between_keypoints
-                interp_qpos = (1 - beta) * start_qpos + beta * end_qpos
-
-                # Control the robot - need to handle per-environment control
-                # Create a full tensor with zeros for all environments
-                all_envs_qpos = torch.zeros(
-                    (num_envs, interp_qpos.shape[0]), device=device
-                )
-                # Set the position for the current environment
-                all_envs_qpos[env_idx] = interp_qpos
-                # Control the position for all environments
-                franka.control_dofs_position(position=all_envs_qpos)
-                scene.step()
-                if camera is not None:
-                    camera.render()
+            # Control the robot - need to handle per-environment control
+            # Control the position for all environments
+            franka.control_dofs_position(position=interp_qpos)
+            scene.step()
+            if camera is not None:
+                camera.render()
 
 
 def plan_linear_trajectory(
