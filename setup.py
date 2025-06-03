@@ -11,7 +11,7 @@ setup(
     description="A library of repair components for reinforcement learning environments",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/RepairsComponents-v0",
+    url="https://github.com/MRiabov/RepairsComponents-v0",
     packages=find_packages(where="."),
     package_dir={"": "."},
     package_data={"": ["*.stl"]},  # Include any data files if needed

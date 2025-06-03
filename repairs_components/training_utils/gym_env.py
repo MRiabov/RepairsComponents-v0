@@ -290,11 +290,8 @@ class RepairsEnv(gym.Env):
             rgb, depth, _segmentation, normal = camera.render(
                 rgb=True, depth=True, normal=True
             )
+            camera_obs = obs_to_int8(rgb, depth, normal)  # type: ignore
 
-            # Combine all camera observations
-            camera_obs = torch.tensor(
-                np.concatenate([rgb, depth[:, :, None], normal], axis=-1)
-            )
             obs.append(camera_obs)
 
         # Stack all camera observations
@@ -302,3 +299,12 @@ class RepairsEnv(gym.Env):
 
         info = {"initial_diff_count": self.initial_diff_count}
         return obs, info
+
+def obs_to_int8(rgb: torch.Tensor, depth: torch.Tensor, normal: torch.Tensor):
+    # Normalize and convert to uint8
+    rgb_uint8 = (rgb * 255).to(torch.uint8)
+    depth_normalized = (depth - depth.min()) / (depth.max() - depth.min() + 1e-6)
+    depth_uint8 = (depth_normalized * 255).to(torch.uint8)
+    normal_normalized = (normal * 0.5 + 0.5) * 255
+    normal_uint8 = normal_normalized.to(torch.uint8)
+    return torch.stack([rgb_uint8, depth_uint8, normal_uint8], dim=-1)
