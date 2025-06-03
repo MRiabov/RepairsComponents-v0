@@ -85,7 +85,7 @@ def translate_to_genesis_scene(
 
 def translate_genesis_to_python(  # translate to sim state, really.
     scene: gs.Scene,
-    hex_to_name: dict[str, str],
+    gs_entities: dict[str, RigidEntity],
     sim_state: RepairsSimState,
 ):
     """
@@ -105,9 +105,11 @@ def translate_genesis_to_python(  # translate to sim state, really.
     # whether fastener joints are on or off.
     # whether
 
-    assert not isinstance(sim_state.tool_state.tool, Screwdriver) or (
-        sim_state.tool_state.tool.picked_up_fastener is None
-        or sim_state.tool_state.tool.picked_up_fastener_name.endswith("@fastener")
+    assert not isinstance(sim_state.tool_state.current_tool, Screwdriver) or (
+        sim_state.tool_state.current_tool.picked_up_fastener is None
+        or sim_state.tool_state.current_tool.picked_up_fastener_name.endswith(
+            "@fastener"
+        )
     ), "Passed name of a picked up fastener is not of that of a fastener."
 
     entities = scene.entities
@@ -124,19 +126,17 @@ def translate_genesis_to_python(  # translate to sim state, really.
     # NOTE for future: genesis is in meters, while build123d and physical state is in cm.
     # xyz seems to be equal.
 
-    for entity in entities:
-        real_name = hex_to_name[str(entity.uid)]
-
-        match real_name:
+    for entity_name, entity in gs_entities.items():
+        match entity_name:
             case name if name.endswith("male@connector"):
-                male_connector_positions[name] = entity.get_link(
-                    "connector_point"
-                ).get_pos()
+                # NOTE: I had some issues with link.pos because it was not updated(!). So be careful and use get_link_pos in case of issues instead.
+                male_connector_positions[name] = entity.get_link("connector_point").pos
 
             case name if name.endswith("female@connector"):
+                # NOTE: I had some issues with link.pos because it was not updated(!). So be careful and use get_link_pos in case of issues instead.
                 female_connector_positions[name] = entity.get_link(
                     "connector_point"
-                ).get_pos()
+                ).pos
 
             case name if name.endswith("@solid"):
                 fastener_hole_positions[name] = get_fastener_hole_positions(entity)
@@ -149,7 +149,9 @@ def translate_genesis_to_python(  # translate to sim state, really.
                 # I'm quite positive there is a faster way, too.
                 continue
 
-            case name if name == sim_state.tool_state.tool.picked_up_fastener_name:
+            case name if (
+                name == sim_state.tool_state.current_tool.picked_up_fastener_name
+            ):
                 link = next(
                     link
                     for link in entity.links

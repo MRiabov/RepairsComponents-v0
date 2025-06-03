@@ -9,14 +9,15 @@ from repairs_components.training_utils.sim_state_global import RepairsSimState
 
 
 # TODO: get the actual values from the mujoco state.
-def calculate_reward(
+def calculate_reward_and_done(
     current_state: RepairsSimState,
     desired_state: RepairsSimState,
     initial_diff_count: int,
     reward_multiplier: float = 10.0,
 ):
     diff_count = current_state.diff(desired_state)
-    return calculate_partial_reward(initial_diff_count, diff_count) * reward_multiplier
+    completion_rate = calculate_partial_reward(initial_diff_count, diff_count)
+    return completion_rate * reward_multiplier, completion_rate >= 1.0
 
 
 def calculate_partial_reward(

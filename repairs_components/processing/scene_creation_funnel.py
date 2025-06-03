@@ -19,6 +19,7 @@ from repairs_components.geometry.base_env.tooling_stand_plate import (
     genesis_setup,
     plate_env_bd_geometry,
 )
+from repairs_components.training_utils.sim_state_global import RepairsSimState
 import torch
 import genesis as gs
 
@@ -84,22 +85,10 @@ def create_random_scenes(
     # build a single scene... but batched
     first_desired_scene.build(n_envs=num_scenes_per_task * len(tasks))
 
-    # move parts to their necessary positions # yes, this could be batched, but idgaf
-    for gs_entity_name, gs_entity in initial_gs_entities.items():
-        positions = torch.zeros((len(initial_gs_entities), 3))
-
-        for env_i, starting_sim_state in enumerate(starting_sim_states):
-            positions[env_i] = (
-                torch.tensor(
-                    starting_sim_state.physical_state.positions[gs_entity_name]
-                )
-                / 100  # cm to meters
-            )
-        # No need to move because the position is already centered.
-        # positions = positions + torch.tensor(tooling_stand_plate.SCENE_CENTER) / 100
-        gs_entity.set_pos(
-            positions, envs_idx=torch.arange(len(tasks) * num_scenes_per_task)
-        )
+    # move all entities to initial positions.
+    move_entities_to_pos(
+        initial_gs_entities, starting_sim_states, torch.arange(len(starting_sim_states))
+    )
     assert all(
         ((e.get_AABB()[:, 0] <= 1).all() and (e.get_AABB()[:, 1] >= -1).all())
         for e in first_desired_scene.entities
@@ -211,6 +200,27 @@ def add_base_scene_geometry(scene: gs.Scene):
     )
     plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
     return scene, [camera_1, camera_2], franka
+
+def move_entities_to_pos(
+    gs_entities: dict[str, RigidEntity],
+    starting_sim_states: list[RepairsSimState],
+    env_idx: torch.Tensor,
+):
+    """Move parts to their necessary positions. Can be used both in reset and init."""
+    for gs_entity_name, gs_entity in gs_entities.items():
+        positions = torch.zeros((len(gs_entities), 3))
+
+        for env_i in env_idx:
+            starting_sim_state = starting_sim_states[int(env_i.item())]
+            positions[int(env_i.item())] = (
+                torch.tensor(
+                    starting_sim_state.physical_state.positions[gs_entity_name]
+                )
+                / 100  # cm to meters
+            )
+        # No need to move because the position is already centered.
+        # positions = positions + torch.tensor(tooling_stand_plate.SCENE_CENTER) / 100
+        gs_entity.set_pos(positions, envs_idx=env_idx)
 
 
 # TODO why not used?

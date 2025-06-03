@@ -7,7 +7,9 @@ import numpy as np
 from typing import List, Any
 
 from repairs_sim_step import step_repairs
-from repairs_components.training_utils.final_reward_calc import calculate_reward
+from repairs_components.training_utils.final_reward_calc import (
+    calculate_reward_and_done,
+)
 from repairs_components.training_utils.motion_planning import (
     execute_straight_line_trajectory,
 )
@@ -87,6 +89,8 @@ class RepairsEnv(gym.Env):
         ) = create_random_scenes(
             self.scene, env_setup, tasks, num_scenes_per_task=num_scenes_per_task
         )
+        # TODO: add mechanism that would recreate random scenes whenever the scene was called too many times.
+        self.called_times_this_batch = 0
 
         # Store the initial difference count for reward calculation
         self.current_sim_state = self.starting_sim_states[
@@ -196,11 +200,8 @@ class RepairsEnv(gym.Env):
             obs, dim=1
         )  # Shape: [num_envs, num_cameras, height, width, channels]
 
-        # Check if the task is completed (based on remaining differences)
-        done = torch.tensor(total_diff_left < 0.1, dtype=torch.bool, device=self.device)
-
         # Compute reward based on progress toward the goal
-        reward = calculate_reward(
+        reward, done = calculate_reward_and_done(
             self.current_sim_state,
             self.desired_state,
             self.initial_diff_count,
@@ -243,6 +244,7 @@ class RepairsEnv(gym.Env):
                         self.desired_state
                     )
 
+                # TODO: replace with scene_creation_funnel.move_entities_to_pos()
                 # Set positions of all objects in this environment
                 for name, entity in self.gs_entities.items():
                     if name.endswith(

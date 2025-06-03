@@ -17,7 +17,7 @@ def main():
 
     # Environment configuration
     env_cfg = {
-        "num_actions": 8,  # [x, y, z, quat_w, quat_x, quat_y, quat_z, gripper]
+        "num_actions": 9,  # [x, y, z, quat_w, quat_x, quat_y, quat_z, gripper_force_left, gripper_force_right]
         "joint_names": [
             "joint1",
             "joint2",
@@ -36,7 +36,7 @@ def main():
             "joint4": -2.0,
             "joint5": 0.0,
             "joint6": 2.0,
-            "joint7": 0.79,
+            "joint7": 0.79,  # no "hand" here? there definitely was hand.
             "finger_joint1": 0.04,
             "finger_joint2": 0.04,
         },
@@ -44,11 +44,13 @@ def main():
 
     obs_cfg = {
         "num_obs": 3,  # RGB, depth, segmentation
+        "res": (640, 480),
     }
 
     reward_cfg = {
         "success_reward": 10.0,
         "progress_reward_scale": 1.0,
+        "progressive": True,  # TODO : if progressive, use progressive reward calc instead.
     }
 
     command_cfg = {}
@@ -77,7 +79,7 @@ def main():
 
     # Generate a sample action
     print("Generating sample action...")
-    action = torch.zeros((2, 8), device=gs.device)  # [batch_size, action_dim]
+    action = torch.zeros((2, 9), device=gs.device)  # [batch_size, action_dim]
 
     # Position at center of workspace, slightly elevated
     action[:, 0:3] = torch.tensor([0.0, 0.0, 0.3], device=gs.device)
@@ -86,7 +88,7 @@ def main():
     action[:, 3:7] = torch.tensor([1.0, 0.0, 0.0, 0.0], device=gs.device)
 
     # Open gripper
-    action[:, 7] = 1.0
+    action[:, 7:8] = 1.0  # N of force.
 
     # Execute a few steps
     print("Executing steps...")
