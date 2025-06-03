@@ -18,7 +18,10 @@ from repairs_components.training_utils.motion_planning import (
 from build123d import Compound
 from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.processing.voxel_export import export_voxel_grid
-from repairs_components.processing.scene_creation_funnel import create_random_scenes
+from repairs_components.processing.scene_creation_funnel import (
+    create_random_scenes,
+    generate_scene_meshes,
+)
 from repairs_components.processing.tasks import Task, AssembleTask
 
 
@@ -76,6 +79,9 @@ class RepairsEnv(gym.Env):
             sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
             show_viewer=False,
         )
+
+        # if scene meshes don't exist yet, create them now.
+        generate_scene_meshes()
 
         # Create random scenes using the scene creation funnel
         (
@@ -187,16 +193,24 @@ class RepairsEnv(gym.Env):
             rgb, depth, _segmentation, normal = camera.render(
                 rgb=True, depth=True, segmentation=False, normal=True
             )
+            # print(rgb.shape)
+            # note: for whichever reason, in batch dim of 1, the cameras don't return batch shape. So I'd expand.
+            rgb = np.expand_dims(rgb, (0))
+            depth = np.expand_dims(depth, (0))[:, :, :, None]
+            normal = np.expand_dims(normal, (0))
+            assert all(lambda a: a.ndim == 4 for a in (rgb, depth, normal)), (
+                "Too many dims found."
+            )
 
             # Combine all camera observations
             camera_obs = torch.tensor(
-                np.concatenate([rgb, depth[:, :, None], normal], axis=-1),
+                np.concatenate([rgb, depth, normal], axis=-1),
                 device=self.device,
             )  # Combine along channel dimension
             obs.append(camera_obs)
 
         # Stack all camera observations
-        obs = torch.stack(
+        video_obs = torch.stack(
             obs, dim=1
         )  # Shape: [num_envs, num_cameras, height, width, channels]
 
@@ -210,7 +224,7 @@ class RepairsEnv(gym.Env):
         # Additional info for debugging
         info = {"diff": diff, "total_diff_left": total_diff_left, "success": success}
 
-        return obs, reward, done, info
+        return video_obs, reward, done, info
 
     def reset_idx(self, envs_idx):
         """Reset specific environments to their initial state.
@@ -273,7 +287,7 @@ class RepairsEnv(gym.Env):
             # Update visual states to show the new positions
             self.scene.visualizer.update_visual_states()
 
-    def reset(self):
+    def reset(self) -> tuple[torch.Tensor, dict]:
         """Reset all environments to initial state.
 
         Returns:
@@ -290,21 +304,35 @@ class RepairsEnv(gym.Env):
             rgb, depth, _segmentation, normal = camera.render(
                 rgb=True, depth=True, normal=True
             )
+            print("rgb shape", str(rgb.shape))
+            print("depth shape", str(depth.shape))
+
+            # note: for whichever reason, in batch dim of 1, the cameras don't return batch shape. So I'd expand.
+            rgb = np.expand_dims(rgb, (0))
+            depth = np.expand_dims(depth, (0))[:, :, :, None]
+            normal = np.expand_dims(normal, (0))
+            assert all(lambda a: a.ndim == 4 for a in (rgb, depth, normal)), (
+                "Too many dims found."
+            )
+
             camera_obs = obs_to_int8(rgb, depth, normal)  # type: ignore
 
             obs.append(camera_obs)
 
         # Stack all camera observations
         obs = torch.stack(obs, dim=1)
+        # why no batch dim?
 
         info = {"initial_diff_count": self.initial_diff_count}
         return obs, info
 
-def obs_to_int8(rgb: torch.Tensor, depth: torch.Tensor, normal: torch.Tensor):
+def obs_to_int8(rgb: np.ndarray, depth: np.ndarray, normal: np.ndarray):
     # Normalize and convert to uint8
-    rgb_uint8 = (rgb * 255).to(torch.uint8)
+    rgb_uint8 = (rgb * 255).astype(np.uint8)
     depth_normalized = (depth - depth.min()) / (depth.max() - depth.min() + 1e-6)
-    depth_uint8 = (depth_normalized * 255).to(torch.uint8)
+    depth_uint8 = (depth_normalized * 255).astype(np.uint8)
     normal_normalized = (normal * 0.5 + 0.5) * 255
-    normal_uint8 = normal_normalized.to(torch.uint8)
-    return torch.stack([rgb_uint8, depth_uint8, normal_uint8], dim=-1)
+    normal_uint8 = normal_normalized.astype(np.uint8)
+    return torch.from_numpy(
+        np.concatenate([rgb_uint8, depth_uint8, normal_uint8], axis=-1)
+    ).cuda()  # why would I convert it to torch here anyway? well, anyway.

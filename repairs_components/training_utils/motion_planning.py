@@ -60,7 +60,7 @@ def execute_straight_line_trajectory(
         franka.control_dofs_force(gripper_force, dofs_idx_local=[7, 8])
         scene.step()
         if camera is not None:
-            camera.render()
+            camera.render()  # todo: remove, from physics-only steps at least.
 
     # let dry-run for 80 steps.
     for _ in range(100):

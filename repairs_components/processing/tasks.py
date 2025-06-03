@@ -29,8 +29,9 @@ class Task(ABC):
         )
 
         # Ensure the part fits in the environment
-        if np.any(max_xy < min_xy):
-            raise ValueError("Compound is too large for the environment.")
+        assert not np.any(max_xy < min_xy), ValueError(
+            "Compound is too large for the environment."
+        )
 
         # Generate random position within the valid range
         target_xy = np.random.uniform(min_xy, max_xy)
@@ -43,10 +44,10 @@ class Task(ABC):
             target_xy[1] - aabb_min[1],  # Move to target Y
             -aabb_min[2]                 # Move up to make Z-min = 0
         ])
-        
-        print(f"Original bbox: min={aabb_min}, max={aabb_max}")
-        print(f"Target position: {target_xy}")
-        print(f"Moving by offset: {offset}")
+
+        # print(f"Original bbox: min={aabb_min}, max={aabb_max}")
+        # print(f"Target position: {target_xy}")
+        # print(f"Moving by offset: {offset}")
         
         # Move the entire compound as a single unit
         result = compound.moved(Location(offset))

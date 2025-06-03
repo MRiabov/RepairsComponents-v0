@@ -10,7 +10,9 @@ from examples.box_to_pos_task import MoveBoxSetup
 
 def main():
     # Create an empty Genesis scene
-    scene = gs.Scene(show_viewer=False)
+    scene = gs.Scene(
+        show_viewer=False, vis_options=gs.options.VisOptions(world_frame_size=2)
+    )
 
     # Create an instance of AssembleTask
     task = AssembleTask()

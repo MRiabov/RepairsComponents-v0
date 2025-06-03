@@ -97,6 +97,7 @@ def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
 
     # # on the top of the stand plate
     plate_env_export = scale(plate_env.part, 0.01)  # convert to mm.
+
     export_gltf(
         plate_env_export,
         "/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
@@ -121,6 +122,7 @@ def genesis_setup(scene: gs.Scene):
             scale=1,  # Use 1.0 scale since we're working in cm
             pos=(0, 0, 0.1),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
+            fixed=True,
         ),
         surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 1)),  # Add color material
     )
@@ -143,7 +145,7 @@ def genesis_setup(scene: gs.Scene):
             0.64 / 2 + STAND_PLATE_DEPTH / 100,
             0.3,
         ),  # Look at the center of the working pos
-        res=(1024, 1024),
+        res=(256, 256),  # (1024,1024) for debug
     )
 
     camera_2 = scene.add_camera(
@@ -153,7 +155,7 @@ def genesis_setup(scene: gs.Scene):
             0.64 / 2 + STAND_PLATE_DEPTH / 100,
             0.3,
         ),  # Look at the center of the working pos
-        res=(1024, 1024),
+        res=(256, 256),  # (1024,1024) for debug
     )
     entities = {
         "plane": plane,

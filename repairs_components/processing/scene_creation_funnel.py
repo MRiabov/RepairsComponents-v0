@@ -5,6 +5,7 @@ Order:
 2. starting_state_geom
 """
 
+import pathlib
 from genesis.engine.entities import RigidEntity
 from repairs_components.geometry.base_env import tooling_stand_plate
 from repairs_components.processing.voxel_export import export_voxel_grid
@@ -157,7 +158,7 @@ def add_base_scene_geometry(scene: gs.Scene):
     # NOTE: the tooling stand is repositioned to 0,0,-0.1 to position all parts on the very center of scene.
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(
-            file="geom_exports/tooling_stands/tool_stand_plate.gltf",
+            file="./geom_exports/tooling_stands/tool_stand_plate.gltf",
             scale=1,  # Use 1.0 scale since we're working in cm
             pos=(0, -(0.64 / 2 + 0.2), -0.2),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
@@ -186,7 +187,7 @@ def add_base_scene_geometry(scene: gs.Scene):
         #     0.64 / 2 + tooling_stand_plate.STAND_PLATE_DEPTH / 100,
         #     0.3,
         # ),  # Look at the center of the working pos
-        res=(1024, 1024),
+        res=(256, 256),  # (1024, 1024),
     )
 
     camera_2 = scene.add_camera(
@@ -196,7 +197,7 @@ def add_base_scene_geometry(scene: gs.Scene):
             0,
             0.2,
         ),  # Look at the center of the working pos
-        res=(1024, 1024),
+        res=(256, 256),  # (1024, 1024),
     )
     plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
     return scene, [camera_1, camera_2], franka
@@ -228,3 +229,8 @@ def normalize_to_center(compound: Compound) -> Compound:
     bbox = compound.bounding_box()
     center = bbox.center()
     return compound.move(Pos(-center.x, -center.y, -center.z / 2))
+
+def generate_scene_meshes():
+    "A function to generate all  meshes for all the scenes."
+    if not pathlib.Path("/geom_exports/tooling_stands/tool_stand_plate.gltf").exists():
+        tooling_stand_plate.plate_env_bd_geometry()
