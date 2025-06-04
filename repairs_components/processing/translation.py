@@ -150,7 +150,8 @@ def translate_genesis_to_python(  # translate to sim state, really.
                 continue
 
             case name if (
-                name == sim_state.tool_state.current_tool.picked_up_fastener_name
+                isinstance(sim_state.tool_state.current_tool, Screwdriver)
+                and name == sim_state.tool_state.current_tool.picked_up_fastener_name
             ):
                 link = next(
                     link
@@ -159,9 +160,12 @@ def translate_genesis_to_python(  # translate to sim state, really.
                 )
                 fastener_tip_pos = link.get_pos()
 
-            case _:
-                # No match found, continue to next iteration
+            case name if name.endswith("@control"):  # ignore some here
                 continue
+            case _:
+                raise NotImplementedError(
+                    f"Entity {entity_name} not implemented for translation."
+                )
 
     return (
         sim_state,

@@ -104,7 +104,7 @@ def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
         unit=Unit.M,
     )
     # ocp_vscode.show(plate_env.part)
-    print("exported gltf")
+    # print("exported gltf")
     return plate_env.part
 
 

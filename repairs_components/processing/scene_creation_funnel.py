@@ -157,8 +157,8 @@ def add_base_env_to_geom(
 def add_base_scene_geometry(scene: gs.Scene):
     # NOTE: the tooling stand is repositioned to 0,0,-0.1 to position all parts on the very center of scene.
     tooling_stand: RigidEntity = scene.add_entity(
-        gs.morphs.Mesh(
-            file="./geom_exports/tooling_stands/tool_stand_plate.gltf",
+        gs.morphs.Mesh(  # note: filepath necessary because debug switches it to other repo when running from Repairs-v0.
+            file="/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
             scale=1,  # Use 1.0 scale since we're working in cm
             pos=(0, -(0.64 / 2 + 0.2), -0.2),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis

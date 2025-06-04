@@ -11,6 +11,9 @@ diff(): combines both into {'fasteners', 'bodies'} with total change count
 """
 
 from dataclasses import dataclass, field
+
+import scipy
+import torch
 from repairs_components.geometry.fasteners import Fastener
 import math
 
@@ -139,7 +142,11 @@ class PhysicalState:
             changes: dict[str, tuple] = {}
             # position diff
             if other_pos is not None:  # math.dist - distance.
-                if math.dist(pos, other_pos) > pos_threshold:
+                print("pos", pos, "other_pos", other_pos, pos_threshold)
+
+                if torch.dist(
+                    pos, torch.tensor(other_pos, device=pos.device)
+                ) > torch.tensor(pos_threshold, device=pos.device):
                     changes["position"] = (pos, other_pos)
                     total_changes += 1
             # rotation diff

@@ -165,8 +165,8 @@ class RepairsEnv(gym.Env):
         # Extract position and orientation from action
         pos = action[:, :3]  # Position: [x, y, z]
         quat = action[:, 3:7]  # Quaternion: [w, x, y, z]
-        gripper_force = action[:, 7:8]  # gripper positions (open/closed.)
-
+        gripper_force = action[:, 7:9]  # two gripper forces (grip push in/out)
+        # print("gripper_force.shape", gripper_force.shape)
         # Execute the motion planning trajectory using our dedicated module
         execute_straight_line_trajectory(
             franka=self.franka,
@@ -325,6 +325,7 @@ class RepairsEnv(gym.Env):
 
         info = {"initial_diff_count": self.initial_diff_count}
         return obs, info
+
 
 def obs_to_int8(rgb: np.ndarray, depth: np.ndarray, normal: np.ndarray):
     # Normalize and convert to uint8

@@ -51,10 +51,10 @@ class Task(ABC):
         
         # Move the entire compound as a single unit
         result = compound.moved(Location(offset))
-        
-        # Debug: Check the resulting position
-        result_bbox = result.bounding_box()
-        print(f"Resulting bbox: min={result_bbox.min}, max={result_bbox.max}")
+
+        # # Debug: Check the resulting position
+        # result_bbox = result.bounding_box()
+        # print(f"Resulting bbox: min={result_bbox.min}, max={result_bbox.max}")
 
         # Verify the result meets our requirements
         result_bbox = result.bounding_box()
