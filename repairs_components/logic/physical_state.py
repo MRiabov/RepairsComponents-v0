@@ -114,7 +114,7 @@ def _diff_node_features(data_a, data_b, pos_threshold=3.0, deg_threshold=5.0):
     }, pos_mask.sum().item() + rot_mask.sum().item()
 
 
-def _diff_edge_features(data_a, data_b):
+def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
     # Stack edge pairs for easy comparison
     def to_sorted_tuple_tensor(edge_index):
         sorted_idx = edge_index.sort(dim=0)[0]
@@ -126,7 +126,7 @@ def _diff_edge_features(data_a, data_b):
     a_set = set(map(tuple, edges_a.tolist()))
     b_set = set(map(tuple, edges_b.tolist()))
 
-    added = list(b_set - a_set)
+    added = list(b_set - a_set)  # well, this is sloppy, but let it be.
     removed = list(a_set - b_set)
 
     return {
