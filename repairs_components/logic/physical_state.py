@@ -12,161 +12,143 @@ diff(): combines both into {'fasteners', 'bodies'} with total change count
 
 from dataclasses import dataclass, field
 
-import scipy
 import torch
 from repairs_components.geometry.fasteners import Fastener
 import math
 
 
+from dataclasses import dataclass, field
+import torch
+from torch_geometric.data import Data, Batch
+
+
 @dataclass
 class PhysicalState:
-    fasteners: list[Fastener] = field(default_factory=list)
-    connected_parts: dict[str, tuple[str, str] | str | None] = field(
-        default_factory=dict
+    device: torch.device = field(
+        default_factory=lambda: torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
     )
-    joint_names: dict[str, tuple[str, str]] = field(default_factory=dict)
-    """Two joint names of fasteners."""
 
-    positions: dict[str, tuple[float, float, float]] = field(default_factory=dict)
-    "Absolute positions of bodies"
-    rotations: dict[str, tuple[float, float, float, float]] = field(
-        default_factory=dict
-    )
-    "Absolute rotations of bodies"
-    used_tool: str = "gripper"
+    # Graph storing part nodes and fastener edges
+    graph: Data = field(default_factory=Data)
+    indices: dict[str, int] = field(default_factory=dict)
 
-    def register_fastener(self, fastener: Fastener):
-        self.fasteners.append(fastener)
-        self.connected_parts.update(
-            {fastener.name: (fastener.initial_body_a, fastener.initial_body_b)}
+    # Fastener metadata (shared across batch)
+    fastener_prototype: dict[str, torch.Tensor] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.graph.x = torch.empty(
+            (0, 7), dtype=torch.float32, device=self.device
+        )  # pos(3) + quat(4)
+        self.graph.edge_index = torch.empty(
+            (2, 0), dtype=torch.long, device=self.device
+        )
+        self.graph.edge_attr = torch.empty(
+            (0, 12), dtype=torch.float32, device=self.device
+        )  # placeholder size
+
+    def register_body(self, name: str, position: torch.Tensor, rotation: torch.Tensor):
+        assert name not in self.indices, f"Body {name} already registered"
+        assert position.shape == (3,) and rotation.shape == (4,)
+
+        idx = len(self.indices)
+        self.indices[name] = idx
+
+        node_feature = torch.cat([position, rotation]).unsqueeze(0).to(self.device)
+        self.graph.x = torch.cat([self.graph.x, node_feature], dim=0)
+
+    def register_fastener(self, name: str, attr: dict[str, torch.Tensor]):
+        self.fastener_prototype[name] = {k: v.to(self.device) for k, v in attr.items()}
+
+    def connect(self, fastener_name: str, body_a: str, body_b: str):
+        src, dst = self.indices[body_a], self.indices[body_b]
+
+        # Undirected: add both directions
+        new_edges = torch.tensor(
+            [[src, dst], [dst, src]], dtype=torch.long, device=self.device
         )
 
-    def register_body(
-        self,
-        name: str,
-        position: tuple[float, float, float],
-        rotation: tuple[float, float, float, float],
-    ):
-        """Register a rigid body with position and rotation."""
-        assert name not in self.positions, f"Body {name} already registered"
-        assert position[2] >= 0, (
-            f"Body {name} is below the base plate. Position: {position}"
-        )
-        self.positions[name] = position
-        self.rotations[name] = rotation
+        # Construct edge features from prototype fastener
+        base_attr = self.fastener_prototype[fastener_name]
+        attr_vec = torch.cat([v.view(-1) for v in base_attr.values()])
+        edge_attr = attr_vec.repeat(2, 1).to(self.device)
 
-    def connect(self, fastener_name: str, body_a: str, body_b: str | None = None):
-        current_fastener_state = self.connected_parts[fastener_name]
-        # Check if the current state is not a tuple (i.e., it's either None or a string)
-        assert current_fastener_state is None or isinstance(
-            current_fastener_state, str
-        ), "Cannot connect - fastener is already connected to two bodies"
-        self.connected_parts[fastener_name] = (
-            (body_a, body_b) if body_b is not None else body_a
-        )
+        self.graph.edge_index = torch.cat([self.graph.edge_index, new_edges], dim=1)
+        self.graph.edge_attr = torch.cat([self.graph.edge_attr, edge_attr], dim=0)
 
     def disconnect(self, fastener_name: str, disconnected_body: str):
-        current_fastener_state = self.connected_parts[fastener_name]
-        # Check if the current state is a tuple (connected to two bodies)
-        assert isinstance(current_fastener_state, tuple), (
-            "Cannot disconnect - fastener is not connected to two bodies"
-        )
+        fastener_id = self.indices[fastener_name]
+        body_id = self.indices[disconnected_body]
 
-        body_a, body_b = current_fastener_state
-        if body_a == disconnected_body:
-            self.connected_parts[fastener_name] = body_b
-        elif body_b == disconnected_body:
-            self.connected_parts[fastener_name] = body_a
-        else:
-            raise ValueError(
-                f"Body {disconnected_body} is not connected to fastener {fastener_name}"
-            )
+        # Find edge indices to remove (brute-force based on node match only)
+        edge_index = self.graph.edge_index
+        src_mask = edge_index[0] == body_id
+        dst_mask = edge_index[1] == body_id
+        match_mask = src_mask | dst_mask
 
-    def _fastener_diff(
-        self, other: "PhysicalState"
-    ) -> tuple[dict[str, dict[str, list[str]]], int]:
-        """Compute per-fastener connection differences.
+        keep_mask = ~match_mask
+        self.graph.edge_index = edge_index[:, keep_mask]
+        self.graph.edge_attr = self.graph.edge_attr[keep_mask]
 
-        Returns:
-            Tuple of:
-            - conn_diff: mapping fastener name -> {'added', 'removed'} lists
-            - total_changes: count of all connection changes
-        """
-        conn_diff: dict[str, dict[str, list[str]]] = {}
-        total_changes = 0
-        for name, state in self.connected_parts.items():
-            other_state = other.connected_parts.get(name)
-            if state is None:
-                self_set = set()
-            elif isinstance(state, str):
-                self_set = {state}
-            else:
-                self_set = set(state)
-            if other_state is None:
-                other_set = set()
-            elif isinstance(other_state, str):
-                other_set = {other_state}
-            else:
-                other_set = set(other_state)
-            added = list(other_set - self_set)
-            removed = list(self_set - other_set)
-            if added or removed:
-                conn_diff[name] = {"added": added, "removed": removed}
-                total_changes += len(added) + len(removed)
-        return conn_diff, total_changes
 
-    def _body_diff(
-        self,
-        other: "PhysicalState",
-        deg_threshold: float = 5.0,
-        pos_threshold: float = 3.0,
-    ) -> tuple[dict[str, dict[str, tuple]], int]:
-        """Compute differences in rigid body positions and rotations.
+def _quaternion_angle_diff(q1, q2):
+    # q1, q2: [N, 4]
+    dot = torch.sum(q1 * q2, dim=1).clamp(-1.0, 1.0).abs()
+    return 2 * torch.acos(dot).rad2deg()
 
-        Ignores position changes below pos_threshold units and rotation changes below deg_threshold degrees.
 
-        Args:
-            other (PhysicalState): state to compare against.
-            deg_threshold (float): angle threshold in degrees.
-            pos_threshold (float): positional threshold.
+def _diff_node_features(data_a, data_b, pos_threshold=3.0, deg_threshold=5.0):
+    pos_diff = torch.norm(data_a.pos - data_b.pos, dim=1)
+    rot_diff = _quaternion_angle_diff(data_a.quat, data_b.quat)
 
-        Returns:
-            Tuple of (body_diff, total_changes).
-            body_diff[name] = {'position': (pos, other_pos), 'rotation': (rot, other_rot)}
-        """
-        body_diff: dict[str, dict[str, tuple]] = {}
-        total_changes = 0
-        for name, pos in self.positions.items():
-            other_pos = other.positions.get(name)
-            other_rot = other.rotations.get(name)
-            changes: dict[str, tuple] = {}
-            # position diff
-            if other_pos is not None:  # math.dist - distance.
-                print("pos", pos, "other_pos", other_pos, pos_threshold)
+    pos_mask = pos_diff > pos_threshold
+    rot_mask = rot_diff > deg_threshold
 
-                if torch.dist(
-                    pos, torch.tensor(other_pos, device=pos.device)
-                ) > torch.tensor(pos_threshold, device=pos.device):
-                    changes["position"] = (pos, other_pos)
-                    total_changes += 1
-            # rotation diff
-            rot = self.rotations.get(name)
-            if rot is not None and other_rot is not None:
-                # quaternion angle diff
-                dot = abs(sum(a * b for a, b in zip(rot, other_rot)))
-                angle = 2 * math.degrees(math.acos(min(1.0, max(-1.0, dot))))
-                if angle > deg_threshold:
-                    changes["rotation"] = (rot, other_rot)
-                    total_changes += 1
-            if changes:
-                body_diff[name] = changes
-        return body_diff, total_changes
+    # Collect indices where there are differences
+    changes = torch.nonzero(pos_mask | rot_mask, as_tuple=False).squeeze()
+    return {
+        "changed_indices": changes,
+        "pos_diff": pos_diff[pos_mask],
+        "rot_diff": rot_diff[rot_mask],
+    }, pos_mask.sum().item() + rot_mask.sum().item()
 
-    def diff(self, other: "PhysicalState") -> tuple[dict[str, dict], int]:
-        """Compute combined fastener and rigid body differences and total changes."""
-        fast_diff, fast_changes = self._fastener_diff(other)
-        body_diff, body_changes = self._body_diff(other)
-        return {
-            "fasteners": fast_diff,
-            "bodies": body_diff,
-        }, fast_changes + body_changes
+
+def _diff_edge_features(data_a, data_b):
+    # Stack edge pairs for easy comparison
+    def to_sorted_tuple_tensor(edge_index):
+        sorted_idx = edge_index.sort(dim=0)[0]
+        return sorted_idx.t()
+
+    edges_a = to_sorted_tuple_tensor(data_a.edge_index)
+    edges_b = to_sorted_tuple_tensor(data_b.edge_index)
+
+    a_set = set(map(tuple, edges_a.tolist()))
+    b_set = set(map(tuple, edges_b.tolist()))
+
+    added = list(b_set - a_set)
+    removed = list(a_set - b_set)
+
+    return {
+        "added": added,
+        "removed": removed,
+    }, len(added) + len(removed)
+
+
+def graph_diff(data_a, data_b) -> tuple[dict, int]:
+    edge_diff, edge_features_diff_count = _diff_edge_features(data_a, data_b)
+    node_diff, node_features_diff_count = _diff_node_features(data_a, data_b)
+
+    return {
+        "nodes": node_diff,
+        "edges": edge_diff,
+    }, edge_features_diff_count + node_features_diff_count
+
+def batch_graph_diff(batch_a: Batch, batch_b: Batch):
+    assert batch_a.batch_size == batch_b.batch_size
+    results = torch.zeros(batch_a.batch_size)
+    for i in range(batch_a.num_graphs):
+        data_a = batch_a.get_example(i)
+        data_b = batch_b.get_example(i)
+        results[i] = graph_diff(data_a, data_b)[1]
+    return results

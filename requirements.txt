@@ -1,6 +1,7 @@
 numpy==1.26.4
 genesis-world
 torch
+torch_geometric
 build123d==0.9.1
 ocp_vscode
 vtk
