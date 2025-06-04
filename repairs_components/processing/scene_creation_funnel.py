@@ -25,11 +25,12 @@ import torch
 import genesis as gs
 from repairs_components.training_utils.sim_state_global import merge_global_states
 
+
 def create_random_scenes(
     empty_scene: gs.Scene,
     env_setup: EnvSetup,  # note: there must be one gs scene per EnvSetup. So this could be done in for loop.
     tasks: list[Task],
-    batch_dim: int,  # this is the batch dim in ML and genesis
+    create_num_scenes: int,
     num_scenes_per_task: int = 128,  # this is how many states to create.
 ):
     """`create_random_scenes` is a general, high_level function responsible for processing of the entire
@@ -40,14 +41,13 @@ def create_random_scenes(
     assert (len(tasks) * num_scenes_per_task) % batch_dim == 0, (
         "In order to support easy batching, num of scenes per task * task must be divisible by batch_dim."
     )
+    assert batch_dim <= (len(tasks) * num_scenes_per_task), (
+        "batch_dim must be less than or equal to the number of training batches."
+    )
     training_batches_created = (len(tasks) * num_scenes_per_task) // batch_dim
 
-    voxel_grids_initial = torch.zeros(
-        (len(tasks) * num_scenes_per_task, 256, 256, 256), dtype=torch.uint8
-    )
-    voxel_grids_desired = torch.zeros(
-        (len(tasks) * num_scenes_per_task, 256, 256, 256), dtype=torch.uint8
-    )
+    voxel_grids_initial = torch.zeros((batch_dim, 256, 256, 256), dtype=torch.uint8)
+    voxel_grids_desired = torch.zeros((batch_dim, 256, 256, 256), dtype=torch.uint8)
     starting_sim_states = []
     desired_sim_states = []
 
@@ -85,6 +85,9 @@ def create_random_scenes(
             starting_sim_states.append(starting_sim_state)
             desired_sim_states.append(desired_sim_state)
 
+            # Store the initial difference count for reward calculation
+            diff, initial_diff_count = starting_sim_state.diff(desired_sim_state)
+
     # pack them into an easily loadable list.
     for i in range(training_batches_created):
         start_idx = i * batch_dim
@@ -96,18 +99,6 @@ def create_random_scenes(
             desired_sim_states[start_idx:end_idx]
         )
         training_batches.append((batch_starting_sim_state, batch_desired_sim_state))
-
-    # for starting scene, move it to an appropriate position #no, not here...
-    # create a FIRST genesis scene for starting state from desired state; it is to be discarded, however.
-    first_desired_scene, initial_gs_entities = translate_to_genesis_scene(
-        empty_scene, desired_state_geom_, desired_sim_state
-    )
-
-    # initiate cameras and others in genesis scene:
-    first_desired_scene, cameras, franka = add_base_scene_geometry(first_desired_scene)
-
-    # build a single scene... but batched
-    first_desired_scene.build(n_envs=batch_dim)
 
     # move all entities to initial positions.
     move_entities_to_pos(
@@ -167,15 +158,21 @@ def desired_state_geom(
     return task.perturb_desired_state(env_setup.desired_state_geom(), env_size=env_size)
 
 
-def add_base_env_to_geom(
-    base_env: Compound, desired_geom: Compound, move_by: tuple[float, float, float]
-) -> Compound:
-    """
-    Add the base environment to the desired geometry.
-    """
-    # move to the center of the environment (or wherever the environment expects)
-    base_env = base_env.move(Pos(*move_by))
-    return Compound(children=[base_env, desired_geom])
+def initialize_and_build_scene(
+    scene: gs.Scene, desired_state_geom: Compound, desired_sim_state: RepairsSimState, batch_dim:int
+):
+    # for starting scene, move it to an appropriate position #no, not here...
+    # create a FIRST genesis scene for starting state from desired state; it is to be discarded, however.
+    first_desired_scene, initial_gs_entities = translate_to_genesis_scene(
+        scene, desired_state_geom, desired_sim_state
+    )
+
+    # initiate cameras and others in genesis scene:
+    first_desired_scene, cameras, franka = add_base_scene_geometry(first_desired_scene)
+
+    # build a single scene... but batched
+    first_desired_scene.build(n_envs=batch_dim)
+    return first_desired_scene, cameras, franka
 
 
 def add_base_scene_geometry(scene: gs.Scene):
@@ -226,6 +223,7 @@ def add_base_scene_geometry(scene: gs.Scene):
     plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
     return scene, [camera_1, camera_2], franka
 
+
 def move_entities_to_pos(
     gs_entities: dict[str, RigidEntity],
     starting_sim_state: RepairsSimState,
@@ -254,6 +252,7 @@ def normalize_to_center(compound: Compound) -> Compound:
     bbox = compound.bounding_box()
     center = bbox.center()
     return compound.move(Pos(-center.x, -center.y, -center.z / 2))
+
 
 def generate_scene_meshes():
     "A function to generate all  meshes for all the scenes."

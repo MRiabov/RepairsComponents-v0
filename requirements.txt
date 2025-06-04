@@ -13,3 +13,5 @@ pyrender
 #constrained as of 2025-06-01
 
 #also `sudo apt install libgl1-mesa-dev`
+
+#note: for faster install, consider using uv, it's in rust (and from ruff devs)

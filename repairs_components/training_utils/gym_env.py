@@ -6,6 +6,7 @@ from genesis.engine.entities import RigidEntity
 import numpy as np
 from typing import List, Any
 
+from repairs_components.training_utils.env_dataloader import RepairsEnvDataset
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_sim_step import step_repairs
 from repairs_components.training_utils.final_reward_calc import (
@@ -83,43 +84,25 @@ class RepairsEnv(gym.Env):
         # if scene meshes don't exist yet, create them now.
         generate_scene_meshes()
 
-        # Create random scenes using the scene creation funnel
-        (
-            self.desired_scene,
-            self.cameras,
-            self.gs_entities,
-            self.starting_sim_states,
-            self.desired_sim_states,
-            self.voxel_grids_initial,
-            self.voxel_grids_desired,
-        ) = create_random_scenes(
-            self.scene,
-            env_setup,
-            tasks,
-            num_scenes_per_task=num_scenes_per_task,
+        self.env_dataloader = RepairsEnvDataset(
+            scenes=[self.scene],
+            env_setups=[self.env_setup],
+            tasks=self.tasks,
             batch_dim=self.batch_dim,
-        )  # NOTE: create random scenes must have one scene per one env setup. This is for batching. But they will be alternated.
+            num_scenes_per_task=self.num_scenes_per_task,
+        )
         # TODO: add mechanism that would recreate random scenes whenever the scene was called too many times.
         # for now just work in one env setup.
         self.called_times_this_batch = 0
 
-        # Store the initial difference count for reward calculation
-        self.current_sim_state = self.starting_sim_states[
-            0
-        ]  # Initialize with the first state
-        self.desired_state = self.desired_sim_states[
-            0
-        ]  # Initialize with the first desired state
-        self.diff, self.initial_diff_count = self.current_sim_state.diff(
-            self.desired_state
-        )
+       
 
-        # Map for entity names to their gs.Entity objects
-        self.entity_name_map = {
-            name: entity for name, entity in self.gs_entities.items()
-        }
+        # # Map for entity names to their gs.Entity objects
+        # self.entity_name_map = {
+        #     name: entity for name, entity in self.gs_entities.items()
+        # }
 
-        self.franka = self.entity_name_map["franka@control"]
+        self.franka: RigidEntity = self.gs_entities["franka@control"]
         # ===== Robot Configuration =====
         # Setup joint names and their corresponding DOF indices
         self.joint_names = env_cfg["joint_names"]
@@ -132,7 +115,6 @@ class RepairsEnv(gym.Env):
             [env_cfg["default_joint_angles"][name] for name in self.joint_names],
             device=self.device,
         )
-        self.data
 
         # ===== Control Parameters =====
         # Set PD control gains (tuned for Franka Emika Panda)
