@@ -6,6 +6,7 @@ from genesis.engine.entities import RigidEntity
 import numpy as np
 from typing import List, Any
 
+from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_sim_step import step_repairs
 from repairs_components.training_utils.final_reward_calc import (
     calculate_reward_and_done,
@@ -34,9 +35,8 @@ class RepairsEnv(gym.Env):
         self,
         env_setup: EnvSetup,
         tasks: List[Task],
-        num_envs: int,
-        # FIXME: this isn't a settable parameter. it is len(tasks)*num_scenes_per_task
-        # or actually, it could be( should be). number of parallel environments to simulate
+        batch_dim: int,
+        # Batch dim number of parallel environments to simulate
         # and the num_scenes per task is the feed-in repetitions of training pipeline.
         env_cfg: dict,
         obs_cfg: dict,
@@ -59,7 +59,6 @@ class RepairsEnv(gym.Env):
             num_scenes_per_task: Number of random scenes to generate per task
         """
         # Store basic environment parameters
-        self.num_envs = num_envs
         self.num_actions = env_cfg["num_actions"]
         self.num_obs = obs_cfg["num_obs"]
         self.device = gs.device
@@ -72,6 +71,7 @@ class RepairsEnv(gym.Env):
         self.env_cfg = env_cfg
         self.obs_cfg = obs_cfg
         self.reward_cfg = reward_cfg
+        self.batch_dim = batch_dim
 
         # ===== Scene Setup =====
         # Create simulation scene with specified timestep and substeps
@@ -93,9 +93,14 @@ class RepairsEnv(gym.Env):
             self.voxel_grids_initial,
             self.voxel_grids_desired,
         ) = create_random_scenes(
-            self.scene, env_setup, tasks, num_scenes_per_task=num_scenes_per_task
-        )
+            self.scene,
+            env_setup,
+            tasks,
+            num_scenes_per_task=num_scenes_per_task,
+            batch_dim=self.batch_dim,
+        )  # NOTE: create random scenes must have one scene per one env setup. This is for batching. But they will be alternated.
         # TODO: add mechanism that would recreate random scenes whenever the scene was called too many times.
+        # for now just work in one env setup.
         self.called_times_this_batch = 0
 
         # Store the initial difference count for reward calculation
@@ -127,6 +132,7 @@ class RepairsEnv(gym.Env):
             [env_cfg["default_joint_angles"][name] for name in self.joint_names],
             device=self.device,
         )
+        self.data
 
         # ===== Control Parameters =====
         # Set PD control gains (tuned for Franka Emika Panda)
@@ -226,7 +232,9 @@ class RepairsEnv(gym.Env):
 
         return video_obs, reward, done, info
 
-    def reset_idx(self, envs_idx):
+    def reset_idx(
+        self, training_batch: list[tuple[RepairsSimState, RepairsSimState]], envs_idx
+    ):
         """Reset specific environments to their initial state.
 
         Args:
@@ -295,7 +303,7 @@ class RepairsEnv(gym.Env):
             info: Additional information
         """
         # Reset all environments
-        idxs = torch.arange(self.num_envs - 1, device=self.device)
+        idxs = torch.arange(self.batch_dim - 1, device=self.device)
         self.reset_idx(idxs)
 
         # Get initial observations

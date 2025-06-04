@@ -10,6 +10,7 @@ import numpy as np
 from repairs_components.processing.voxel_export import PART_TYPE_COLORS
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.tools.screwdriver import Screwdriver
+from repairs_components.geometry.fasteners import Fastener
 
 
 def translate_to_genesis_scene(
@@ -17,7 +18,6 @@ def translate_to_genesis_scene(
 ):
     assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
 
-    hex_to_name: dict[str, str] = {}
     gs_entities: dict[str, RigidEntity] = {}
 
     # translate each child into genesis entities
@@ -77,10 +77,9 @@ def translate_to_genesis_scene(
                 f"Not implemented for translation part type: {part_type}"
             )
 
-        hex_to_name[new_entity.uid] = label
         gs_entities[label] = new_entity
 
-    return scene, hex_to_name, gs_entities
+    return scene, gs_entities
 
 
 def translate_genesis_to_python(  # translate to sim state, really.
@@ -104,76 +103,83 @@ def translate_genesis_to_python(  # translate to sim state, really.
     # all contacts specifically of electronics bodies.
     # whether fastener joints are on or off.
     # whether
+    for env_idx in range(scene.n_envs):
+        assert not isinstance(
+            sim_state.tool_state[env_idx].current_tool, Screwdriver
+        ) or (
+            sim_state.tool_state[env_idx].current_tool.picked_up_fastener is None
+            or sim_state.tool_state[
+                env_idx
+            ].current_tool.picked_up_fastener_name.endswith("@fastener")
+        ), "Passed name of a picked up fastener is not of that of a fastener."
 
-    assert not isinstance(sim_state.tool_state.current_tool, Screwdriver) or (
-        sim_state.tool_state.current_tool.picked_up_fastener is None
-        or sim_state.tool_state.current_tool.picked_up_fastener_name.endswith(
-            "@fastener"
+        entities = scene.entities
+        entity: RigidEntity  # type hint
+
+        fastener_hole_positions = {}
+        fastener_tip_pos = None
+
+        male_connector_positions = {}
+        female_connector_positions = {}
+
+        fluid_state_pos_checks: dict[str, bool] = {}
+
+        # NOTE for future: genesis is in meters, while build123d and physical state is in cm.
+        # xyz seems to be equal.
+
+        for entity_name, entity in gs_entities.items():
+            match entity_name:
+                case name if name.endswith("male@connector"):
+                    # NOTE: I had some issues with link.pos because it was not updated(!). So be careful and use get_link_pos in case of issues instead.
+                    male_connector_positions[name] = entity.get_links_pos(env_idx)[
+                        "connector_point"
+                    ]  # note: this does not work and I know, but maybe there's a better way to get index.
+                case name if name.endswith("female@connector"):
+                    # NOTE: I had some issues with link.pos because it was not updated(!). So be careful and use get_link_pos in case of issues instead.
+                    female_connector_positions[name] = entity.get_links_pos(env_idx)[
+                        "connector_point"
+                    ]
+
+                case name if name.endswith("@solid"):
+                    fastener_hole_positions[name] = get_fastener_hole_positions(entity)
+                    sim_state.physical_state[env_idx].register_body(
+                        name, entity.get_pos(env_idx), entity.get_ang(env_idx)
+                    )
+
+                case name if name.endswith("@liquid"):
+                    # TODO: check whether there is a particle in the fluid_state.positions[idx]
+                    # among particles = liquid.get_particles()
+                    # I'm quite positive there is a faster way, too.
+                    continue
+
+                case name if (
+                    isinstance(sim_state.tool_state[env_idx].current_tool, Screwdriver)
+                    and name
+                    == sim_state.tool_state[
+                        env_idx
+                    ].current_tool.picked_up_fastener_name
+                ):
+                    link = next(
+                        link
+                        for link in entity.links
+                        if link.name.endswith("_to_screwdriver")
+                    )
+                    fastener_tip_pos = link.get_pos()
+
+                case name if name.endswith("@control"):  # ignore some here
+                    continue
+                case _:
+                    raise NotImplementedError(
+                        f"Entity {entity_name} not implemented for translation."
+                    )
+
+        return (
+            sim_state,
+            fastener_tip_pos,
+            fastener_hole_positions,
+            male_connector_positions,
+            female_connector_positions,
         )
-    ), "Passed name of a picked up fastener is not of that of a fastener."
-
-    entities = scene.entities
-    entity: RigidEntity  # type hint
-
-    fastener_hole_positions = {}
-    fastener_tip_pos = None
-
-    male_connector_positions = {}
-    female_connector_positions = {}
-
-    fluid_state_pos_checks: dict[str, bool] = {}
-
-    # NOTE for future: genesis is in meters, while build123d and physical state is in cm.
-    # xyz seems to be equal.
-
-    for entity_name, entity in gs_entities.items():
-        match entity_name:
-            case name if name.endswith("male@connector"):
-                # NOTE: I had some issues with link.pos because it was not updated(!). So be careful and use get_link_pos in case of issues instead.
-                male_connector_positions[name] = entity.get_link("connector_point").pos
-
-            case name if name.endswith("female@connector"):
-                # NOTE: I had some issues with link.pos because it was not updated(!). So be careful and use get_link_pos in case of issues instead.
-                female_connector_positions[name] = entity.get_link(
-                    "connector_point"
-                ).pos
-
-            case name if name.endswith("@solid"):
-                fastener_hole_positions[name] = get_fastener_hole_positions(entity)
-                sim_state.physical_state.positions[name] = entity.get_pos()
-                sim_state.physical_state.rotations[name] = entity.get_ang()
-
-            case name if name.endswith("@liquid"):
-                # TODO: check whether there is a particle in the fluid_state.positions[idx]
-                # among particles = liquid.get_particles()
-                # I'm quite positive there is a faster way, too.
-                continue
-
-            case name if (
-                isinstance(sim_state.tool_state.current_tool, Screwdriver)
-                and name == sim_state.tool_state.current_tool.picked_up_fastener_name
-            ):
-                link = next(
-                    link
-                    for link in entity.links
-                    if link.name.endswith("_to_screwdriver")
-                )
-                fastener_tip_pos = link.get_pos()
-
-            case name if name.endswith("@control"):  # ignore some here
-                continue
-            case _:
-                raise NotImplementedError(
-                    f"Entity {entity_name} not implemented for translation."
-                )
-
-    return (
-        sim_state,
-        fastener_tip_pos,
-        fastener_hole_positions,
-        male_connector_positions,
-        female_connector_positions,
-    )
 
 
 def get_fastener_hole_positions(entity: RigidEntity):
@@ -186,47 +192,54 @@ def get_fastener_hole_positions(entity: RigidEntity):
     return fastener_hole_positions
 
 
-def translate_compound_to_sim_state(b123d_compound: Compound) -> RepairsSimState:
+def translate_compound_to_sim_state(
+    batch_b123d_compound: list[Compound],
+) -> RepairsSimState:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
-    sim_state = RepairsSimState()
-    for part in b123d_compound.descendants:
-        part: Part
-        assert part.label, f"Part must have a label. Failed at position {part.position}"
-        assert "@" in part.label, "Part must annotate type."
-        # physical state
-        if part.label.endswith("@solid"):
-            sim_state.physical_state.register_body(
-                name=part.label,
-                # position=part.position.to_tuple(), # this isn't always true
-                position=part.center(CenterOf.BOUNDING_BOX).to_tuple(),
-                rotation=part.location.orientation.to_tuple(),
-            )
-        elif part.label.endswith(
-            "@fastener"
-        ):  # collect constraints, get labels of bodies,
-            # collect constraints (in build123d named joints)
-            joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
-            joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
-            joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
+    sim_state = RepairsSimState(batch_dim=len(batch_b123d_compound))
 
-            # are active
-            constraint_a_active = joint_a.connected_to is not None
-            constraint_b_active = joint_b.connected_to is not None
+    for env_idx in range(len(batch_b123d_compound)):
+        b123d_compound = batch_b123d_compound[env_idx]
+        for part in b123d_compound.descendants:
+            part: Part
+            assert part.label, (
+                f"Part must have a label. Failed at position {part.position}"
+            )
+            assert "@" in part.label, "Part must annotate type."
+            # physical state
+            if part.label.endswith("@solid"):
+                sim_state.physical_state[env_idx].register_body(
+                    name=part.label,
+                    # position=part.position.to_tuple(), # this isn't always true
+                    position=part.center(CenterOf.BOUNDING_BOX).to_tuple(),
+                    rotation=part.location.orientation.to_tuple(),
+                )
+            elif part.label.endswith(
+                "@fastener"
+            ):  # collect constraints, get labels of bodies,
+                # collect constraints (in build123d named joints)
+                joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
+                joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
+                joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
 
-            # if active, get connected to names
-            initial_body_a = (
-                joint_a.connected_to.parent if constraint_a_active else None
-            )
-            initial_body_b = (
-                joint_b.connected_to.parent if constraint_b_active else None
-            )
+                # are active
+                constraint_a_active = joint_a.connected_to is not None
+                constraint_b_active = joint_b.connected_to is not None
 
-            # collect names of bodies(?)
-            assert initial_body_a.label and initial_body_a.label, (
-                "Constrained parts must be labeled"
-            )
-            sim_state.physical_state.register_fastener(
-                Fastener(
+                # if active, get connected to names
+                initial_body_a = (
+                    joint_a.connected_to.parent if constraint_a_active else None
+                )
+                initial_body_b = (
+                    joint_b.connected_to.parent if constraint_b_active else None
+                )
+
+                # collect names of bodies(?)
+                assert initial_body_a.label and initial_body_a.label, (
+                    "Constrained parts must be labeled"
+                )
+
+                fastener = Fastener(
                     initial_body_a=initial_body_a.label
                     if constraint_a_active
                     else None,
@@ -237,11 +250,8 @@ def translate_compound_to_sim_state(b123d_compound: Compound) -> RepairsSimState
                     constraint_b_active=constraint_b_active,
                     name=part.label,
                 )
-            )
+                sim_state.physical_state[env_idx].register_fastener(
+                    fastener.name, fastener
+                )
+
     return sim_state
-
-
-# I think you've identified the issue correctly, and yes, now that I've increased the box dim, I can see it, however...
-# However the gltf 0,0,0 export is expected? Later it should be adjusted for during the translation to genesis, specifically during this:@scene_creation_funnel.py#L87-101 . And we store starting_sim_state.physical_state.positions, which should be relative to 0,0,0 in gltf, this makes it easier to track.
-
-# So there is a bug somewhere here.

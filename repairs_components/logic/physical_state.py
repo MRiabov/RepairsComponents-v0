@@ -35,7 +35,7 @@ class PhysicalState:
     indices: dict[str, int] = field(default_factory=dict)
 
     # Fastener metadata (shared across batch)
-    fastener_prototype: dict[str, torch.Tensor] = field(default_factory=dict)
+    fastener_prototype: dict[str, Fastener] = field(default_factory=dict)
 
     def __post_init__(self):
         self.graph.x = torch.empty(
@@ -55,11 +55,12 @@ class PhysicalState:
         idx = len(self.indices)
         self.indices[name] = idx
 
-        node_feature = torch.cat([position, rotation]).unsqueeze(0).to(self.device)
-        self.graph.x = torch.cat([self.graph.x, node_feature], dim=0)
+        self.graph.position = torch.cat([self.graph.position, position], dim=0)
+        self.graph.quat = torch.cat([self.graph.quat, rotation], dim=0)
 
-    def register_fastener(self, name: str, attr: dict[str, torch.Tensor]):
-        self.fastener_prototype[name] = {k: v.to(self.device) for k, v in attr.items()}
+    def register_fastener(self, name: str, fastener: Fastener):
+        self.fastener_prototype[name] = fastener
+        # TODO should automatically connect if there are part labels
 
     def connect(self, fastener_name: str, body_a: str, body_b: str):
         src, dst = self.indices[body_a], self.indices[body_b]
@@ -111,7 +112,9 @@ def _quaternion_angle_diff(q1, q2):
     return 2 * torch.acos(dot).rad2deg()
 
 
-def _diff_node_features(data_a, data_b, pos_threshold=3.0, deg_threshold=5.0):
+def _diff_node_features(
+    data_a: Data, data_b: Data, pos_threshold=3.0, deg_threshold=5.0
+):
     pos_diff = torch.norm(data_a.pos - data_b.pos, dim=1)
     rot_diff = _quaternion_angle_diff(data_a.quat, data_b.quat)
 
@@ -149,11 +152,11 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
 
 
 
-def batch_graph_diff(batch_a: Batch, batch_b: Batch):
-    assert batch_a.batch_size == batch_b.batch_size
-    results = torch.zeros(batch_a.batch_size)
-    for i in range(batch_a.num_graphs):
-        data_a = batch_a.get_example(i)
-        data_b = batch_b.get_example(i)
-        results[i] = graph_diff(data_a, data_b)[1]
-    return results
+# def batch_graph_diff(batch_a: Batch, batch_b: Batch):
+#     assert batch_a.batch_size == batch_b.batch_size
+#     results = torch.zeros(batch_a.batch_size)
+#     for i in range(batch_a.num_graphs):
+#         data_a = batch_a.get_example(i)
+#         data_b = batch_b.get_example(i)
+#         results[i] = diff(data_a, data_b)[1]
+#     return results

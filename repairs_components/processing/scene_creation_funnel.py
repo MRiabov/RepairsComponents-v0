@@ -23,17 +23,25 @@ from repairs_components.geometry.base_env.tooling_stand_plate import (
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 import torch
 import genesis as gs
-
+from repairs_components.training_utils.sim_state_global import merge_global_states
 
 def create_random_scenes(
     empty_scene: gs.Scene,
-    env_setup: EnvSetup,
+    env_setup: EnvSetup,  # note: there must be one gs scene per EnvSetup. So this could be done in for loop.
     tasks: list[Task],
-    num_scenes_per_task: int = 128,
+    batch_dim: int,  # this is the batch dim in ML and genesis
+    num_scenes_per_task: int = 128,  # this is how many states to create.
 ):
     """`create_random_scenes` is a general, high_level function responsible for processing of the entire
     funnel, and is the only method users should call from `scene_creation_funnel`."""
     # note: ideally, `build` would, of course, happen async.
+    assert len(tasks) > 0, "Tasks can not be empty."
+    assert num_scenes_per_task > 0, "num_scenes_per_task can not be 0."
+    assert (len(tasks) * num_scenes_per_task) % batch_dim == 0, (
+        "In order to support easy batching, num of scenes per task * task must be divisible by batch_dim."
+    )
+    training_batches_created = (len(tasks) * num_scenes_per_task) // batch_dim
+
     voxel_grids_initial = torch.zeros(
         (len(tasks) * num_scenes_per_task, 256, 256, 256), dtype=torch.uint8
     )
@@ -42,6 +50,9 @@ def create_random_scenes(
     )
     starting_sim_states = []
     desired_sim_states = []
+
+    # training batches as for a dataloader/ML training batches.
+    training_batches = []
 
     # create starting_state
     for task_idx, task in enumerate(tasks):
@@ -67,16 +78,28 @@ def create_random_scenes(
             voxel_grids_desired[index] = torch.from_numpy(desired_voxel_grid)
 
             # create RepairsSimState for both
-            starting_sim_state = translate_compound_to_sim_state(starting_scene_geom_)
-            desired_sim_state = translate_compound_to_sim_state(desired_state_geom_)
+            starting_sim_state = translate_compound_to_sim_state([starting_scene_geom_])
+            desired_sim_state = translate_compound_to_sim_state([desired_state_geom_])
 
             # store states
             starting_sim_states.append(starting_sim_state)
             desired_sim_states.append(desired_sim_state)
 
+    # pack them into an easily loadable list.
+    for i in range(training_batches_created):
+        start_idx = i * batch_dim
+        end_idx = (i + 1) * batch_dim
+        batch_starting_sim_state = merge_global_states(
+            starting_sim_states[start_idx:end_idx]
+        )
+        batch_desired_sim_state = merge_global_states(
+            desired_sim_states[start_idx:end_idx]
+        )
+        training_batches.append((batch_starting_sim_state, batch_desired_sim_state))
+
     # for starting scene, move it to an appropriate position #no, not here...
     # create a FIRST genesis scene for starting state from desired state; it is to be discarded, however.
-    first_desired_scene, hex_to_name, initial_gs_entities = translate_to_genesis_scene(
+    first_desired_scene, initial_gs_entities = translate_to_genesis_scene(
         empty_scene, desired_state_geom_, desired_sim_state
     )
 
@@ -84,12 +107,13 @@ def create_random_scenes(
     first_desired_scene, cameras, franka = add_base_scene_geometry(first_desired_scene)
 
     # build a single scene... but batched
-    first_desired_scene.build(n_envs=num_scenes_per_task * len(tasks))
+    first_desired_scene.build(n_envs=batch_dim)
 
     # move all entities to initial positions.
     move_entities_to_pos(
-        initial_gs_entities, starting_sim_states, torch.arange(len(starting_sim_states))
-    )
+        initial_gs_entities, starting_sim_states[0]
+    )  # well, this shouldn't be here, but.
+
     assert all(
         ((e.get_AABB()[:, 0] <= 1).all() and (e.get_AABB()[:, 1] >= -1).all())
         for e in first_desired_scene.entities
@@ -204,18 +228,19 @@ def add_base_scene_geometry(scene: gs.Scene):
 
 def move_entities_to_pos(
     gs_entities: dict[str, RigidEntity],
-    starting_sim_states: list[RepairsSimState],
-    env_idx: torch.Tensor,
+    starting_sim_state: RepairsSimState,
+    env_idx: torch.Tensor | None = None,
 ):
     """Move parts to their necessary positions. Can be used both in reset and init."""
+    if env_idx is None:
+        env_idx = torch.arange(len(starting_sim_state.physical_state))
     for gs_entity_name, gs_entity in gs_entities.items():
         positions = torch.zeros((len(gs_entities), 3))
 
         for env_i in env_idx:
-            starting_sim_state = starting_sim_states[int(env_i.item())]
             positions[int(env_i.item())] = (
                 torch.tensor(
-                    starting_sim_state.physical_state.positions[gs_entity_name]
+                    starting_sim_state.physical_state[env_i].positions[gs_entity_name]
                 )
                 / 100  # cm to meters
             )
