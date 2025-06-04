@@ -68,15 +68,21 @@ class ElectronicsState(SimState):
         index_to_name = {idx: name for name, idx in self.indices.items()}
         for src, dst in edge_diff["added"]:
             comp_name = index_to_name[src]
-            diff_map.setdefault(comp_name, {"added": [], "removed": []})["added"].append(index_to_name[dst])
+            diff_map.setdefault(comp_name, {"added": [], "removed": []})[
+                "added"
+            ].append(index_to_name[dst])
         for src, dst in edge_diff["removed"]:
             comp_name = index_to_name[src]
-            diff_map.setdefault(comp_name, {"added": [], "removed": []})["removed"].append(index_to_name[dst])
+            diff_map.setdefault(comp_name, {"added": [], "removed": []})[
+                "removed"
+            ].append(index_to_name[dst])
         return diff_map, total_changes
 
     def register(self, component: ElectricalComponent):
         """Register a new electrical component."""
-        assert component.name not in self.components, f"Component {component.name} already registered"
+        assert component.name not in self.components, (
+            f"Component {component.name} already registered"
+        )
         self.components[component.name] = component
         self._graph_built = False
 
@@ -95,3 +101,4 @@ class ElectronicsState(SimState):
             component.connected_to = []
         self._graph_built = False
 
+    def batch_diff(self, other: "ElectronicsState")

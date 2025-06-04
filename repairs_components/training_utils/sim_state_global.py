@@ -14,22 +14,25 @@ from repairs_components.training_utils.sim_state import SimState
 class RepairsSimState(SimState):
     "A convenience sim state class to put diff logic out of a step function"
 
-    electronics_state: ElectronicsState = field(default_factory=ElectronicsState)
-    physical_state: PhysicalState = field(default_factory=PhysicalState)
-    fluid_state: FluidState = field(default_factory=FluidState)
-    tool_state: ToolState = field(default_factory=ToolState)
+    electronics_state: list[ElectronicsState] = field(default_factory=list)
+    physical_state: list[PhysicalState] = field(default_factory=list)
+    fluid_state: list[FluidState] = field(default_factory=list)
+    tool_state: list[ToolState] = field(default_factory=list)
 
-    def diff(self, other: "RepairsSimState"):
-        electronics_diff, electronics_diff_count = self.electronics_state.diff(
-            other.electronics_state
-        )
-        physical_diff, physical_diff_count = self.physical_state.diff(
-            other.physical_state
-        )
-        fluid_diff, fluid_diff_count = self.fluid_state.diff(other.fluid_state)
-        total_diff_left = (
-            electronics_diff_count + physical_diff_count + fluid_diff_count
-        )
+    def diff(self, other: "RepairsSimState"):  # batched diff.
+        for i in range(len(self.electronics_state)):
+            electronics_diff, electronics_diff_count = self.electronics_state[i].diff(
+                other.electronics_state[i]
+            )
+            physical_diff, physical_diff_count = self.physical_state[i].diff(
+                other.physical_state[i]
+            )
+            fluid_diff, fluid_diff_count = self.fluid_state[i].diff(
+                other.fluid_state[i]
+            )
+            total_diff_left = (
+                electronics_diff_count + physical_diff_count + fluid_diff_count
+            )
         return {
             "physical_diff": physical_diff,
             "electronics_diff": electronics_diff,

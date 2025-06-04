@@ -91,6 +91,19 @@ class PhysicalState:
         self.graph.edge_index = edge_index[:, keep_mask]
         self.graph.edge_attr = self.graph.edge_attr[keep_mask]
 
+    def diff(self, other: "PhysicalState") -> tuple[dict, int]:
+        edge_diff, edge_features_diff_count = _diff_edge_features(
+            self.graph, other.graph
+        )
+        node_diff, node_features_diff_count = _diff_node_features(
+            self.graph, other.graph
+        )
+
+        return {
+            "nodes": node_diff,
+            "edges": edge_diff,
+        }, int(edge_features_diff_count + node_features_diff_count)
+
 
 def _quaternion_angle_diff(q1, q2):
     # q1, q2: [N, 4]
@@ -135,14 +148,6 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
     }, len(added) + len(removed)
 
 
-def graph_diff(data_a, data_b) -> tuple[dict, int]:
-    edge_diff, edge_features_diff_count = _diff_edge_features(data_a, data_b)
-    node_diff, node_features_diff_count = _diff_node_features(data_a, data_b)
-
-    return {
-        "nodes": node_diff,
-        "edges": edge_diff,
-    }, edge_features_diff_count + node_features_diff_count
 
 def batch_graph_diff(batch_a: Batch, batch_b: Batch):
     assert batch_a.batch_size == batch_b.batch_size
