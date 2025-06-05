@@ -54,9 +54,9 @@ class RepairsEnvDataset(IterableDataset):
 
         # Generate one “chunk” of data for this scene:
         (
-            _,
-            _,
-            _,
+            _scene,
+            _cameras,
+            gs_entities,
             starting_states,
             desired_states,
             voxel_grids_initial,
@@ -71,7 +71,6 @@ class RepairsEnvDataset(IterableDataset):
 
         num_batches = len(starting_states) // self.batch_dim
         # Grab “initial_entities” once so you can reset the scene before each batch if needed:
-        initial_entities = starting_states[0].entities
 
         for i in range(num_batches):
             start = i * self.batch_dim
@@ -84,6 +83,7 @@ class RepairsEnvDataset(IterableDataset):
 
             # (Re‐initialize the scene’s object positions before yielding a new training sample)
             scene = move_entities_to_pos(scene_template, batch_start)
+            initial_diff, initial_diff_count = batch_start.diff(batch_desired)
 
             # Yield a tuple of (scene, batch_start, batch_desired, voxel_init, voxel_des)
-            yield (scene, batch_start, batch_desired, vox_init, vox_des, initial_diff)
+            yield scene, batch_start, batch_desired, vox_init, vox_des, initial_diff

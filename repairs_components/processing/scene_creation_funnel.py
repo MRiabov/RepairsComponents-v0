@@ -24,6 +24,7 @@ from repairs_components.training_utils.sim_state_global import RepairsSimState
 import torch
 import genesis as gs
 from repairs_components.training_utils.sim_state_global import merge_global_states
+from repairs_components.training_utils.multienv_dataloader import MultiEnvDataLoader
 
 
 def create_random_scenes(
@@ -159,7 +160,10 @@ def desired_state_geom(
 
 
 def initialize_and_build_scene(
-    scene: gs.Scene, desired_state_geom: Compound, desired_sim_state: RepairsSimState, batch_dim:int
+    scene: gs.Scene,
+    desired_state_geom: Compound,
+    desired_sim_state: RepairsSimState,
+    batch_dim: int,
 ):
     # for starting scene, move it to an appropriate position #no, not here...
     # create a FIRST genesis scene for starting state from desired state; it is to be discarded, however.
