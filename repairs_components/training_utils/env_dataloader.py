@@ -69,8 +69,6 @@ class RepairsEnvDataset(IterableDataset):
             num_scenes_per_task=self.num_scenes_per_task,
         )
 
-        
-
         num_batches = len(starting_states) // self.batch_dim
         # Grab “initial_entities” once so you can reset the scene before each batch if needed:
         initial_entities = starting_states[0].entities
@@ -88,4 +86,4 @@ class RepairsEnvDataset(IterableDataset):
             scene = move_entities_to_pos(scene_template, batch_start)
 
             # Yield a tuple of (scene, batch_start, batch_desired, voxel_init, voxel_des)
-            yield (scene, batch_start, batch_desired, vox_init, vox_des)
+            yield (scene, batch_start, batch_desired, vox_init, vox_des, initial_diff)

@@ -25,6 +25,8 @@ from repairs_components.processing.scene_creation_funnel import (
     generate_scene_meshes,
 )
 from repairs_components.processing.tasks import Task, AssembleTask
+from torch.utils.data import DataLoader
+from repairs_components.processing.scene_creation_funnel import move_entities_to_pos
 
 
 def gs_rand_float(lower, upper, shape, device):
@@ -83,19 +85,24 @@ class RepairsEnv(gym.Env):
 
         # if scene meshes don't exist yet, create them now.
         generate_scene_meshes()
-
-        self.env_dataloader = RepairsEnvDataset(
+        dataset = RepairsEnvDataset(
             scenes=[self.scene],
             env_setups=[self.env_setup],
             tasks=self.tasks,
             batch_dim=self.batch_dim,
             num_scenes_per_task=self.num_scenes_per_task,
         )
+        self.env_dataloader = DataLoader(
+            dataset,
+            batch_size=None,  # IMPORTANT: batches are generated manually in dataset
+            num_workers=len([self.scene]),  # One worker per scene
+            pin_memory=True,
+            prefetch_factor=2,
+            persistent_workers=True,  # keeps workers alive across epochs
+        )
+
         # TODO: add mechanism that would recreate random scenes whenever the scene was called too many times.
         # for now just work in one env setup.
-        self.called_times_this_batch = 0
-
-       
 
         # # Map for entity names to their gs.Entity objects
         # self.entity_name_map = {
@@ -214,9 +221,7 @@ class RepairsEnv(gym.Env):
 
         return video_obs, reward, done, info
 
-    def reset_idx(
-        self, training_batch: list[tuple[RepairsSimState, RepairsSimState]], envs_idx
-    ):
+    def reset_idx(self, envs_idx: torch.Tensor):
         """Reset specific environments to their initial state.
 
         Args:
@@ -224,55 +229,26 @@ class RepairsEnv(gym.Env):
         """
         if len(envs_idx) > 0:
             # Reset robot joint positions to default
-            dof_pos = self.default_dof_pos.expand(len(envs_idx), -1)
+            dof_pos = self.default_dof_pos.expand(envs_idx.shape[0], -1)
             self.franka.set_dofs_position(
                 position=dof_pos,
                 # dofs_idx_local=self.dof_idx,
                 envs_idx=envs_idx,
             )
+            for env_i in envs_idx:
+                scene = self.idx_to_scene[env_i]  # todo
 
-            # For each environment, assign a random scene configuration
-            for i, env_idx in enumerate(envs_idx):
-                # Choose a random starting state from our pregenerated states
-                random_scene_idx = torch.randint(
-                    0, len(self.starting_sim_states), (1,), device=self.device
-                ).item()
+                # for each environment, get its bucket of dataloaded states.
+                (
+                    scene,
+                    batch_starting_state,
+                    batch_desired_state,
+                    voxel_init,
+                    voxel_desired,
+                    initial_diff,
+                ) = next(self.env_dataloader)
 
-                # Set the current and desired states for this environment
-                if env_idx == 0:  # Only update the tracked state for the first env
-                    self.current_sim_state = self.starting_sim_states[random_scene_idx]
-                    self.desired_state = self.desired_sim_states[random_scene_idx]
-
-                    # Calculate initial difference for reward calculation
-                    diff, self.initial_diff_count = self.current_sim_state.diff(
-                        self.desired_state
-                    )
-
-                # TODO: replace with scene_creation_funnel.move_entities_to_pos()
-                # Set positions of all objects in this environment
-                for name, entity in self.gs_entities.items():
-                    if name.endswith(
-                        "@control"
-                    ):  # don't explicitly reset franka arm...
-                        # maybe it's worth returning franka explicitly instead.
-                        continue
-                    # Get position from the simulation state
-                    pos = (
-                        torch.tensor(
-                            [
-                                self.starting_sim_states[
-                                    random_scene_idx
-                                ].physical_state.positions[name]
-                            ]
-                        )
-                        / 100
-                    )  # Convert from cm to meters
-                    # TODO !! this has to be generated with batching. for now, just expand the dim of pos.
-                    # generated specifically with task initial state perturbation (!or loaded from a dataloader.)
-                    # Set the position for this entity in this environment
-                    entity.set_pos(
-                        pos, envs_idx=torch.tensor([env_idx], device=self.device)
-                    )
+                move_entities_to_pos(scene, batch_starting_state)
 
             # Update visual states to show the new positions
             self.scene.visualizer.update_visual_states()
