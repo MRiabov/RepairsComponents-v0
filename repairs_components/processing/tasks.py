@@ -39,16 +39,18 @@ class Task(ABC):
         # Calculate the offset needed to move the compound
         # We want the new position to be at target_xy in XY plane
         # and have the bottom of the bounding box at Z=0
-        offset = np.array([
-            target_xy[0] - aabb_min[0],  # Move to target X
-            target_xy[1] - aabb_min[1],  # Move to target Y
-            -aabb_min[2]                 # Move up to make Z-min = 0
-        ])
+        offset = np.array(
+            [
+                target_xy[0] - aabb_min[0],  # Move to target X
+                target_xy[1] - aabb_min[1],  # Move to target Y
+                -aabb_min[2],  # Move up to make Z-min = 0
+            ]
+        )
 
         # print(f"Original bbox: min={aabb_min}, max={aabb_max}")
         # print(f"Target position: {target_xy}")
         # print(f"Moving by offset: {offset}")
-        
+
         # Move the entire compound as a single unit
         result = compound.moved(Location(offset))
 

@@ -25,17 +25,19 @@ import torch
 import genesis as gs
 from repairs_components.training_utils.sim_state_global import merge_global_states
 from repairs_components.training_utils.multienv_dataloader import MultiEnvDataLoader
+from repairs_components.training_utils.concurrent_scene_dataclass import (
+    ConcurrentSceneData,
+)
 
 
-def create_random_scenes(
-    empty_scene: gs.Scene,
+def create_env_configs(
     env_setup: EnvSetup,  # note: there must be one gs scene per EnvSetup. So this could be done in for loop.
     tasks: list[Task],
-    create_num_scenes: int,
+    batch_dim: int,
     num_scenes_per_task: int = 128,  # this is how many states to create.
 ):
-    """`create_random_scenes` is a general, high_level function responsible for processing of the entire
-    funnel, and is the only method users should call from `scene_creation_funnel`."""
+    """`create_env_configs` is a general, high_level function responsible for creating of randomized configurations
+    (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis."""
     # note: ideally, `build` would, of course, happen async.
     assert len(tasks) > 0, "Tasks can not be empty."
     assert num_scenes_per_task > 0, "num_scenes_per_task can not be 0."
@@ -54,6 +56,8 @@ def create_random_scenes(
 
     # training batches as for a dataloader/ML training batches.
     training_batches = []
+    init_diffs = []
+    init_diff_counts = []
 
     # create starting_state
     for task_idx, task in enumerate(tasks):
@@ -88,6 +92,8 @@ def create_random_scenes(
 
             # Store the initial difference count for reward calculation
             diff, initial_diff_count = starting_sim_state.diff(desired_sim_state)
+            init_diffs.append(diff)
+            init_diff_counts.append(initial_diff_count)
 
     # pack them into an easily loadable list.
     for i in range(training_batches_created):
@@ -99,40 +105,27 @@ def create_random_scenes(
         batch_desired_sim_state = merge_global_states(
             desired_sim_states[start_idx:end_idx]
         )
-        training_batches.append((batch_starting_sim_state, batch_desired_sim_state))
+        # note: this is a *partial* task batch.
+        # it does not have Genesis entities or scene, but it is used
+        # to make it simpler to return and accept this method.
 
-    # move all entities to initial positions.
-    move_entities_to_pos(
-        initial_gs_entities, starting_sim_states[0]
-    )  # well, this shouldn't be here, but.
+        partial_task_batch = ConcurrentSceneData(
+            scene=None,
+            gs_entities=None,
+            cameras=None,
+            current_state=batch_starting_sim_state,
+            desired_state=batch_desired_sim_state,
+            vox_init=voxel_grids_initial[start_idx:end_idx],
+            vox_des=voxel_grids_desired[start_idx:end_idx],
+            initial_diff=init_diffs[start_idx:end_idx],
+            initial_diff_count=init_diff_counts[start_idx:end_idx],
+            scene_id=i,
+        )
 
-    assert all(
-        ((e.get_AABB()[:, 0] <= 1).all() and (e.get_AABB()[:, 1] >= -1).all())
-        for e in first_desired_scene.entities
-    ), "Entities are out of expected bounds, likely a misconfiguration."
-    assert all(
-        (e.get_AABB()[:, :, 2] >= 0).all() for e in initial_gs_entities.values()
-    ), "Entities are below the base plate."
-
-    print(
-        "gs_entities['box@solid'].get_AABB():",
-        initial_gs_entities["box@solid"].get_AABB(),
-    )
-    # Add franka to gs_entities
-    initial_gs_entities["franka@control"] = franka
-    # to have gs_entities positions updated in visuals too, update the visual states.
-    first_desired_scene.visualizer.update_visual_states()
+        training_batches.append(partial_task_batch)
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
-    return (
-        first_desired_scene,
-        cameras,
-        initial_gs_entities,
-        starting_sim_states,
-        desired_sim_states,
-        voxel_grids_initial,
-        voxel_grids_desired,
-    )
+    return training_batches
 
 
 def starting_state_geom(
@@ -176,7 +169,25 @@ def initialize_and_build_scene(
 
     # build a single scene... but batched
     first_desired_scene.build(n_envs=batch_dim)
-    return first_desired_scene, cameras, franka
+
+    # ===== Control Parameters =====
+    # Set PD control gains (tuned for Franka Emika Panda)
+    # These values are robot-specific and affect the stiffness and damping
+    # of the robot's joints during control
+    franka.set_dofs_kp(
+        kp=np.array([4500, 4500, 3500, 3500, 2000, 2000, 2000, 100, 100]),
+    )
+    franka.set_dofs_kv(
+        kv=np.array([450, 450, 350, 350, 200, 200, 200, 10, 10]),
+    )
+
+    # Set force limits for each joint (in Nm for rotational joints, N for prismatic)
+    franka.set_dofs_force_range(
+        lower=np.array([-87, -87, -87, -87, -12, -12, -12, -100, -100]),
+        upper=np.array([87, 87, 87, 87, 12, 12, 12, 100, 100]),
+    )
+
+    return first_desired_scene, cameras, initial_gs_entities, franka
 
 
 def add_base_scene_geometry(scene: gs.Scene):
@@ -191,7 +202,7 @@ def add_base_scene_geometry(scene: gs.Scene):
         surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 0.3)),  # Add color material
         # 0.3 alpha for debug.
     )
-    franka = scene.add_entity(
+    franka: RigidEntity = scene.add_entity(
         gs.morphs.MJCF(
             file="xml/franka_emika_panda/panda.xml",
             pos=(0.3, -(0.64 / 2 + 0.2 / 2), 0),

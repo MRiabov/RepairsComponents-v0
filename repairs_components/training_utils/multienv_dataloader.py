@@ -5,6 +5,10 @@ from collections import defaultdict, deque
 from typing import Dict, List, Optional, Callable, Any
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from repairs_components.training_utils.sim_state_global import merge_global_states
+from repairs_components.training_utils.concurrent_scene_dataclass import (
+    ConcurrentSceneData,
+)
 
 
 class MultiEnvDataLoader:
@@ -66,12 +70,15 @@ class MultiEnvDataLoader:
                 self.env_states[env_idx] = initial_state
             self._trigger_prefetch_for_env(env_idx)
 
-    def get_processed_data(self, env_idx: int, timeout: float = 1.0) -> Any:
+    def get_processed_data(
+        self, env_idx: int, get_count: int, timeout: float = 1.0
+    ) -> Any:
         """
         Get preprocessed data for a specific environment.
 
         Args:
             env_idx: Environment index
+            get_count: Number of configurations to get/generate
             timeout: Max time to wait for data
 
         Returns:
@@ -298,38 +305,43 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             scene = move_entities_to_pos(scene_template, batch_start)
             initial_diff, initial_diff_count = batch_start.diff(batch_desired)
 
-            # Store the complete batch tuple
-            batch_tuple = (
-                scene,
-                batch_start,
-                batch_desired,
-                vox_init,
-                vox_des,
-                initial_diff,
-                initial_diff_count,
+            # Create ConcurrentSceneData object
+            batch_data = ConcurrentSceneData(
+                scene=scene,
+                gs_entities=gs_entities,
+                cameras=_cameras,
+                starting_state=batch_start,
+                desired_state=batch_desired,
+                vox_init=vox_init,
+                vox_des=vox_des,
+                initial_diff=initial_diff,
+                initial_diff_count=initial_diff_count,
+                scene_id=scene_idx,
             )
-            batches.append(batch_tuple)
+            batches.append(batch_data)
 
         return batches
 
-    def get_batch(self, scene_idx: int, timeout: float = 5.0) -> list[tuple]:
-        """
-        Get a single batch for a specific scene.
+    # def get_batch(
+    #     self, scene_idx: int, timeout: float = 5.0
+    # ) -> list[ConcurrentSceneData]:
+    #     """
+    #     Get a single batch for a specific scene.
 
-        Args:
-            scene_idx: Scene index to get batch from
-            timeout: Max time to wait for batch
+    #     Args:
+    #         scene_idx: Scene index to get batch from
+    #         timeout: Max time to wait for batch
 
-        Returns:
-            list of tuples of (scene, batch_start, batch_desired, vox_init, vox_des, initial_diff)
-        """
-        # Get the list of batches for this scene
-        batches = self.get_processed_data(scene_idx, timeout=timeout)
+    #     Returns:
+    #         list of tuples of (scene, batch_start, batch_desired, vox_init, vox_des, initial_diff)
+    #     """
+    #     # Get the list of batches for this scene
+    #     batches = self.get_processed_data(scene_idx, timeout=timeout)
 
-        # Return a random batch from the generated batches
-        import random
+    #     # Return a random batch from the generated batches
+    #     import random
 
-        return random.choice(batches)
+    #     return random.choice(batches)
 
     # def get_batch_iterator(self, scene_idx: int) -> Iterator[tuple]:
     #     """
@@ -350,9 +362,10 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
     #             for batch in batches:
     #                 yield batch
 
-    def regenerate_scene_data(self, scene_idx: int):
-        """Trigger regeneration of data for a specific scene (e.g., after reset)."""
-        self.update_environment_state(scene_idx, None)
+    # note: possibly useful if there is a bug in the env, though should not be.
+    # def regenerate_scene_data(self, scene_idx: int):
+    #     """Trigger regeneration of data for a specific scene (e.g., after reset)."""
+    #     self.update_environment_state(scene_idx, None)
 
 
 # Example preprocessing function

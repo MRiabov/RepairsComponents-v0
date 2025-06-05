@@ -20,13 +20,19 @@ from build123d import Compound
 from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.processing.voxel_export import export_voxel_grid
 from repairs_components.processing.scene_creation_funnel import (
-    create_random_scenes,
+    create_env_configs,
     generate_scene_meshes,
 )
 from repairs_components.processing.tasks import Task, AssembleTask
 from torch.utils.data import DataLoader
-from repairs_components.processing.scene_creation_funnel import move_entities_to_pos
+from repairs_components.processing.scene_creation_funnel import (
+    move_entities_to_pos,
+    initialize_and_build_scene,
+)
 from repairs_components.training_utils.multienv_dataloader import RepairsEnvDataLoader
+from repairs_components.training_utils.concurrent_scene_dataclass import (
+    ConcurrentSceneData,
+)
 
 
 def gs_rand_float(lower, upper, shape, device):
@@ -79,65 +85,61 @@ class RepairsEnv(gym.Env):
         self.concurrent_scenes = concurrent_scenes  # todo implement concurrent scenes.
         # genesis batch dim = batch_dim // concurrent_scenes
 
-        # concurrent scene tuples
-        # #(scene, gs_entities, cameras, starting_state, desired_state, voxel_grids_initial, voxel_grids_desired, initial_diff, initial_diff_count)
-        self.concurrent_scene_tuples = [None] * concurrent_scenes
+        # Using dataclass to store concurrent scene data for better organization and clarity
+        self.concurrent_scenes_data: list[ConcurrentSceneData] = []
 
-        # ===== Scene Setup =====
-        # Create simulation scene with specified timestep and substeps
-        self.scene = gs.Scene(
-            sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
-            show_viewer=False,
-        )
+        scenes = []
+        task = tasks[0]  # any task will suffice for init.
 
         # if scene meshes don't exist yet, create them now.
         generate_scene_meshes()
 
+        # scene init setup # note: technically this should be the Dataloader worker init fn.
+        for scene_idx in range(concurrent_scenes):
+            scene = gs.Scene(  # empty scene
+                sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
+                show_viewer=False,
+            )
+            scenes.append(scene)
+            partial_env_configs_batch = create_env_configs(
+                env_setup, tasks, batch_dim, self.num_scenes_per_task
+            )[0]  # for init I need only one. (it will be discarded later)
+
+            scene, cameras, gs_entities, franka = initialize_and_build_scene(
+                scene,  # build scene.
+                env_setup.desired_state_geom(),
+                partial_env_configs_batch.desired_state,
+                self.batch_dim,
+            )
+
+            # Using dataclass to store concurrent scene data for better organization and clarity
+            self.concurrent_scenes_data.append(
+                ConcurrentSceneData(
+                    scene=scene,
+                    gs_entities=gs_entities,
+                    cameras=cameras,
+                    current_state=partial_env_configs_batch.current_state,
+                    desired_state=partial_env_configs_batch.desired_state,
+                    vox_init=partial_env_configs_batch.vox_init,
+                    vox_des=partial_env_configs_batch.vox_des,
+                    initial_diff=partial_env_configs_batch.initial_diff,
+                    initial_diff_count=partial_env_configs_batch.initial_diff_count,
+                    scene_id=scene_idx,
+                )
+            )
+        # create the dataloader to update scenes.
         self.env_dataloader = RepairsEnvDataLoader(
-            scenes=[self.scene],
-            env_setups=[self.env_setup],
-            tasks=self.tasks,
+            scenes=scenes,
+            env_setups=[env_setup],
+            tasks=tasks,
             batch_dim=self.batch_dim,
             num_scenes_per_task=self.num_scenes_per_task,
         )
-
-        # TODO: add mechanism that would recreate random scenes whenever the scene was called too many times.
-        # for now just work in one env setup.
-
-        # # Map for entity names to their gs.Entity objects
-        # self.entity_name_map = {
-        #     name: entity for name, entity in self.gs_entities.items()
-        # }
-
-        self.franka: RigidEntity = self.gs_entities["franka@control"]
-        # ===== Robot Configuration =====
-        # Setup joint names and their corresponding DOF indices
-        self.joint_names = env_cfg["joint_names"]
-        self.dof_idx = [
-            self.franka.get_joint(name).dof_start for name in self.joint_names
-        ]
 
         # Set default joint positions from config
         self.default_dof_pos = torch.tensor(
             [env_cfg["default_joint_angles"][name] for name in self.joint_names],
             device=self.device,
-        )
-
-        # ===== Control Parameters =====
-        # Set PD control gains (tuned for Franka Emika Panda)
-        # These values are robot-specific and affect the stiffness and damping
-        # of the robot's joints during control
-        self.franka.set_dofs_kp(
-            kp=np.array([4500, 4500, 3500, 3500, 2000, 2000, 2000, 100, 100]),
-        )
-        self.franka.set_dofs_kv(
-            kv=np.array([450, 450, 350, 350, 200, 200, 200, 10, 10]),
-        )
-
-        # Set force limits for each joint (in Nm for rotational joints, N for prismatic)
-        self.franka.set_dofs_force_range(
-            lower=np.array([-87, -87, -87, -87, -12, -12, -12, -100, -100]),
-            upper=np.array([87, 87, 87, 87, 12, 12, 12, 100, 100]),
         )
 
         # Initialize environment to starting state
@@ -167,15 +169,9 @@ class RepairsEnv(gym.Env):
         )
         # step through different, concurrent scenes.
         for scene_idx in range(self.concurrent_scenes):
-            (
-                scene,
-                batch_starting_state,
-                batch_desired,
-                vox_init,
-                vox_des,
-                initial_diff,
-                initial_diff_count,
-            ) = self.concurrent_scene_tuples[scene_idx]
+            # Get data for this concurrent scene
+            scene_data = self.concurrent_scenes_data[scene_idx]
+
             # Extract position and orientation from action
             pos = action_by_scenes[scene_idx, :, :3]  # Position: [x, y, z]
             quat = action_by_scenes[scene_idx, :, 3:7]  # Quaternion: [w, x, y, z]
@@ -186,59 +182,33 @@ class RepairsEnv(gym.Env):
             # Execute the motion planning trajectory using our dedicated module
             execute_straight_line_trajectory(
                 franka=self.franka,
-                scene=self.scene,
+                scene=scene_data.scene,
                 target_pos=pos,
                 target_quat=quat,
                 gripper_force=gripper_force,
                 keypoint_distance=0.1,  # 10cm as suggested
                 num_steps_between_keypoints=10,
             )
-            scene = self.scenes[scene_idx]
-            gs_entities = gs_entities_by_scene[scene_idx]
-            current_sim_state = self.current_sim_states[scene_idx]
-            desired_state = self.desired_states[scene_idx]
 
             # Update the current simulation state based on the scene
             success, total_diff_left, current_sim_state, diff = step_repairs(
-                scene,
-                action[i],
-                gs_entities,
-                current_sim_state,
-                desired_state,
+                scene_data.scene,
+                action_by_scenes[scene_idx],
+                scene_data.gs_entities,
+                scene_data.current_state,
+                scene_data.desired_state,
             )
 
-            # Capture observations from cameras
-            obs = []
-            for camera in self.cameras:
-                rgb, depth, _segmentation, normal = camera.render(
-                    rgb=True, depth=True, segmentation=False, normal=True
-                )
-                # print(rgb.shape)
-                # note: for whichever reason, in batch dim of 1, the cameras don't return batch shape. So I'd expand.
-                rgb = np.expand_dims(rgb, (0))
-                depth = np.expand_dims(depth, (0))[:, :, :, None]
-                normal = np.expand_dims(normal, (0))
-                assert all(lambda a: a.ndim == 4 for a in (rgb, depth, normal)), (
-                    "Too many dims found."
-                )
+            # Update the scene data with the new state
+            scene_data.current_state = current_sim_state
 
-                # Combine all camera observations
-                camera_obs = torch.tensor(
-                    np.concatenate([rgb, depth, normal], axis=-1),
-                    device=self.device,
-                )  # Combine along channel dimension
-                obs.append(camera_obs)
-
-            # Stack all camera observations
-            video_obs = torch.stack(
-                obs, dim=1
-            )  # Shape: [num_envs, num_cameras, height, width, channels]
+            video_obs = _render_all_cameras(scene_data.cameras)
 
             # Compute reward based on progress toward the goal
             reward, done = calculate_reward_and_done(
-                current_sim_state,
-                desired_state,
-                initial_diff_count,
+                current_sim_state,  # Updated by step_repairs
+                scene_data.desired_state,
+                scene_data.initial_diff_count,
             )
 
             # Additional info for debugging
@@ -256,47 +226,58 @@ class RepairsEnv(gym.Env):
         Args:
             envs_idx: Indices of environments to reset
         """
-        if len(envs_idx) > 0:
-            # Reset robot joint positions to default
-            dof_pos = self.default_dof_pos.expand(envs_idx.shape[0], -1)
-            self.franka.set_dofs_position(
-                position=dof_pos,
-                # dofs_idx_local=self.dof_idx,
-                envs_idx=envs_idx,
+
+        # FIXME: envs_idx or scene_idx? the dataloader returns for the whole scene. and I don't need it.
+
+        assert len(envs_idx) > 0, "Can't reset 0 environments"
+
+        # get from which scene(s) we are resetting
+        scene_idx = envs_idx // self.batch_dim
+
+        # get the scene data
+        scene_data = self.env_dataloader.get_processed_data(scene_idx)
+
+        # update the scene
+        # Reset robot joint positions to default
+        dof_pos = self.default_dof_pos.expand(envs_idx.shape[0], -1)
+        franka.set_dofs_position(
+            position=dof_pos,
+            # dofs_idx_local=self.dof_idx,
+            envs_idx=envs_idx,
+        )
+
+        for env_i in envs_idx:
+            # calculate the num of environments to reset
+            num_envs_to_reset = torch.count_nonzero(scene_idx == env_i)
+
+            for _ in range(num_envs_to_reset):
+                # get the scene data
+                scene_data: ConcurrentSceneData = (
+                    self.env_dataloader.get_processed_data(env_i)
+                )  # note: ideally batch this operation under the hood.
+
+            # Create ConcurrentSceneData instance
+            new_scene_data = ConcurrentSceneData(
+                scene=scene_data.scene,
+                gs_entities=scene_data.gs_entities,
+                cameras=scene_data.cameras,
+                current_state=scene_data.current_state,
+                desired_state=scene_data.desired_state,
+                vox_init=scene_data.vox_init,
+                vox_des=scene_data.vox_des,
+                initial_diff=scene_data.initial_diff,
+                initial_diff_count=scene_data.initial_diff_count,
             )
-            for env_i in envs_idx:
-                # for each environment, get its bucket of dataloaded states.
-                # get_batch returns: (scene, batch_start, batch_desired, vox_init, vox_des, initial_diff, initial_diff_count)
-                batch_tuple = self.env_dataloader.get_batch(env_i)
+            self.concurrent_scenes_data[env_i] = new_scene_data
 
-                # Update the concurrent scene tuples memory with the new batch
-                # Store the tuple exactly as returned by get_batch to match step method expectations
-                (
-                    scene,
-                    batch_starting_state,
-                    batch_desired_state,
-                    vox_init,
-                    vox_des,
-                    initial_diff,
-                    initial_diff_count,
-                ) = batch_tuple
+            # Move entities to their starting positions
+            move_entities_to_pos(
+                new_scene_data.gs_entities, new_scene_data.current_state
+            )
 
-                # Store the complete tuple matching the format expected by step method
-                self.concurrent_scene_tuples[env_i] = (
-                    scene,
-                    batch_starting_state,
-                    batch_desired_state,
-                    vox_init,
-                    vox_des,
-                    initial_diff,
-                    initial_diff_count,
-                )
-
-                # Move entities to their starting positions
-                move_entities_to_pos(scene, batch_starting_state)
-
-            # Update visual states to show the new positions
-            self.scene.visualizer.update_visual_states()
+        # Update visual states to show the new positions
+        self.scene.visualizer.update_visual_states()
+        return self.concurrent_scenes_data
 
     def reset(self) -> tuple[torch.Tensor, dict]:
         """Reset all environments to initial state.
@@ -309,33 +290,47 @@ class RepairsEnv(gym.Env):
         idxs = torch.arange(self.batch_dim - 1, device=self.device)
         self.reset_idx(idxs)
 
-        # Get initial observations
-        obs = []
-        for camera in self.cameras:
-            rgb, depth, _segmentation, normal = camera.render(
-                rgb=True, depth=True, normal=True
-            )
-            print("rgb shape", str(rgb.shape))
-            print("depth shape", str(depth.shape))
+        # Get initial observations from all concurrent scenes
+        all_env_obs = []
 
-            # note: for whichever reason, in batch dim of 1, the cameras don't return batch shape. So I'd expand.
-            rgb = np.expand_dims(rgb, (0))
-            depth = np.expand_dims(depth, (0))[:, :, :, None]
-            normal = np.expand_dims(normal, (0))
-            assert all(lambda a: a.ndim == 4 for a in (rgb, depth, normal)), (
-                "Too many dims found."
-            )
+        # Process each environment
+        for scene_idx in range(self.concurrent_scenes):
+            # Get the scene data for this environment
+            scene_data = self.concurrent_scenes_data[scene_idx]
 
-            camera_obs = obs_to_int8(rgb, depth, normal)  # type: ignore
+            # Extract cameras from scene data
+            cameras = scene_data.cameras
+            video_obs = _render_all_cameras(cameras)
 
-            obs.append(camera_obs)
-
-        # Stack all camera observations
-        obs = torch.stack(obs, dim=1)
-        # why no batch dim?
+            all_env_obs.append(video_obs)
 
         info = {"initial_diff_count": self.initial_diff_count}
-        return obs, info
+        return torch.stack(all_env_obs, dim=0), info
+
+
+def _render_all_cameras(cameras: list[Camera]):
+    # Process each camera in the scene
+    env_obs = []
+    for camera in cameras:
+        rgb, depth, _segmentation, normal = camera.render(
+            rgb=True, depth=True, normal=True
+        )
+
+        # note: for whichever reason, in batch dim of 1, the cameras don't return batch shape. So I'd expand.
+        rgb = np.expand_dims(rgb, (0))
+        depth = np.expand_dims(depth, (0))[:, :, :, None]
+        normal = np.expand_dims(normal, (0))
+        assert all(lambda a: a.ndim == 4 for a in (rgb, depth, normal)), (
+            "Too many dims found."
+        )
+
+        # Process camera observation
+        camera_obs = obs_to_int8(rgb, depth, normal)  # type: ignore
+        env_obs.append(camera_obs)
+
+    # Stack all cameras for this environment
+    video_obs = torch.stack(env_obs, dim=1)
+    return video_obs
 
 
 def obs_to_int8(rgb: np.ndarray, depth: np.ndarray, normal: np.ndarray):

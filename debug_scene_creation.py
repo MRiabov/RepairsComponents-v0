@@ -2,7 +2,7 @@ import logging
 import genesis as gs
 from genesis.vis.camera import Camera
 
-from repairs_components.processing.scene_creation_funnel import create_random_scenes
+from repairs_components.processing.scene_creation_funnel import create_env_configs
 from repairs_components.processing.tasks import AssembleTask
 from repairs_components.geometry.base_env.tooling_stand_plate import render_and_save
 from examples.box_to_pos_task import MoveBoxSetup
@@ -29,7 +29,7 @@ def main():
         voxel_grids_desired,
         starting_sim_states,
         desired_sim_states,
-    ) = create_random_scenes(scene, env_setup, [task], num_scenes_per_task=1)
+    ) = create_env_configs(scene, env_setup, [task], num_scenes_per_task=1)
 
     # Set up cameras for visualization
     # Render and save the scene

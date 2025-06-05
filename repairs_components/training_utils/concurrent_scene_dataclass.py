@@ -16,7 +16,7 @@ class ConcurrentSceneData:
     scene: gs.Scene
     gs_entities: list[RigidEntity]
     cameras: tuple[Camera, Camera]
-    starting_state: RepairsSimState
+    current_state: RepairsSimState
     desired_state: RepairsSimState
     vox_init: torch.Tensor
     vox_des: torch.Tensor
