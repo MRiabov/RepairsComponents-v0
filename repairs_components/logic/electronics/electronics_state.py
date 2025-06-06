@@ -51,24 +51,29 @@ class ElectronicsState(SimState):
         self.graph = data
         self._graph_built = True
 
-    def diff(self, other: "ElectronicsState") -> Data:
+    def diff(self, other: "ElectronicsState") -> tuple[Data, int]:
         """Compute a graph diff between two electronic states.
 
         Returns:
-            Data: A PyG Data object representing the diff with:
-                - x: Node features [num_nodes, 1] (1 if node exists in both states)
-                - edge_index: Edge connections [2, num_edges]
-                - edge_attr: Edge features [num_edges, 3] (is_added, is_removed, is_changed)
-                - node_mask: Boolean mask of nodes that exist in either state [num_nodes]
-                - edge_mask: Boolean mask of changed edges [num_edges]
-                - num_nodes: Total number of nodes
+            tuple[Data, int]: A tuple containing:
+                - A PyG Data object representing the diff with:
+                    - x: Node features [num_nodes, 1] (1 if node exists in both states)
+                    - edge_index: Edge connections [2, num_edges]
+                    - edge_attr: Edge features [num_edges, 3] (is_added, is_removed, is_changed)
+                    - node_mask: Boolean mask of nodes that exist in either state [num_nodes]
+                    - edge_mask: Boolean mask of changed edges [num_edges]
+                    - num_nodes: Total number of nodes
+                - An integer count of the total number of differences
         """
         # Ensure graphs are built
         self._build_graph()
         other._build_graph()
 
         # Get edge differences
-        edge_diff, _ = _diff_edge_features(self.graph, other.graph)
+        edge_diff, edge_diff_count = _diff_edge_features(self.graph, other.graph)
+        
+        # Calculate total differences (only edge differences for now, as nodes are just existence checks)
+        total_diff_count = edge_diff_count
 
         # Create diff graph with same nodes as original
         diff_graph = Data()
@@ -137,7 +142,7 @@ class ElectronicsState(SimState):
         diff_graph.edge_mask = edge_mask
         diff_graph.num_nodes = num_nodes
 
-        return diff_graph
+        return diff_graph, total_diff_count
 
     def diff_to_dict(self, diff_graph: Data) -> dict:
         """Convert the graph diff to a human-readable dictionary format.

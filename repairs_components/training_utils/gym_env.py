@@ -77,7 +77,7 @@ class RepairsEnv(gym.Env):
         self.device = gs.device
         self.dt = env_cfg.get("dt", 0.02)  # Default to 50Hz if not specified
         self.tasks = tasks
-        self.env_setup = env_setup
+        self.env_setups = env_setups
         self.num_scenes_per_task = num_scenes_per_task
 
         # Store configuration dictionaries
@@ -97,9 +97,9 @@ class RepairsEnv(gym.Env):
         # if scene meshes don't exist yet, create them now.
         generate_scene_meshes()
 
-        init_generate_per_scene = env_cfg["dataloader_settings"]["prefetch_memory_size"]
+        prefetch_memory_size = env_cfg["dataloader_settings"]["prefetch_memory_size"]
         init_generate_per_scene = torch.full(
-            (concurrent_scenes,), init_generate_per_scene
+            (concurrent_scenes,), prefetch_memory_size
         )
 
         partial_env_configs = create_env_configs(
@@ -142,7 +142,7 @@ class RepairsEnv(gym.Env):
             env_setups=env_setups,
             tasks=tasks,
             batch_dim=self.batch_dim,
-            num_scenes_per_task=self.num_scenes_per_task,
+            prefetch_memory_size=prefetch_memory_size,
         )
 
         # Set default joint positions from config

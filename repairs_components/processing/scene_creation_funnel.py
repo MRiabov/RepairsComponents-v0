@@ -16,15 +16,11 @@ from repairs_components.processing.translation import (
     translate_compound_to_sim_state,
     translate_to_genesis_scene,
 )
-from repairs_components.geometry.base_env.tooling_stand_plate import (
-    genesis_setup,
-    plate_env_bd_geometry,
-)
+
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 import torch
 import genesis as gs
 from repairs_components.training_utils.sim_state_global import merge_global_states
-from repairs_components.training_utils.multienv_dataloader import MultiEnvDataLoader
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
 )

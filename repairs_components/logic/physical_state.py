@@ -48,15 +48,33 @@ class PhysicalState:
             (0, 12), dtype=torch.float32, device=self.device
         )  # placeholder size
 
-    def register_body(self, name: str, position: torch.Tensor, rotation: torch.Tensor):
+        self.graph.position = torch.empty(
+            (0, 3), dtype=torch.float32, device=self.device
+        )
+        self.graph.quat = torch.empty((0, 4), dtype=torch.float32, device=self.device)
+
+    def register_body(self, name: str, position: tuple, rotation: tuple):
         assert name not in self.indices, f"Body {name} already registered"
-        assert position.shape == (3,) and rotation.shape == (4,)
+        # assert position.shape == (3,) and rotation.shape == (4,) # was a tensor.
+        assert len(position) == 3 and len(rotation) == 3, (
+            f"Position must be 3D vector, got {position}"
+            f"Rotation must be 4D vector, got {rotation}"
+        )
+        from scipy.spatial.transform import Rotation as R
+
+        rotation = R.from_euler("xyz", rotation).as_quat()
 
         idx = len(self.indices)
         self.indices[name] = idx
 
-        self.graph.position = torch.cat([self.graph.position, position], dim=0)
-        self.graph.quat = torch.cat([self.graph.quat, rotation], dim=0)
+        self.graph.position = torch.cat(
+            [self.graph.position, torch.tensor(position, device=self.device).unsqueeze(0)],
+            dim=0,
+        )
+        self.graph.quat = torch.cat(
+            [self.graph.quat, torch.tensor(rotation, device=self.device).unsqueeze(0)],
+            dim=0,
+        )
 
     def register_fastener(self, name: str, fastener: Fastener):
         self.fastener_prototype[name] = fastener
@@ -92,23 +110,28 @@ class PhysicalState:
         self.graph.edge_index = edge_index[:, keep_mask]
         self.graph.edge_attr = self.graph.edge_attr[keep_mask]
 
-    def diff(self, other: "PhysicalState") -> Data:
+    def diff(self, other: "PhysicalState") -> tuple[Data, int]:
         """Compute a graph diff between two physical states.
 
         Returns:
-            Data: A PyG Data object representing the diff with:
-                - x: Node features [num_nodes, node_feature_dim]
-                - edge_index: Edge connections [2, num_edges]
-                - edge_attr: Edge features [num_edges, edge_feature_dim]
-                - node_mask: Boolean mask of changed nodes [num_nodes]
-                - edge_mask: Boolean mask of changed edges [num_edges]
-                - num_nodes: Total number of nodes
+            tuple[Data, int]: A tuple containing:
+                - A PyG Data object representing the diff with:
+                    - x: Node features [num_nodes, node_feature_dim]
+                    - edge_index: Edge connections [2, num_edges]
+                    - edge_attr: Edge features [num_edges, edge_feature_dim]
+                    - node_mask: Boolean mask of changed nodes [num_nodes]
+                    - edge_mask: Boolean mask of changed edges [num_edges]
+                    - num_nodes: Total number of nodes
+                - An integer count of the total number of differences
         """
         # Get node differences
-        node_diff, _ = _diff_node_features(self.graph, other.graph)
+        node_diff, node_diff_count = _diff_node_features(self.graph, other.graph)
 
         # Get edge differences
-        edge_diff, _ = _diff_edge_features(self.graph, other.graph)
+        edge_diff, edge_diff_count = _diff_edge_features(self.graph, other.graph)
+        
+        # Calculate total differences
+        total_diff_count = node_diff_count + edge_diff_count
 
         # Create diff graph with same nodes as original
         diff_graph = Data()
@@ -181,7 +204,7 @@ class PhysicalState:
         diff_graph.edge_mask = edge_mask
         diff_graph.num_nodes = num_nodes
 
-        return diff_graph
+        return diff_graph, int(total_diff_count)
 
     def diff_to_dict(self, diff_graph: Data) -> dict:
         """Convert the graph diff to a human-readable dictionary format.
@@ -262,6 +285,7 @@ def _quaternion_angle_diff(q1, q2):
 def _diff_node_features(
     data_a: Data, data_b: Data, pos_threshold=3.0, deg_threshold=5.0
 ):
+    assert data_a.pos is not None and data_b.pos is not None, "Both graphs must have positions."
     pos_diff = torch.norm(data_a.pos - data_b.pos, dim=1)
     rot_diff = _quaternion_angle_diff(data_a.quat, data_b.quat)
 

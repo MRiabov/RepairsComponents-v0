@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import torch
 from repairs_components.processing.scene_creation_funnel import (
     create_env_configs,
-    move_entities_to_pos,
 )
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
@@ -18,6 +17,8 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
 )
 import genesis as gs
+from repairs_components.training_utils.env_setup import EnvSetup
+from repairs_components.processing.tasks import Task
 
 
 class MultiEnvDataLoader:
@@ -299,7 +300,9 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         self.num_scenes_per_task = num_scenes_per_task
         self.batches_in_memory_per_scene = batches_in_memory_per_scene
 
-        assert len(scenes)==len(env_setups),"Count of scenes and env_setups must match."
+        assert len(scenes) == len(env_setups), (
+            "Count of scenes and env_setups must match."
+        )
 
         # Create preprocessing function that generates batches for scenes
         def scene_preprocessing_fn(

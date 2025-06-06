@@ -7,6 +7,7 @@ from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np
 from abc import ABC, abstractmethod
 
+
 class Connector(ElectricalComponent):
     @property
     @abstractmethod
