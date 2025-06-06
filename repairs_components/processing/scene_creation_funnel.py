@@ -119,7 +119,7 @@ def create_env_configs(
             initial_diffs={
                 k: torch.cat([diff[k] for diff in init_diffs], dim=0)
                 for k in init_diffs[0].keys()
-            }, # I think this will fail... diffs are not just flat tensors, they are sparse.
+            },  # I think this will fail... diffs are not just flat tensors, they are sparse.
             initial_diff_counts=torch.tensor(init_diff_counts),
             scene_id=scene_idx,
         )

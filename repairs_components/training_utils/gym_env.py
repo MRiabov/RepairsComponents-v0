@@ -45,7 +45,7 @@ def gs_rand_float(lower, upper, shape, device):
 class RepairsEnv(gym.Env):
     def __init__(
         self,
-        env_setup: EnvSetup,
+        env_setups: List[EnvSetup],
         tasks: List[Task],
         batch_dim: int,
         # Batch dim number of parallel environments to simulate
@@ -97,6 +97,15 @@ class RepairsEnv(gym.Env):
         # if scene meshes don't exist yet, create them now.
         generate_scene_meshes()
 
+        init_generate_per_scene = env_cfg["dataloader_settings"]["prefetch_memory_size"]
+        init_generate_per_scene = torch.full(
+            (concurrent_scenes,), init_generate_per_scene
+        )
+
+        partial_env_configs = create_env_configs(
+            env_setups, tasks, init_generate_per_scene
+        )[0]  # for init I need only one. (it will be discarded later)
+
         # scene init setup # note: technically this should be the Dataloader worker init fn.
         for scene_idx in range(concurrent_scenes):
             scene = gs.Scene(  # empty scene
@@ -104,16 +113,11 @@ class RepairsEnv(gym.Env):
                 show_viewer=False,
             )
             scenes.append(scene)
-            partial_env_configs_batch = create_env_configs(
-                env_setup,
-                tasks,
-                self.num_scenes_per_task,  # FIXME
-            )[0]  # for init I need only one. (it will be discarded later)
 
             scene, cameras, gs_entities, franka = initialize_and_build_scene(
                 scene,  # build scene.
-                env_setup.desired_state_geom(),
-                partial_env_configs_batch.desired_state,
+                env_setups[scene_idx].desired_state_geom(),
+                partial_env_configs.desired_state,
                 self.batch_dim,
             )
 
@@ -123,19 +127,19 @@ class RepairsEnv(gym.Env):
                     scene=scene,
                     gs_entities=gs_entities,
                     cameras=tuple(cameras),
-                    current_state=partial_env_configs_batch.current_state,
-                    desired_state=partial_env_configs_batch.desired_state,
-                    vox_init=partial_env_configs_batch.vox_init,
-                    vox_des=partial_env_configs_batch.vox_des,
-                    initial_diffs=partial_env_configs_batch.initial_diffs,
-                    initial_diff_counts=partial_env_configs_batch.initial_diff_counts,
+                    current_state=partial_env_configs.current_state,
+                    desired_state=partial_env_configs.desired_state,
+                    vox_init=partial_env_configs.vox_init,
+                    vox_des=partial_env_configs.vox_des,
+                    initial_diffs=partial_env_configs.initial_diffs,
+                    initial_diff_counts=partial_env_configs.initial_diff_counts,
                     scene_id=scene_idx,
                 )
             )
         # create the dataloader to update scenes.
         self.env_dataloader = RepairsEnvDataLoader(
             scenes=scenes,
-            env_setups=[env_setup],
+            env_setups=env_setups,
             tasks=tasks,
             batch_dim=self.batch_dim,
             num_scenes_per_task=self.num_scenes_per_task,

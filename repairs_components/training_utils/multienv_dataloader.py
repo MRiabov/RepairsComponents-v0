@@ -11,10 +11,13 @@ from repairs_components.processing.scene_creation_funnel import (
     create_env_configs,
     move_entities_to_pos,
 )
+from repairs_components.processing.tasks import Task
+from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.sim_state_global import merge_global_states
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
 )
+import genesis as gs
 
 
 class MultiEnvDataLoader:
@@ -22,7 +25,7 @@ class MultiEnvDataLoader:
         self,
         num_environments: int,  # in general called "environments" though it's scenes.
         preprocessing_fn: Callable,
-        prefetch_size: int = 3,
+        prefetch_size: int = 256,
         max_workers: int = 4,
     ):
         """
@@ -295,6 +298,8 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         self.batch_dim = batch_dim
         self.num_scenes_per_task = num_scenes_per_task
         self.batches_in_memory_per_scene = batches_in_memory_per_scene
+
+        assert len(scenes)==len(env_setups),"Count of scenes and env_setups must match."
 
         # Create preprocessing function that generates batches for scenes
         def scene_preprocessing_fn(
