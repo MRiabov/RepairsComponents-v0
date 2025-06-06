@@ -1,4 +1,5 @@
 import random
+from genesis.vis.visualizer import Camera
 import torch
 import genesis as gs
 import gymnasium as gym
@@ -32,6 +33,8 @@ from repairs_components.processing.scene_creation_funnel import (
 from repairs_components.training_utils.multienv_dataloader import RepairsEnvDataLoader
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
+    merge_concurrent_scene_configs,
+    merge_scene_configs_at_idx,
 )
 
 
@@ -102,7 +105,9 @@ class RepairsEnv(gym.Env):
             )
             scenes.append(scene)
             partial_env_configs_batch = create_env_configs(
-                env_setup, tasks, batch_dim, self.num_scenes_per_task
+                env_setup,
+                tasks,
+                self.num_scenes_per_task,  # FIXME
             )[0]  # for init I need only one. (it will be discarded later)
 
             scene, cameras, gs_entities, franka = initialize_and_build_scene(
@@ -117,13 +122,13 @@ class RepairsEnv(gym.Env):
                 ConcurrentSceneData(
                     scene=scene,
                     gs_entities=gs_entities,
-                    cameras=cameras,
+                    cameras=tuple(cameras),
                     current_state=partial_env_configs_batch.current_state,
                     desired_state=partial_env_configs_batch.desired_state,
                     vox_init=partial_env_configs_batch.vox_init,
                     vox_des=partial_env_configs_batch.vox_des,
-                    initial_diff=partial_env_configs_batch.initial_diff,
-                    initial_diff_count=partial_env_configs_batch.initial_diff_count,
+                    initial_diffs=partial_env_configs_batch.initial_diffs,
+                    initial_diff_counts=partial_env_configs_batch.initial_diff_counts,
                     scene_id=scene_idx,
                 )
             )
@@ -181,7 +186,7 @@ class RepairsEnv(gym.Env):
             # print("gripper_force.shape", gripper_force.shape)
             # Execute the motion planning trajectory using our dedicated module
             execute_straight_line_trajectory(
-                franka=self.franka,
+                franka=scene_data.gs_entities["franka@control"],
                 scene=scene_data.scene,
                 target_pos=pos,
                 target_quat=quat,
@@ -208,8 +213,11 @@ class RepairsEnv(gym.Env):
             reward, done = calculate_reward_and_done(
                 current_sim_state,  # Updated by step_repairs
                 scene_data.desired_state,
-                scene_data.initial_diff_count,
+                scene_data.initial_diff_counts,
             )
+
+            # reset at done
+            self.reset_idx(done)
 
             # Additional info for debugging
             info = {
@@ -233,50 +241,57 @@ class RepairsEnv(gym.Env):
 
         # get from which scene(s) we are resetting
         scene_idx = envs_idx // self.batch_dim
-
-        # get the scene data
-        scene_data = self.env_dataloader.get_processed_data(scene_idx)
+        unique_scene_idx, counts = torch.unique(scene_idx, return_counts=True)
 
         # update the scene
         # Reset robot joint positions to default
         dof_pos = self.default_dof_pos.expand(envs_idx.shape[0], -1)
-        franka.set_dofs_position(
-            position=dof_pos,
-            # dofs_idx_local=self.dof_idx,
-            envs_idx=envs_idx,
-        )
 
-        for env_i in envs_idx:
-            # calculate the num of environments to reset
-            num_envs_to_reset = torch.count_nonzero(scene_idx == env_i)
+        for scene_id in unique_scene_idx:
+            # get the number of environments to reset
+            num_envs_to_reset = counts[scene_id]
+            envs_idx_to_reset_this_scene = torch.nonzero(scene_idx == scene_id).squeeze(
+                1
+            )
 
-            for _ in range(num_envs_to_reset):
-                # get the scene data
-                scene_data: ConcurrentSceneData = (
-                    self.env_dataloader.get_processed_data(env_i)
-                )  # note: ideally batch this operation under the hood.
+            self.concurrent_scenes_data[scene_id].gs_entities[
+                "franka@control"
+            ].set_dofs_position(
+                position=dof_pos,
+                envs_idx=envs_idx_to_reset_this_scene,
+            )
+
+            reset_scene_data: ConcurrentSceneData = (
+                self.env_dataloader.get_processed_data(
+                    scene_id.item(), get_count=num_envs_to_reset.item()
+                )
+            )
 
             # Create ConcurrentSceneData instance
             new_scene_data = ConcurrentSceneData(
-                scene=scene_data.scene,
-                gs_entities=scene_data.gs_entities,
-                cameras=scene_data.cameras,
-                current_state=scene_data.current_state,
-                desired_state=scene_data.desired_state,
-                vox_init=scene_data.vox_init,
-                vox_des=scene_data.vox_des,
-                initial_diff=scene_data.initial_diff,
-                initial_diff_count=scene_data.initial_diff_count,
+                scene=reset_scene_data.scene,
+                gs_entities=reset_scene_data.gs_entities,
+                cameras=reset_scene_data.cameras,
+                current_state=reset_scene_data.current_state,
+                desired_state=reset_scene_data.desired_state,
+                vox_init=reset_scene_data.vox_init,
+                vox_des=reset_scene_data.vox_des,
+                initial_diffs=reset_scene_data.initial_diffs,
+                initial_diff_counts=reset_scene_data.initial_diff_counts,
+                scene_id=reset_scene_data.scene_id,
             )
-            self.concurrent_scenes_data[env_i] = new_scene_data
+            self.concurrent_scenes_data[scene_id] = new_scene_data
 
             # Move entities to their starting positions
             move_entities_to_pos(
                 new_scene_data.gs_entities, new_scene_data.current_state
             )
 
-        # Update visual states to show the new positions
-        self.scene.visualizer.update_visual_states()
+            # Update visual states to show the new positions
+            self.concurrent_scenes_data[
+                scene_id
+            ].scene.visualizer.update_visual_states()
+
         return self.concurrent_scenes_data
 
     def reset(self) -> tuple[torch.Tensor, dict]:
@@ -304,8 +319,7 @@ class RepairsEnv(gym.Env):
 
             all_env_obs.append(video_obs)
 
-        info = {"initial_diff_count": self.initial_diff_count}
-        return torch.stack(all_env_obs, dim=0), info
+        return torch.stack(all_env_obs, dim=0), {}
 
 
 def _render_all_cameras(cameras: list[Camera]):

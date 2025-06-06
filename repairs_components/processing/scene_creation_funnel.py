@@ -28,47 +28,56 @@ from repairs_components.training_utils.multienv_dataloader import MultiEnvDataLo
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
 )
+import numpy as np
 
 
 def create_env_configs(
     env_setup: EnvSetup,  # note: there must be one gs scene per EnvSetup. So this could be done in for loop.
     tasks: list[Task],
-    batch_dim: int,
-    num_scenes_per_task: int = 128,  # this is how many states to create.
-):
+    num_configs_to_generate_per_scene: torch.Tensor,  # int [len]
+) -> list[ConcurrentSceneData]:
     """`create_env_configs` is a general, high_level function responsible for creating of randomized configurations
-    (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis."""
-    # note: ideally, `build` would, of course, happen async.
+    (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis.
+
+    `create_env_configs` should only be called from `multienv_dataloader`."""
     assert len(tasks) > 0, "Tasks can not be empty."
-    assert num_scenes_per_task > 0, "num_scenes_per_task can not be 0."
-    assert (len(tasks) * num_scenes_per_task) % batch_dim == 0, (
-        "In order to support easy batching, num of scenes per task * task must be divisible by batch_dim."
+    assert any(num_configs_to_generate_per_scene) > 0, (
+        "At least one scene must be generated."
     )
-    assert batch_dim <= (len(tasks) * num_scenes_per_task), (
-        "batch_dim must be less than or equal to the number of training batches."
+    assert len(num_configs_to_generate_per_scene) == len(tasks), (
+        "Number of tasks and number of configs to generate must match."
     )
-    training_batches_created = (len(tasks) * num_scenes_per_task) // batch_dim
 
-    voxel_grids_initial = torch.zeros((batch_dim, 256, 256, 256), dtype=torch.uint8)
-    voxel_grids_desired = torch.zeros((batch_dim, 256, 256, 256), dtype=torch.uint8)
-    starting_sim_states = []
-    desired_sim_states = []
+    # FIXME: below generates only for starting states. This is a subcase of generating for however much we need.
+    # instead it should generate as per num_configs_to_generate.
 
-    # training batches as for a dataloader/ML training batches.
-    training_batches = []
-    init_diffs = []
-    init_diff_counts = []
-
+    scene_config_batches: list[ConcurrentSceneData] = []
     # create starting_state
-    for task_idx, task in enumerate(tasks):
-        for env_i in range(num_scenes_per_task):
-            index = task_idx * num_scenes_per_task + env_i
+    for scene_idx, scene_gen_count in enumerate(num_configs_to_generate_per_scene):
+        if scene_gen_count == 0:
+            scene_config_batches.append(None)
+            continue
+        voxel_grids_initial = torch.zeros(
+            (scene_gen_count, 256, 256, 256), dtype=torch.uint8
+        )
+        voxel_grids_desired = torch.zeros(
+            (scene_gen_count, 256, 256, 256), dtype=torch.uint8
+        )
+
+        starting_sim_states = []
+        desired_sim_states = []
+
+        # training batches as for a dataloader/ML training batches.
+        training_batches = []
+        init_diffs = []
+        init_diff_counts = []
+        for _ in range(scene_gen_count):
             starting_scene_geom_ = starting_state_geom(
-                env_setup, task, env_size=(64, 64, 64)
+                env_setup, tasks[scene_idx], env_size=(64, 64, 64)
             )  # create task... in a for loop...
             # note: at the moment the starting scene goes out of bounds a little, but whatever, it'll only generalize better.
             desired_state_geom_ = desired_state_geom(
-                env_setup, task, env_size=(64, 64, 64)
+                env_setup, tasks[scene_idx], env_size=(64, 64, 64)
             )
 
             # voxelize both
@@ -79,8 +88,8 @@ def create_env_configs(
                 desired_state_geom_, voxel_size=64 / 256
             )
 
-            voxel_grids_initial[index] = torch.from_numpy(starting_voxel_grid)
-            voxel_grids_desired[index] = torch.from_numpy(desired_voxel_grid)
+            voxel_grids_initial[scene_idx] = torch.from_numpy(starting_voxel_grid)
+            voxel_grids_desired[scene_idx] = torch.from_numpy(desired_voxel_grid)
 
             # create RepairsSimState for both
             starting_sim_state = translate_compound_to_sim_state([starting_scene_geom_])
@@ -95,37 +104,24 @@ def create_env_configs(
             init_diffs.append(diff)
             init_diff_counts.append(initial_diff_count)
 
-    # pack them into an easily loadable list.
-    for i in range(training_batches_created):
-        start_idx = i * batch_dim
-        end_idx = (i + 1) * batch_dim
-        batch_starting_sim_state = merge_global_states(
-            starting_sim_states[start_idx:end_idx]
-        )
-        batch_desired_sim_state = merge_global_states(
-            desired_sim_states[start_idx:end_idx]
-        )
-        # note: this is a *partial* task batch.
-        # it does not have Genesis entities or scene, but it is used
-        # to make it simpler to return and accept this method.
-
-        partial_task_batch = ConcurrentSceneData(
+        starting_sim_state = merge_global_states(starting_sim_states)
+        desired_sim_state = merge_global_states(desired_sim_states)
+        this_scene_configs = ConcurrentSceneData(
             scene=None,
             gs_entities=None,
             cameras=None,
-            current_state=batch_starting_sim_state,
-            desired_state=batch_desired_sim_state,
-            vox_init=voxel_grids_initial[start_idx:end_idx],
-            vox_des=voxel_grids_desired[start_idx:end_idx],
-            initial_diff=init_diffs[start_idx:end_idx],
-            initial_diff_count=init_diff_counts[start_idx:end_idx],
-            scene_id=i,
+            current_state=starting_sim_state,
+            desired_state=desired_sim_state,
+            vox_init=voxel_grids_initial,
+            vox_des=voxel_grids_desired,
+            initial_diffs=init_diffs,
+            initial_diff_counts=torch.tensor(init_diff_counts),
+            scene_id=scene_idx,
         )
-
-        training_batches.append(partial_task_batch)
+        scene_config_batches.append(this_scene_configs)
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
-    return training_batches
+    return scene_config_batches
 
 
 def starting_state_geom(

@@ -5,6 +5,7 @@ which demonstrates how things should be - e.g. in an electronics circuit, a cert
 lamps must be ignited when the power is supplied, which does not happen at the moment
 """
 
+import torch
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 
 
@@ -14,7 +15,10 @@ def calculate_reward_and_done(
     desired_state: RepairsSimState,
     initial_diff_count: int,
     reward_multiplier: float = 10.0,
-):
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """returns:
+    - Reward [ml_batch_dim,]
+    - terminated [ml_batch_dim, ]"""
     diff_count = current_state.diff(desired_state)
     completion_rate = calculate_partial_reward(initial_diff_count, diff_count)
     return completion_rate * reward_multiplier, completion_rate >= 1.0
