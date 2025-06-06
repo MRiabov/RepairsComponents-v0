@@ -92,18 +92,141 @@ class PhysicalState:
         self.graph.edge_index = edge_index[:, keep_mask]
         self.graph.edge_attr = self.graph.edge_attr[keep_mask]
 
-    def diff(self, other: "PhysicalState") -> tuple[dict, int]:
-        edge_diff, edge_features_diff_count = _diff_edge_features(
-            self.graph, other.graph
+    def diff(self, other: "PhysicalState") -> Data:
+        """Compute a graph diff between two physical states.
+        
+        Returns:
+            Data: A PyG Data object representing the diff with:
+                - x: Node features [num_nodes, node_feature_dim]
+                - edge_index: Edge connections [2, num_edges]
+                - edge_attr: Edge features [num_edges, edge_feature_dim]
+                - node_mask: Boolean mask of changed nodes [num_nodes]
+                - edge_mask: Boolean mask of changed edges [num_edges]
+                - num_nodes: Total number of nodes
+        """
+        # Get node differences
+        node_diff, _ = _diff_node_features(self.graph, other.graph)
+        
+        # Get edge differences
+        edge_diff, _ = _diff_edge_features(self.graph, other.graph)
+        
+        # Create diff graph with same nodes as original
+        diff_graph = Data()
+        num_nodes = max(
+            self.graph.num_nodes if hasattr(self.graph, 'num_nodes') else 0,
+            other.graph.num_nodes if hasattr(other.graph, 'num_nodes') else 0
         )
-        node_diff, node_features_diff_count = _diff_node_features(
-            self.graph, other.graph
-        )
-
-        return {
-            "nodes": node_diff,
-            "edges": edge_diff,
-        }, int(edge_features_diff_count + node_features_diff_count)
+        
+        # Node features: [pos_diff, rot_diff, is_changed]
+        pos_diffs = torch.zeros((num_nodes, 3), device=self.device)
+        rot_diffs = torch.zeros((num_nodes, 1), device=self.device)
+        node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=self.device)
+        
+        if 'changed_indices' in node_diff and len(node_diff['changed_indices']) > 0:
+            changed_indices = node_diff['changed_indices'].to(self.device)
+            pos_diffs[changed_indices] = node_diff['pos_diff'].to(self.device).unsqueeze(-1)
+            rot_diffs[changed_indices] = node_diff['rot_diff'].to(self.device).unsqueeze(-1)
+            node_mask[changed_indices] = True
+        
+        # Combine node features
+        diff_graph.x = torch.cat([pos_diffs, rot_diffs, node_mask.float().unsqueeze(-1)], dim=-1)
+        diff_graph.node_mask = node_mask
+        
+        # Edge features and mask
+        edge_index = torch.tensor([], dtype=torch.long, device=self.device).reshape(2, 0)
+        edge_attr = torch.tensor([], device=self.device).reshape(0, 3)  # [is_added, is_removed, is_changed]
+        edge_mask = torch.tensor([], dtype=torch.bool, device=self.device)
+        
+        if edge_diff['added'] or edge_diff['removed']:
+            added_edges = torch.tensor(edge_diff['added'], device=self.device).t() if edge_diff['added'] else torch.tensor([], device=self.device).long().reshape(2, 0)
+            removed_edges = torch.tensor(edge_diff['removed'], device=self.device).t() if edge_diff['removed'] else torch.tensor([], device=self.device).long().reshape(2, 0)
+            
+            # Combine all edges
+            edge_index = torch.cat([added_edges, removed_edges], dim=1)
+            
+            # Create edge features
+            added_attrs = torch.zeros((added_edges.size(1), 3), device=self.device)
+            added_attrs[:, 0] = 1  # is_added
+            added_attrs[:, 2] = 1   # is_changed
+            
+            removed_attrs = torch.zeros((removed_edges.size(1), 3), device=self.device)
+            removed_attrs[:, 1] = 1  # is_removed
+            removed_attrs[:, 2] = 1   # is_changed
+            
+            edge_attr = torch.cat([added_attrs, removed_attrs], dim=0)
+            edge_mask = torch.ones(edge_index.size(1), dtype=torch.bool, device=self.device)
+        
+        diff_graph.edge_index = edge_index
+        diff_graph.edge_attr = edge_attr
+        diff_graph.edge_mask = edge_mask
+        diff_graph.num_nodes = num_nodes
+        
+        return diff_graph
+        
+    def diff_to_dict(self, diff_graph: Data) -> dict:
+        """Convert the graph diff to a human-readable dictionary format.
+        
+        Args:
+            diff_graph: The graph diff returned by diff()
+            
+        Returns:
+            dict: A dictionary with 'nodes' and 'edges' keys containing
+                  human-readable diff information
+        """
+        result = {
+            'nodes': {
+                'changed_indices': diff_graph.node_mask.nonzero().squeeze(-1).tolist(),
+                'position_diffs': diff_graph.x[..., :3].tolist(),
+                'rotation_diffs': diff_graph.x[..., 3:4].squeeze(-1).tolist()
+            },
+            'edges': {
+                'added': diff_graph.edge_index[:, diff_graph.edge_attr[:, 0].bool()].t().tolist(),
+                'removed': diff_graph.edge_index[:, diff_graph.edge_attr[:, 1].bool()].t().tolist()
+            }
+        }
+        return result
+        
+    def diff_to_str(self, diff_graph: Data) -> str:
+        """Convert the graph diff to a human-readable string.
+        
+        Args:
+            diff_graph: The graph diff returned by diff()
+            
+        Returns:
+            str: A formatted string describing the diff
+        """
+        diff_dict = self.diff_to_dict(diff_graph)
+        lines = ["Physical State Diff:", "="*50]
+        
+        # Node changes
+        changed_nodes = diff_dict['nodes']['changed_indices']
+        if changed_nodes:
+            lines.append("\nNode Changes:")
+            for i, idx in enumerate(changed_nodes):
+                pos_diff = diff_dict['nodes']['position_diffs'][i]
+                rot_diff = diff_dict['nodes']['rotation_diffs'][i]
+                lines.append(f"  Node {idx}:")
+                lines.append(f"    Position diff: {pos_diff}")
+                lines.append(f"    Rotation diff: {rot_diff}°")
+        
+        # Edge changes
+        added_edges = diff_dict['edges']['added']
+        removed_edges = diff_dict['edges']['removed']
+        
+        if added_edges:
+            lines.append("\nAdded Edges:")
+            for src, dst in added_edges:
+                lines.append(f"  {src} -> {dst}")
+                
+        if removed_edges:
+            lines.append("\nRemoved Edges:")
+            for src, dst in removed_edges:
+                lines.append(f"  {src} -> {dst}")
+                
+        if not (changed_nodes or added_edges or removed_edges):
+            lines.append("No changes detected.")
+            
+        return "\n".join(lines)
 
 
 def _quaternion_angle_diff(q1, q2):
@@ -145,11 +268,7 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
     added = list(b_set - a_set)  # well, this is sloppy, but let it be.
     removed = list(a_set - b_set)
 
-    return {
-        "added": added,
-        "removed": removed,
-    }, len(added) + len(removed)
-
+    return {"added": added, "removed": removed}, len(added) + len(removed)
 
 
 # def batch_graph_diff(batch_a: Batch, batch_b: Batch):
