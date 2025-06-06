@@ -20,7 +20,7 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
 class MultiEnvDataLoader:
     def __init__(
         self,
-        num_environments: int,
+        num_environments: int,  # in general called "environments" though it's scenes.
         preprocessing_fn: Callable,
         prefetch_size: int = 3,
         max_workers: int = 4,
@@ -45,8 +45,8 @@ class MultiEnvDataLoader:
         }
 
         # Track which environments are currently active/requested
-        self.active_envs = set()
-        self.env_access_history = deque(maxlen=100)  # Track recent access patterns
+        self.active_envs = set()  # TODO: remove.
+        # self.env_access_history = deque(maxlen=100)  # Track recent access patterns
 
         # Threading components
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -60,7 +60,7 @@ class MultiEnvDataLoader:
         self.prefetch_thread.start()
 
         # Environment-specific state tracking
-        self.env_states = {}  # Store current state per environment
+        # self.env_states = {}  # Store current state per environment
         self.pending_futures = defaultdict(list)  # Track ongoing preprocessing tasks
 
     def register_environment(self, env_idx: int, initial_state: Any = None):
@@ -256,7 +256,7 @@ class MultiEnvDataLoader:
                     env_idx: len(futures)
                     for env_idx, futures in self.pending_futures.items()
                 },
-                "recent_access_pattern": list(self.env_access_history)[-10:],
+                # "recent_access_pattern": list(self.env_access_history)[-10:],
             }
         return stats
 
@@ -270,9 +270,9 @@ class MultiEnvDataLoader:
 class RepairsEnvDataLoader(MultiEnvDataLoader):
     def __init__(
         self,
-        scenes: List[Any],  # gs.Scene objects
-        env_setups: List[Any],  # EnvSetup objects
-        tasks: List[Any],  # Task objects
+        scenes: List[gs.Scene],
+        env_setups: List[EnvSetup],
+        tasks: List[Task],
         batch_dim: int = 128,
         num_scenes_per_task: int = 128,
         batches_in_memory_per_scene: int = 8,
@@ -322,23 +322,29 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         num_configs_to_generate_per_scene: torch.Tensor of shape [num_tasks_per_scene] with torch_bool."""
         # FIXME: I also need a possibility of returning controlled-size batches.
         # in fact, I don't need batches in memory at all, I need individual items.
-
+        assert len(self.env_setups) == len(self.active_envs), (
+            "One env setup per one env"
+        )
+        assert len(self.env_setups) == len(num_configs_to_generate_per_scene), (
+            "One env setup per config to generate."
+        )
         # Generate one "chunk" of data for this scene # even though I don't need to generate a chunk.
+
         scene_configs_per_scene = create_env_configs(
-            env_setup=self.env_setups,
+            env_setups=self.env_setups,
             tasks=self.tasks,
             num_configs_to_generate_per_scene=num_configs_to_generate_per_scene,
         )
 
-        for i in range(len(scene_configs_per_scene)):
+        for scene_id in range(len(num_configs_to_generate_per_scene)):
             batch_starting_states = merge_global_states(
-                [scene_configs_per_scene[i].current_state]
+                [scene_configs_per_scene[scene_id].current_state]
             )
             batch_desired_states = merge_global_states(
-                [scene_configs_per_scene[i].desired_state]
+                [scene_configs_per_scene[scene_id].desired_state]
             )
-            vox_init = scene_configs_per_scene[i].vox_init
-            vox_des = scene_configs_per_scene[i].vox_des
+            vox_init = scene_configs_per_scene[scene_id].vox_init
+            vox_des = scene_configs_per_scene[scene_id].vox_des
 
             initial_diffs, initial_diff_count = batch_starting_states.diff(
                 batch_desired_states

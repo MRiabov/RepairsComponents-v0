@@ -32,7 +32,9 @@ import numpy as np
 
 
 def create_env_configs(
-    env_setup: EnvSetup,  # note: there must be one gs scene per EnvSetup. So this could be done in for loop.
+    env_setups: list[
+        EnvSetup
+    ],  # note: there must be one gs scene per EnvSetup. So this could be done in for loop.
     tasks: list[Task],
     num_configs_to_generate_per_scene: torch.Tensor,  # int [len]
 ) -> list[ConcurrentSceneData]:
@@ -73,11 +75,11 @@ def create_env_configs(
         init_diff_counts = []
         for _ in range(scene_gen_count):
             starting_scene_geom_ = starting_state_geom(
-                env_setup, tasks[scene_idx], env_size=(64, 64, 64)
+                env_setups[scene_idx], tasks[scene_idx], env_size=(64, 64, 64)
             )  # create task... in a for loop...
             # note: at the moment the starting scene goes out of bounds a little, but whatever, it'll only generalize better.
             desired_state_geom_ = desired_state_geom(
-                env_setup, tasks[scene_idx], env_size=(64, 64, 64)
+                env_setups[scene_idx], tasks[scene_idx], env_size=(64, 64, 64)
             )
 
             # voxelize both
@@ -114,7 +116,10 @@ def create_env_configs(
             desired_state=desired_sim_state,
             vox_init=voxel_grids_initial,
             vox_des=voxel_grids_desired,
-            initial_diffs=init_diffs,
+            initial_diffs={
+                k: torch.cat([diff[k] for diff in init_diffs], dim=0)
+                for k in init_diffs[0].keys()
+            }, # I think this will fail... diffs are not just flat tensors, they are sparse.
             initial_diff_counts=torch.tensor(init_diff_counts),
             scene_id=scene_idx,
         )

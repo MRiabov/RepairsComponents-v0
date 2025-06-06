@@ -7,36 +7,43 @@ lamps must be ignited when the power is supplied, which does not happen at the m
 
 import torch
 from repairs_components.training_utils.sim_state_global import RepairsSimState
+from repairs_components.training_utils.concurrent_scene_dataclass import (
+    ConcurrentSceneData,
+)
 
 
 # TODO: get the actual values from the mujoco state.
 def calculate_reward_and_done(
-    current_state: RepairsSimState,
-    desired_state: RepairsSimState,
-    initial_diff_count: int,
+    scene_data: ConcurrentSceneData,
     reward_multiplier: float = 10.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """returns:
     - Reward [ml_batch_dim,]
-    - terminated [ml_batch_dim, ]"""
-    diff_count = current_state.diff(desired_state)
-    completion_rate = calculate_partial_reward(initial_diff_count, diff_count)
+    - terminated [ml_batch_dim,]"""
+    _diff, diff_count = scene_data.current_state.diff(scene_data.desired_state)
+    completion_rate = calculate_partial_reward(
+        scene_data.initial_diff_counts, diff_count
+    )
     return completion_rate * reward_multiplier, completion_rate >= 1.0
 
 
 def calculate_partial_reward(
-    count_initial_delta, count_final_delta, partial_multiplier=0.5
-):
+    initial_diff_count: torch.Tensor,
+    final_diff_count: torch.Tensor,
+    partial_multiplier: float = 0.5,
+) -> torch.Tensor:
     completion_percentage = caclulate_completion_percentage(
-        count_initial_delta, count_final_delta
+        initial_diff_count, final_diff_count
     )
     if completion_percentage == 1.0:
-        return 1.0
+        return torch.ones_like(completion_percentage)
     elif completion_percentage > 0:
         return completion_percentage * partial_multiplier
     else:
-        return 0.0
+        return torch.zeros_like(completion_percentage)
 
 
-def caclulate_completion_percentage(count_initial_delta, count_final_delta):
-    return (count_initial_delta - count_final_delta) / count_initial_delta
+def caclulate_completion_percentage(
+    initial_diff_count: torch.Tensor, final_diff_count: torch.Tensor
+) -> torch.Tensor:
+    return (initial_diff_count - final_diff_count) / initial_diff_count

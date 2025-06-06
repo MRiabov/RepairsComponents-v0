@@ -143,7 +143,7 @@ class RepairsEnv(gym.Env):
 
         # Set default joint positions from config
         self.default_dof_pos = torch.tensor(
-            [env_cfg["default_joint_angles"][name] for name in self.joint_names],
+            [env_cfg["default_joint_angles"][name] for name in env_cfg["joint_names"]],
             device=self.device,
         )
 
@@ -210,11 +210,7 @@ class RepairsEnv(gym.Env):
             video_obs = _render_all_cameras(scene_data.cameras)
 
             # Compute reward based on progress toward the goal
-            reward, done = calculate_reward_and_done(
-                current_sim_state,  # Updated by step_repairs
-                scene_data.desired_state,
-                scene_data.initial_diff_counts,
-            )
+            reward, done = calculate_reward_and_done(scene_data)
 
             # reset at done
             self.reset_idx(done)

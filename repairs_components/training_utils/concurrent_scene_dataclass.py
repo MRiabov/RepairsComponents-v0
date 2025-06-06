@@ -25,7 +25,7 @@ class ConcurrentSceneData:
     desired_state: RepairsSimState
     vox_init: torch.Tensor
     vox_des: torch.Tensor
-    initial_diffs: dict[str, torch.Tensor] # feature diffs and node diffs.
+    initial_diffs: dict[str, torch.Tensor]  # feature diffs and node diffs.
     initial_diff_counts: torch.Tensor  # shape: (batch_dim // concurrent_scenes,)
     scene_id: int
     "A safety int to ensure we don't access the wrong scene."
