@@ -55,9 +55,9 @@ class RepairsSimState(SimState):
             fluid_diffs.append(fluid_diff)
             fluid_diff_counts.append(fluid_diff_count)
 
-        electronics_diff_counts = torch.stack(electronics_diff_counts)
-        physical_diff_counts = torch.stack(physical_diff_counts)
-        fluid_diff_counts = torch.stack(fluid_diff_counts)
+        electronics_diff_counts = torch.tensor(electronics_diff_counts)
+        physical_diff_counts = torch.tensor(physical_diff_counts)
+        fluid_diff_counts = torch.tensor(fluid_diff_counts)
         total_diff_counts = (
             electronics_diff_counts + physical_diff_counts + fluid_diff_counts
         )

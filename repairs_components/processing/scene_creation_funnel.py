@@ -19,6 +19,7 @@ from repairs_components.processing.translation import (
 
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 import torch
+from torch_geometric.data import Batch
 import genesis as gs
 from repairs_components.training_utils.sim_state_global import merge_global_states
 from repairs_components.training_utils.concurrent_scene_dataclass import (
@@ -69,6 +70,8 @@ def create_env_configs(
         training_batches = []
         init_diffs = []
         init_diff_counts = []
+
+        voxelization_cache = {}
         for _ in range(scene_gen_count):
             starting_scene_geom_ = starting_state_geom(
                 env_setups[scene_idx], tasks[scene_idx], env_size=(64, 64, 64)
@@ -79,11 +82,17 @@ def create_env_configs(
             )
 
             # voxelize both
-            starting_voxel_grid = export_voxel_grid(
-                starting_scene_geom_, voxel_size=64 / 256
+            starting_voxel_grid, voxelization_cache = export_voxel_grid(
+                starting_scene_geom_,
+                voxel_size=64 / 256,
+                cached=True,
+                cache=voxelization_cache,
             )
-            desired_voxel_grid = export_voxel_grid(
-                desired_state_geom_, voxel_size=64 / 256
+            desired_voxel_grid, voxelization_cache = export_voxel_grid(
+                desired_state_geom_,
+                voxel_size=64 / 256,
+                cached=True,
+                cache=voxelization_cache,
             )
 
             voxel_grids_initial[scene_idx] = torch.from_numpy(starting_voxel_grid)
@@ -112,10 +121,10 @@ def create_env_configs(
             desired_state=desired_sim_state,
             vox_init=voxel_grids_initial,
             vox_des=voxel_grids_desired,
-            initial_diffs={
-                k: torch.cat([diff[k] for diff in init_diffs], dim=0)
+            initial_diffs={  # aggregate individual Data diffs into PyG Batches
+                k: Batch.from_data_list([d[k][0] for d in init_diffs])
                 for k in init_diffs[0].keys()
-            },  # I think this will fail... diffs are not just flat tensors, they are sparse.
+            },  # note: diff[k][0] because diff[k] is a list with a single diff (I process them in a loop above.)
             initial_diff_counts=torch.tensor(init_diff_counts),
             scene_id=scene_idx,
         )
