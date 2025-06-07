@@ -38,9 +38,7 @@ class PhysicalState:
     fastener_prototype: dict[str, Fastener] = field(default_factory=dict)
 
     def __post_init__(self):
-        self.graph.x = torch.empty(
-            (0, 7), dtype=torch.float32, device=self.device
-        )  # pos(3) + quat(4)
+        # Initialize graph attributes
         self.graph.edge_index = torch.empty(
             (2, 0), dtype=torch.long, device=self.device
         )
@@ -48,9 +46,10 @@ class PhysicalState:
             (0, 12), dtype=torch.float32, device=self.device
         )  # placeholder size
 
+        # Node attributes
         self.graph.position = torch.empty(
             (0, 3), dtype=torch.float32, device=self.device
-        )
+        )  # note: torch_geomeric conventionally uses `pos` for 2d or 3d positions. You could too.
         self.graph.quat = torch.empty((0, 4), dtype=torch.float32, device=self.device)
 
     def register_body(self, name: str, position: tuple, rotation: tuple):
@@ -68,20 +67,26 @@ class PhysicalState:
         self.indices[name] = idx
 
         self.graph.position = torch.cat(
-            [self.graph.position, torch.tensor(position, device=self.device).unsqueeze(0)],
+            [
+                self.graph.position,
+                torch.tensor(position, device=self.device).unsqueeze(0),
+            ],
             dim=0,
         )
         self.graph.quat = torch.cat(
             [self.graph.quat, torch.tensor(rotation, device=self.device).unsqueeze(0)],
             dim=0,
         )
+        # set num_nodes manually because otherwise there is no way for PyG to know the number of nodes.
+        self.graph.num_nodes = len(self.indices)
 
     def register_fastener(self, name: str, fastener: Fastener):
         self.fastener_prototype[name] = fastener
-        # TODO should automatically connect if there are part labels
+        # FIXME should automatically connect if there are part labels
 
     def connect(self, fastener_name: str, body_a: str, body_b: str):
-        src, dst = self.indices[body_a], self.indices[body_b]
+        src = self.indices[body_a]
+        dst = self.indices[body_b]
 
         # Undirected: add both directions
         new_edges = torch.tensor(
@@ -124,15 +129,17 @@ class PhysicalState:
                     - num_nodes: Total number of nodes
                 - An integer count of the total number of differences
         """
-        assert self.graph.num_edges>0, "Graph must not be empty."
-        assert other.graph.num_edges>0, "Compared graph must not be empty."
-        assert self.graph.num_nodes == other.graph.num_nodes, "Graphs must have the same number of nodes."
+        assert self.graph.num_nodes > 0, "Graph must not be empty."
+        assert other.graph.num_nodes > 0, "Compared graph must not be empty."
+        assert self.graph.num_nodes == other.graph.num_nodes, (
+            "Graphs must have the same number of nodes."
+        )
         # Get node differences
         node_diff, node_diff_count = _diff_node_features(self.graph, other.graph)
 
         # Get edge differences
         edge_diff, edge_diff_count = _diff_edge_features(self.graph, other.graph)
-        
+
         # Calculate total differences
         total_diff_count = node_diff_count + edge_diff_count
 
@@ -143,26 +150,28 @@ class PhysicalState:
             other.graph.num_nodes if hasattr(other.graph, "num_nodes") else 0,
         )
 
-        # Node features: [pos_diff, rot_diff, is_changed]
-        pos_diffs = torch.zeros((num_nodes, 3), device=self.device)
-        rot_diffs = torch.zeros((num_nodes, 1), device=self.device)
-        node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=self.device)
+        # Node features
+        diff_graph.position = torch.zeros((num_nodes, 3), device=self.device)
+        diff_graph.quat = torch.zeros((num_nodes, 4), device=self.device)
+        diff_graph.node_mask = torch.zeros(
+            num_nodes, dtype=torch.bool, device=self.device
+        )
 
         if "changed_indices" in node_diff and len(node_diff["changed_indices"]) > 0:
             changed_indices = node_diff["changed_indices"].to(self.device)
-            pos_diffs[changed_indices] = (
+            diff_graph.position[changed_indices] = (
                 node_diff["pos_diff"].to(self.device).unsqueeze(-1)
             )
-            rot_diffs[changed_indices] = (
-                node_diff["rot_diff"].to(self.device).unsqueeze(-1)
-            )
-            node_mask[changed_indices] = True
 
-        # Combine node features
-        diff_graph.x = torch.cat(
-            [pos_diffs, rot_diffs, node_mask.float().unsqueeze(-1)], dim=-1
-        )
-        diff_graph.node_mask = node_mask
+            # Create identity quaternions for rotation differences
+            rot_diffs = node_diff["rot_diff"].to(self.device)
+            identity_quats = torch.zeros((len(changed_indices), 4), device=self.device)
+            identity_quats[:, 0] = 1.0  # w=1, x=y=z=0 for identity quaternion
+            diff_graph.quat[changed_indices] = (
+                identity_quats  # Store rotation differences as quaternions
+            )
+
+            diff_graph.node_mask[changed_indices] = True
 
         # Edge features and mask
         edge_index = torch.tensor([], dtype=torch.long, device=self.device).reshape(
@@ -222,8 +231,8 @@ class PhysicalState:
         result = {
             "nodes": {
                 "changed_indices": diff_graph.node_mask.nonzero().squeeze(-1).tolist(),
-                "position_diffs": diff_graph.x[..., :3].tolist(),
-                "rotation_diffs": diff_graph.x[..., 3:4].squeeze(-1).tolist(),
+                "position_diffs": diff_graph.position.tolist(),
+                "quaternion_diffs": diff_graph.quat.tolist(),
             },
             "edges": {
                 "added": diff_graph.edge_index[:, diff_graph.edge_attr[:, 0].bool()]
@@ -254,10 +263,10 @@ class PhysicalState:
             lines.append("\nNode Changes:")
             for i, idx in enumerate(changed_nodes):
                 pos_diff = diff_dict["nodes"]["position_diffs"][i]
-                rot_diff = diff_dict["nodes"]["rotation_diffs"][i]
+                quat_diff = diff_dict["nodes"]["quaternion_diffs"][i]
                 lines.append(f"  Node {idx}:")
                 lines.append(f"    Position diff: {pos_diff}")
-                lines.append(f"    Rotation diff: {rot_diff}°")
+                lines.append(f"    Quaternion diff: {quat_diff}")
 
         # Edge changes
         added_edges = diff_dict["edges"]["added"]
@@ -288,15 +297,18 @@ def _quaternion_angle_diff(q1, q2):
 def _diff_node_features(
     data_a: Data, data_b: Data, pos_threshold=3.0, deg_threshold=5.0
 ):
-    assert data_a.pos is not None and data_b.pos is not None, "Both graphs must have positions."
-    pos_diff = torch.norm(data_a.pos - data_b.pos, dim=1)
+    assert data_a.position is not None and data_b.position is not None, (
+        "Both graphs must have positions."
+    )
+    pos_diff = torch.norm(data_a.position - data_b.position, dim=1)
     rot_diff = _quaternion_angle_diff(data_a.quat, data_b.quat)
 
     pos_mask = pos_diff > pos_threshold
     rot_mask = rot_diff > deg_threshold
 
     # Collect indices where there are differences
-    changes = torch.nonzero(pos_mask | rot_mask, as_tuple=False).squeeze()
+    changes = torch.nonzero(pos_mask | rot_mask, as_tuple=False).squeeze(dim=0)
+    # Note^ I did not check whether dim=0 or dim=1, maybe debug here. (it was flat squeeze.)
     return {
         "changed_indices": changes,
         "pos_diff": pos_diff[pos_mask],
@@ -305,7 +317,7 @@ def _diff_node_features(
 
 
 def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
-    #FIXME: does this not check for feature value differences? 
+    # FIXME: does this not check for feature value differences?
     # Stack edge pairs for easy comparison
     def to_sorted_tuple_tensor(edge_index):
         sorted_idx = edge_index.sort(dim=0)[0]

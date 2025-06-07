@@ -24,7 +24,13 @@ class ElectronicsState(SimState):
         # Initialize sparse graph representation
         self.indices = {}
         self.graph = Data()
-        self.graph.edge_index = torch.empty((2, 0), dtype=torch.long)
+        self.graph.edge_index = torch.empty(
+            (2, 0), dtype=torch.long, device=self.device
+        )
+        #fixme: better go from graph.x to individual features... I think.
+        self.graph.x = torch.empty(
+            (0, 2), dtype=torch.float32, device=self.device
+        )  # [max_voltage, max_current]
         self.graph.num_nodes = 0
         self._graph_built = False
 
@@ -34,6 +40,15 @@ class ElectronicsState(SimState):
         # Build index mapping
         self.indices = {name: idx for idx, name in enumerate(self.components.keys())}
         num_nodes = len(self.indices)
+
+        # Initialize node features with max_load or [0,0] if not specified
+        node_features = []
+        for comp in self.components.values():
+            if comp.max_load is not None:
+                node_features.append([comp.max_load[0], comp.max_load[1]])
+            else:
+                node_features.append([0.0, 0.0])  # Default to no load limit
+
         # Gather edges
         edge_list: list[tuple[int, int]] = []
         for name, comp in self.components.items():
@@ -41,12 +56,19 @@ class ElectronicsState(SimState):
             for other in comp.connected_to:
                 dst = self.indices[other.name]
                 edge_list.append((src, dst))
-        if edge_list:
-            edge_index = torch.tensor(edge_list, dtype=torch.long).t().contiguous()
-        else:
-            edge_index = torch.empty((2, 0), dtype=torch.long)
+
+        # Create graph data
         data = Data()
-        data.edge_index = edge_index
+        if edge_list:
+            data.edge_index = (
+                torch.tensor(edge_list, dtype=torch.long, device=self.device)
+                .t()
+                .contiguous()
+            )
+        else:
+            data.edge_index = torch.empty((2, 0), dtype=torch.long, device=self.device)
+
+        data.x = torch.tensor(node_features, dtype=torch.float32, device=self.device)
         data.num_nodes = num_nodes
         self.graph = data
         self._graph_built = True
@@ -65,20 +87,22 @@ class ElectronicsState(SimState):
                     - num_nodes: Total number of nodes
                 - An integer count of the total number of differences
         """
-        #if no electronics is present...
-        if len(self.components)==0: 
-            assert len(other.components)==0, "Other graph must be empty."
+        # if no electronics is present...
+        if len(self.components) == 0:
+            assert len(other.components) == 0, "Other graph must be empty."
             return Data(), 0
-        assert self.graph.num_nodes>0, "Graph must not be empty."
-        assert other.graph.num_nodes>0, "Compared graph must not be empty."
-        assert self.graph.num_nodes == other.graph.num_nodes, "Graphs must have the same number of nodes."
+        assert self.graph.num_nodes > 0, "Graph must not be empty."
+        assert other.graph.num_nodes > 0, "Compared graph must not be empty."
+        assert self.graph.num_nodes == other.graph.num_nodes, (
+            "Graphs must have the same number of nodes."
+        )
         # Ensure graphs are built
         self._build_graph()
         other._build_graph()
 
         # Get edge differences
         edge_diff, edge_diff_count = _diff_edge_features(self.graph, other.graph)
-        
+
         # Calculate total differences (only edge differences for now, as nodes are just existence checks)
         total_diff_count = edge_diff_count
 
@@ -94,7 +118,16 @@ class ElectronicsState(SimState):
         if hasattr(self.graph, "num_nodes") and hasattr(other.graph, "num_nodes"):
             common_nodes = min(self.graph.num_nodes, other.graph.num_nodes)
             if common_nodes > 0:
-                node_exists[:common_nodes] = 1
+                # For common nodes, we can compute load differences
+                if hasattr(self.graph, "x") and hasattr(other.graph, "x"):
+                    load_diff = torch.abs(
+                        self.graph.x[:common_nodes] - other.graph.x[:common_nodes]
+                    )
+                    node_exists[:common_nodes] = (
+                        (load_diff > 1e-6).any(dim=1, keepdim=True).float()
+                    )
+                else:
+                    node_exists[:common_nodes] = 1.0
 
         # Node mask: True if node exists in either state
         node_mask = torch.zeros(num_nodes, dtype=torch.bool, device=self.device)
@@ -165,13 +198,15 @@ class ElectronicsState(SimState):
         index_to_name = {idx: name for name, idx in self.indices.items()}
 
         # Get added and removed edges with component names
-        edge_attr = diff_graph.edge_attr
-        edge_index = diff_graph.edge_index
+        edge_attr = diff_graph.edge_attr if hasattr(diff_graph, "edge_attr") else None
+        edge_index = (
+            diff_graph.edge_index if hasattr(diff_graph, "edge_index") else None
+        )
 
         added_edges = []
         removed_edges = []
 
-        if edge_attr.size(0) > 0:
+        if edge_attr is not None and edge_index is not None and edge_attr.size(0) > 0:
             added_mask = edge_attr[:, 0].bool()
             removed_mask = edge_attr[:, 1].bool()
 
@@ -191,14 +226,24 @@ class ElectronicsState(SimState):
                 for src, dst in edge_index[:, removed_mask].t()
             ]
 
+        # Get node information
+        nodes = []
+        if hasattr(diff_graph, "node_mask"):
+            for i in range(diff_graph.node_mask.size(0)):
+                if diff_graph.node_mask[i]:
+                    node_info = {"id": index_to_name.get(i, str(i))}
+                    # Add load information if available
+                    if (
+                        hasattr(diff_graph, "x")
+                        and diff_graph.x is not None
+                        and i < diff_graph.x.size(0)
+                    ):
+                        if diff_graph.x[i].dim() > 0:  # If it's not a scalar
+                            node_info["load_diff"] = diff_graph.x[i].tolist()
+                    nodes.append(node_info)
+
         return {
-            "nodes": {
-                "existing": [
-                    index_to_name.get(i, str(i))
-                    for i in range(diff_graph.x.size(0))
-                    if diff_graph.x[i].item() > 0
-                ]
-            },
+            "nodes": nodes,
             "edges": {"added": added_edges, "removed": removed_edges},
         }
 
@@ -239,7 +284,19 @@ class ElectronicsState(SimState):
             f"Component {component.name} already registered"
         )
         self.components[component.name] = component
-        self._graph_built = False
+        self._graph_built = False  # Invalidate graph cache
+
+        # Update node features if graph is already built
+        if hasattr(self.graph, "x") and self.graph.x is not None:
+            # Add new node feature row with max_load or [0,0] if not specified
+            if component.max_load is not None:
+                new_feature = torch.tensor(
+                    [[component.max_load[0], component.max_load[1]]], device=self.device
+                )
+            else:
+                new_feature = torch.zeros((1, 2), device=self.device)
+            self.graph.x = torch.cat([self.graph.x, new_feature], dim=0)
+            self.graph.num_nodes = len(self.components)
 
     # def register_contacts(self, contacts: dict[str, tuple[str, str]]):
     #     "Register components of body A to bodies B"
