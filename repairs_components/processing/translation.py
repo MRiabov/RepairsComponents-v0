@@ -94,7 +94,10 @@ def translate_genesis_to_python(  # translate to sim state, really.
     2. All contacts of electronics to electronics
     3. Whether fluid detectors register on or off.
     4. Picked up fastener tip position
+
+    TODO: this docstring is pointless.
     """
+    assert len(gs_entities)>0, "Genesis entities can not be empty"
     # get:
     # positions of all solid bodies,
     # all emitters (leds)
@@ -150,7 +153,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
                     # TODO: check whether there is a particle in the fluid_state.positions[idx]
                     # among particles = liquid.get_particles()
                     # I'm quite positive there is a faster way, too.
-                    continue
+                    raise NotImplementedError
 
                 case name if (
                     isinstance(sim_state.tool_state[env_idx].current_tool, Screwdriver)
@@ -193,19 +196,22 @@ def get_fastener_hole_positions(entity: RigidEntity):
 
 
 def translate_compound_to_sim_state(
-    batch_b123d_compound: list[Compound],
+    batch_b123d_compounds: list[Compound],
 ) -> RepairsSimState:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
-    sim_state = RepairsSimState(batch_dim=len(batch_b123d_compound))
+    assert len(batch_b123d_compounds)>0, "Batch must not be empty."
+    assert all(len(compound.descendants)>0 for compound in batch_b123d_compounds), "All compounds must have descendants."
+    sim_state = RepairsSimState(batch_dim=len(batch_b123d_compounds))
 
-    for env_idx in range(len(batch_b123d_compound)):
-        b123d_compound = batch_b123d_compound[env_idx]
+    for env_idx in range(len(batch_b123d_compounds)):
+        b123d_compound = batch_b123d_compounds[env_idx]
         for part in b123d_compound.descendants:
             part: Part
             assert part.label, (
                 f"Part must have a label. Failed at position {part.position}"
             )
             assert "@" in part.label, "Part must annotate type."
+            assert part.volume>0, "Part must have a volume."
             # physical state
             if part.label.endswith("@solid"):
                 sim_state.physical_state[env_idx].register_body(
@@ -218,6 +224,9 @@ def translate_compound_to_sim_state(
                 "@fastener"
             ):  # collect constraints, get labels of bodies,
                 # collect constraints (in build123d named joints)
+                assert "fastener_joint_a" in part.joints, "Fastener must have a joint a."
+                assert "fastener_joint_b" in part.joints, "Fastener must have a joint b."
+                assert "fastener_joint_tip" in part.joints, "Fastener must have a tip joint."
                 joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
                 joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
                 joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
@@ -253,5 +262,14 @@ def translate_compound_to_sim_state(
                 sim_state.physical_state[env_idx].register_fastener(
                     fastener.name, fastener
                 )
+            #FIXME: no electronics implemented???
+            elif part.label.endswith("@liquid"):
+                raise NotImplementedError("Liquid is not handled yet.")
+            elif part.label.endswith("@button"):
+                continue
+            elif part.label.endswith("@connector"):
+                raise NotImplementedError("Connector is not handled yet.")
+            else:
+                raise NotImplementedError(f"Part type {part.label} not implemented.")
 
     return sim_state

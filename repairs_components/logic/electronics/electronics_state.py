@@ -65,6 +65,13 @@ class ElectronicsState(SimState):
                     - num_nodes: Total number of nodes
                 - An integer count of the total number of differences
         """
+        #if no electronics is present...
+        if len(self.components)==0: 
+            assert len(other.components)==0, "Other graph must be empty."
+            return Data(), 0
+        assert self.graph.num_nodes>0, "Graph must not be empty."
+        assert other.graph.num_nodes>0, "Compared graph must not be empty."
+        assert self.graph.num_nodes == other.graph.num_nodes, "Graphs must have the same number of nodes."
         # Ensure graphs are built
         self._build_graph()
         other._build_graph()

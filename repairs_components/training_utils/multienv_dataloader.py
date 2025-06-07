@@ -151,14 +151,14 @@ class MultiEnvDataLoader:
 
         return results
 
-    def update_environment_state(self, env_idx: int, new_state: Any):
-        """Update environment state (e.g., after reset or step)."""
-        with self.prefetch_lock:
-            self.env_states[env_idx] = new_state
-            # Clear old prefetched data since state changed
-            self._clear_prefetch_queue(env_idx)
-            # Trigger new prefetching
-            self._trigger_prefetch_for_env(env_idx)
+    # def update_environment_state(self, env_idx: int, new_state: Any):
+    #     """Update environment state (e.g., after reset or step)."""
+    #     with self.prefetch_lock:
+    #         self.env_states[env_idx] = new_state
+    #         # Clear old prefetched data since state changed
+    #         self._clear_prefetch_queue(env_idx)
+    #         # Trigger new prefetching
+    #         self._trigger_prefetch_for_env(env_idx)
 
     def deactivate_environment(self, env_idx: int):
         """Stop prefetching for an environment that's no longer needed."""

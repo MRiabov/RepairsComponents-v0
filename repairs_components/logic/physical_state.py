@@ -124,6 +124,9 @@ class PhysicalState:
                     - num_nodes: Total number of nodes
                 - An integer count of the total number of differences
         """
+        assert self.graph.num_edges>0, "Graph must not be empty."
+        assert other.graph.num_edges>0, "Compared graph must not be empty."
+        assert self.graph.num_nodes == other.graph.num_nodes, "Graphs must have the same number of nodes."
         # Get node differences
         node_diff, node_diff_count = _diff_node_features(self.graph, other.graph)
 
@@ -302,6 +305,7 @@ def _diff_node_features(
 
 
 def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
+    #FIXME: does this not check for feature value differences? 
     # Stack edge pairs for easy comparison
     def to_sorted_tuple_tensor(edge_index):
         sorted_idx = edge_index.sort(dim=0)[0]

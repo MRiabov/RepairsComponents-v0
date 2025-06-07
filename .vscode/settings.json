@@ -1,8 +1,15 @@
 {
-    "python.testing.pytestArgs": [
-        "tests"
-    ],
-    "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true,
-    "python.languageServer": "None"
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../Repairs-v0"
+		}
+	],
+	"settings": {
+		"python.languageServer": "None",
+		"editor.defaultFormatter": "charliermarsh.ruff",
+		"makefile.configureOnOpen": false
+	}
 }
