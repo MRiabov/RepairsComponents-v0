@@ -1,7 +1,7 @@
 import threading
 import queue
 import time
-from collections import defaultdict, deque
+from collections import deque
 from typing import Dict, List, Optional, Callable, Any
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -26,7 +26,7 @@ class MultiEnvDataLoader:
         self,
         num_environments: int,  # in general called "environments" though it's scenes.
         preprocessing_fn: Callable,
-        prefetch_size: int = 256,
+        prefetch_memory_size: int = 256,
         max_workers: int = 4,
     ):
         """
@@ -40,12 +40,13 @@ class MultiEnvDataLoader:
         """
         self.num_environments = num_environments
         self.preprocessing_fn = preprocessing_fn
-        self.prefetch_size = prefetch_size
+        self.prefetch_size = prefetch_memory_size
         self.max_workers = max_workers
 
         # Per-environment queues for prefetched data
         self.prefetch_queues: Dict[int, queue.Queue] = {
-            i: queue.Queue(maxsize=prefetch_size) for i in range(num_environments)
+            i: queue.Queue(maxsize=prefetch_memory_size)
+            for i in range(num_environments)
         }
 
         # Track which environments are currently active/requested
@@ -56,7 +57,8 @@ class MultiEnvDataLoader:
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.prefetch_lock = threading.Lock()
         self.shutdown_event = threading.Event()
-
+        # Track ongoing batch preprocessing tasks
+        self.pending_futures: list = []
         # Start background prefetching thread
         self.prefetch_thread = threading.Thread(
             target=self._prefetch_worker, daemon=True
@@ -65,7 +67,6 @@ class MultiEnvDataLoader:
 
         # Environment-specific state tracking
         # self.env_states = {}  # Store current state per environment
-        self.pending_futures = defaultdict(list)  # Track ongoing preprocessing tasks
 
     def register_environment(self, env_idx: int, initial_state: Any = None):
         """Register an environment and optionally set its initial state."""
@@ -77,8 +78,9 @@ class MultiEnvDataLoader:
         with self.prefetch_lock:
             self.active_envs.add(env_idx)
             if initial_state is not None:
-                self.env_states[env_idx] = initial_state
-            self._trigger_prefetch_for_env(env_idx)
+                # self.env_states[env_idx] = initial_state
+                pass
+            self._trigger_prefetch()
 
     def get_processed_data(
         self, num_configs_to_generate_per_scene: torch.Tensor, timeout: float = 1.0
@@ -104,28 +106,23 @@ class MultiEnvDataLoader:
 
         num_configs_to_generate = torch.zeros_like(num_configs_to_generate_per_scene)
         results = []
-        for scene_id, num_to_generate_in_this_scene in enumerate(
+        for scene_id, num_to_generate_tensor in enumerate(
             num_configs_to_generate_per_scene
         ):
+            num_to_generate = int(num_to_generate_tensor)
             results_this_scene = []
-            # if there is sufficient generated values for this scene, get from queue
-            if num_to_generate_in_this_scene > self.prefetch_queues[scene_id].qsize():
-                for _ in range(self.prefetch_queues[scene_id].qsize()):
-                    results_this_scene.append(
-                        self.prefetch_queues[scene_id].get(timeout=timeout)
-                    )
-            else:
-                # else get as much as possible, the remainder will be generated.
-                for _ in range(num_to_generate_in_this_scene):
-                    try:
-                        results_this_scene.append(
-                            self.prefetch_queues[scene_id].get(timeout=timeout)
-                        )
-                    except queue.Empty:
-                        break
-                num_configs_to_generate[scene_id] = num_to_generate_in_this_scene - len(
-                    results_this_scene
+            queue_size = self.prefetch_queues[scene_id].qsize()
+
+            # find minimal between num_to_generate and queue_size
+            take = min(
+                num_to_generate, queue_size
+            )  # it won't happen async anyway, I understand.
+            for _ in range(take):
+                results_this_scene.append(
+                    self.prefetch_queues[scene_id].get(timeout=timeout)
                 )
+            num_configs_to_generate[scene_id] = num_to_generate - take
+            results.append(results_this_scene)
 
         # generator - count however much is not enough and gen it.
         new_configs = self.preprocessing_fn(num_configs_to_generate)
@@ -143,10 +140,9 @@ class MultiEnvDataLoader:
 
         # put newly generated configs to queue (to alleviate starvation)
         # note: in future, configs should be reused 3-4 times before being discarded.
-        for scene_id, num_to_generate_in_this_scene in enumerate(
-            num_configs_to_generate
-        ):
-            for _ in range(num_to_generate_in_this_scene):
+        for scene_id, num_to_generate_tensor in enumerate(num_configs_to_generate):
+            num_to_generate = int(num_to_generate_tensor.item())
+            for _ in range(num_to_generate):
                 self.prefetch_queues[scene_id].put(new_configs[scene_id])
 
         return results
@@ -165,10 +161,10 @@ class MultiEnvDataLoader:
         with self.prefetch_lock:
             self.active_envs.discard(env_idx)
             self._clear_prefetch_queue(env_idx)
-            # Cancel pending futures for this environment
-            for future in self.pending_futures[env_idx]:
+            # cancel all pending batch futures
+            for future in self.pending_futures:
                 future.cancel()
-            self.pending_futures[env_idx].clear()
+            self.pending_futures.clear()
 
     def _clear_prefetch_queue(self, env_idx: int):
         """Clear prefetch queue for an environment."""
@@ -178,62 +174,41 @@ class MultiEnvDataLoader:
             except queue.Empty:
                 break
 
-    def _trigger_prefetch_for_env(self, env_idx: int):
-        """Trigger prefetching for a specific environment."""
-        if env_idx not in self.env_states:
+    def _trigger_prefetch(self):
+        """Trigger batch prefetch for all active environments."""
+        if not self.active_envs:
             return
 
-        current_queue = self.prefetch_queues[env_idx]
-        current_state = self.env_states[env_idx]
+        print("trigger happens before out of mem.")
 
-        # Only prefetch if queue has space
-        spaces_needed = self.prefetch_size - current_queue.qsize()
-        if spaces_needed <= 0:
-            return
-
-        # Submit preprocessing tasks
-        for _ in range(spaces_needed):
-            future = self.executor.submit(self.preprocessing_fn, env_idx, current_state)
-            self.pending_futures[env_idx].append(future)
+        # build tensor of per-env prefetch counts
+        num = torch.zeros(self.num_environments, dtype=torch.uint16)
+        for i in self.active_envs:
+            free = self.prefetch_size - self.prefetch_queues[i].qsize()
+            num[i] = free if free > 0 else 0
+        # submit one batch job
+        future = self.executor.submit(self.preprocessing_fn, num)
+        self.pending_futures.append(future)
 
     def _prefetch_worker(self):
         """Background worker that manages prefetching based on access patterns."""
         while not self.shutdown_event.is_set():
-            try:
-                # Process completed futures
-                with self.prefetch_lock:
-                    for env_idx in list(self.pending_futures.keys()):
-                        if env_idx not in self.active_envs:
-                            continue
+            # process batch futures
+            with self.prefetch_lock:
+                done = [f for f in self.pending_futures if f.done()]
+                self.pending_futures = [f for f in self.pending_futures if not f.done()]
+            for f in done:
+                batch = f.result()  # list of lists per scene
+                for idx, items in enumerate(batch):
+                    q = self.prefetch_queues[idx]
+                    for it in items:
+                        if not q.full():
+                            q.put_nowait(it)
 
-                        completed_futures = []
-                        remaining_futures = []
+            with self.prefetch_lock:
+                self._trigger_prefetch()
 
-                        for future in self.pending_futures[env_idx]:
-                            if future.done():
-                                completed_futures.append(future)
-                            else:
-                                remaining_futures.append(future)
-
-                        self.pending_futures[env_idx] = remaining_futures
-
-                        # Put completed results into queues
-                        for future in completed_futures:
-                            try:
-                                result = future.result()
-                                if not self.prefetch_queues[env_idx].full():
-                                    self.prefetch_queues[env_idx].put_nowait(result)
-                            except Exception as e:
-                                print(f"Error in preprocessing for env {env_idx}: {e}")
-
-                # Predict which environments need prefetching
-                self._intelligent_prefetch()
-
-                time.sleep(0.1)  # Small delay to prevent busy waiting
-
-            except Exception as e:
-                print(f"Error in prefetch worker: {e}")
-                time.sleep(1.0)
+            time.sleep(0.005)  # Small delay to prevent busy waiting
 
     # def _intelligent_prefetch(self):  # could be any prioritized prefetch.
     #     """Intelligently prefetch based on access patterns."""
@@ -256,10 +231,7 @@ class MultiEnvDataLoader:
                 "queue_sizes": {
                     env_idx: q.qsize() for env_idx, q in self.prefetch_queues.items()
                 },
-                "pending_tasks": {
-                    env_idx: len(futures)
-                    for env_idx, futures in self.pending_futures.items()
-                },
+                "pending_tasks": len(self.pending_futures),
                 # "recent_access_pattern": list(self.env_access_history)[-10:],
             }
         return stats
@@ -278,9 +250,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         env_setups: List[EnvSetup],
         tasks: List[Task],
         batch_dim: int = 128,
-        num_scenes_per_task: int = 128,
-        batches_in_memory_per_scene: int = 8,
-        **kwargs,
+        prefetch_memory_size=256,
     ):
         """
         Repairs environment dataloader that prefetches scene data.
@@ -297,8 +267,6 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         self.env_setups = env_setups
         self.tasks = tasks
         self.batch_dim = batch_dim
-        self.num_scenes_per_task = num_scenes_per_task
-        self.batches_in_memory_per_scene = batches_in_memory_per_scene
 
         assert len(scenes) == len(env_setups), (
             "Count of scenes and env_setups must match."
@@ -306,15 +274,15 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
 
         # Create preprocessing function that generates batches for scenes
         def scene_preprocessing_fn(
-            num_configs_to_generate_per_scene: torch.Tensor, _state_data: Any
+            num_configs_to_generate_per_scene: torch.Tensor,
+            _state_data: Any | None = None,
         ) -> List[ConcurrentSceneData]:
             return self._generate_scene_batches(num_configs_to_generate_per_scene)
 
         super().__init__(
             num_environments=len(scenes),
             preprocessing_fn=scene_preprocessing_fn,
-            prefetch_size=batches_in_memory_per_scene,
-            **kwargs,
+            prefetch_memory_size=prefetch_memory_size,
         )
 
         # Initialize all scenes as active
@@ -344,15 +312,16 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             num_configs_to_generate_per_scene=num_configs_to_generate_per_scene,
         )
 
-        for scene_id in range(len(num_configs_to_generate_per_scene)):
+        batches = []
+        for scene_idx in range(len(num_configs_to_generate_per_scene)):
             batch_starting_states = merge_global_states(
-                [scene_configs_per_scene[scene_id].current_state]
+                [scene_configs_per_scene[scene_idx].current_state]
             )
             batch_desired_states = merge_global_states(
-                [scene_configs_per_scene[scene_id].desired_state]
+                [scene_configs_per_scene[scene_idx].desired_state]
             )
-            vox_init = scene_configs_per_scene[scene_id].vox_init
-            vox_des = scene_configs_per_scene[scene_id].vox_des
+            vox_init = scene_configs_per_scene[scene_idx].vox_init
+            vox_des = scene_configs_per_scene[scene_idx].vox_des
 
             initial_diffs, initial_diff_count = batch_starting_states.diff(
                 batch_desired_states

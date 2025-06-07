@@ -98,9 +98,7 @@ class RepairsEnv(gym.Env):
         generate_scene_meshes()
 
         prefetch_memory_size = env_cfg["dataloader_settings"]["prefetch_memory_size"]
-        init_generate_per_scene = torch.full(
-            (concurrent_scenes,), prefetch_memory_size
-        )
+        init_generate_per_scene = torch.full((concurrent_scenes,), prefetch_memory_size)
 
         partial_env_configs = create_env_configs(
             env_setups, tasks, init_generate_per_scene
@@ -153,6 +151,8 @@ class RepairsEnv(gym.Env):
 
         # Initialize environment to starting state
         self.reset()
+
+        print("Repairs environment initialized")
 
     def step(self, action: torch.Tensor):
         """Execute one step in the environment.
@@ -238,6 +238,10 @@ class RepairsEnv(gym.Env):
         # FIXME: envs_idx or scene_idx? the dataloader returns for the whole scene. and I don't need it.
 
         assert len(envs_idx) > 0, "Can't reset 0 environments"
+        assert (envs_idx >= 0).all(), "Can't reset negative environments"
+        assert (envs_idx < self.batch_dim).all(), (
+            "Can't reset environments out of bounds"
+        )
 
         # get from which scene(s) we are resetting
         scene_idx = envs_idx // self.batch_dim
@@ -247,9 +251,13 @@ class RepairsEnv(gym.Env):
         # Reset robot joint positions to default
         dof_pos = self.default_dof_pos.expand(envs_idx.shape[0], -1)
 
-        for scene_id in unique_scene_idx:
+        # get data for the entire batch.
+        reset_scene_data: list[ConcurrentSceneData] = (
+            self.env_dataloader.get_processed_data(counts.to(dtype=torch.uint16))
+        )
+
+        for scene_id, reset_scene_data in zip(unique_scene_idx, reset_scene_data):
             # get the number of environments to reset
-            num_envs_to_reset = counts[scene_id]
             envs_idx_to_reset_this_scene = torch.nonzero(scene_idx == scene_id).squeeze(
                 1
             )
@@ -259,12 +267,6 @@ class RepairsEnv(gym.Env):
             ].set_dofs_position(
                 position=dof_pos,
                 envs_idx=envs_idx_to_reset_this_scene,
-            )
-
-            reset_scene_data: ConcurrentSceneData = (
-                self.env_dataloader.get_processed_data(
-                    scene_id.item(), get_count=num_envs_to_reset.item()
-                )
             )
 
             # Create ConcurrentSceneData instance
@@ -301,8 +303,8 @@ class RepairsEnv(gym.Env):
             obs: Initial observation after reset
             info: Additional information
         """
-        # Reset all environments
-        idxs = torch.arange(self.batch_dim - 1, device=self.device)
+        # Reset all environments # note: it was self.batch_dim - 1, but I don't think this is ri
+        idxs = torch.arange(self.batch_dim, device=self.device)
         self.reset_idx(idxs)
 
         # Get initial observations from all concurrent scenes

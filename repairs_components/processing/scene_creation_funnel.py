@@ -19,7 +19,6 @@ from repairs_components.processing.translation import (
 
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 import torch
-from torch_geometric.data import Batch
 import genesis as gs
 from repairs_components.training_utils.sim_state_global import merge_global_states
 from repairs_components.training_utils.concurrent_scene_dataclass import (
@@ -28,7 +27,7 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
 import numpy as np
 
 
-def create_env_configs(
+def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     env_setups: list[
         EnvSetup
     ],  # note: there must be one gs scene per EnvSetup. So this could be done in for loop.
@@ -121,10 +120,9 @@ def create_env_configs(
             desired_state=desired_sim_state,
             vox_init=voxel_grids_initial,
             vox_des=voxel_grids_desired,
-            initial_diffs={  # aggregate individual Data diffs into PyG Batches
-                k: Batch.from_data_list([d[k][0] for d in init_diffs])
-                for k in init_diffs[0].keys()
-            },  # note: diff[k][0] because diff[k] is a list with a single diff (I process them in a loop above.)
+            initial_diffs={  # store list of Data diffs per config
+                k: [d[k][0] for d in init_diffs] for k in init_diffs[0].keys()
+            },
             initial_diff_counts=torch.tensor(init_diff_counts),
             scene_id=scene_idx,
         )
@@ -172,6 +170,7 @@ def initialize_and_build_scene(
 
     # initiate cameras and others in genesis scene:
     first_desired_scene, cameras, franka = add_base_scene_geometry(first_desired_scene)
+    initial_gs_entities["franka@control"] = franka
 
     # build a single scene... but batched
     first_desired_scene.build(n_envs=batch_dim)

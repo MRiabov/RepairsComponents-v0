@@ -27,7 +27,7 @@ class ElectronicsState(SimState):
         self.graph.edge_index = torch.empty(
             (2, 0), dtype=torch.long, device=self.device
         )
-        #fixme: better go from graph.x to individual features... I think.
+        # fixme: better go from graph.x to individual features... I think.
         self.graph.x = torch.empty(
             (0, 2), dtype=torch.float32, device=self.device
         )  # [max_voltage, max_current]

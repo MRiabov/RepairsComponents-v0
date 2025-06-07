@@ -97,7 +97,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     TODO: this docstring is pointless.
     """
-    assert len(gs_entities)>0, "Genesis entities can not be empty"
+    assert len(gs_entities) > 0, "Genesis entities can not be empty"
     # get:
     # positions of all solid bodies,
     # all emitters (leds)
@@ -199,8 +199,10 @@ def translate_compound_to_sim_state(
     batch_b123d_compounds: list[Compound],
 ) -> RepairsSimState:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
-    assert len(batch_b123d_compounds)>0, "Batch must not be empty."
-    assert all(len(compound.descendants)>0 for compound in batch_b123d_compounds), "All compounds must have descendants."
+    assert len(batch_b123d_compounds) > 0, "Batch must not be empty."
+    assert all(len(compound.descendants) > 0 for compound in batch_b123d_compounds), (
+        "All compounds must have descendants."
+    )
     sim_state = RepairsSimState(batch_dim=len(batch_b123d_compounds))
 
     for env_idx in range(len(batch_b123d_compounds)):
@@ -211,7 +213,7 @@ def translate_compound_to_sim_state(
                 f"Part must have a label. Failed at position {part.position}"
             )
             assert "@" in part.label, "Part must annotate type."
-            assert part.volume>0, "Part must have a volume."
+            assert part.volume > 0, "Part must have a volume."
             # physical state
             if part.label.endswith("@solid"):
                 sim_state.physical_state[env_idx].register_body(
@@ -224,9 +226,15 @@ def translate_compound_to_sim_state(
                 "@fastener"
             ):  # collect constraints, get labels of bodies,
                 # collect constraints (in build123d named joints)
-                assert "fastener_joint_a" in part.joints, "Fastener must have a joint a."
-                assert "fastener_joint_b" in part.joints, "Fastener must have a joint b."
-                assert "fastener_joint_tip" in part.joints, "Fastener must have a tip joint."
+                assert "fastener_joint_a" in part.joints, (
+                    "Fastener must have a joint a."
+                )
+                assert "fastener_joint_b" in part.joints, (
+                    "Fastener must have a joint b."
+                )
+                assert "fastener_joint_tip" in part.joints, (
+                    "Fastener must have a tip joint."
+                )
                 joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
                 joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
                 joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
@@ -262,7 +270,8 @@ def translate_compound_to_sim_state(
                 sim_state.physical_state[env_idx].register_fastener(
                     fastener.name, fastener
                 )
-            #FIXME: no electronics implemented???
+
+            # FIXME: no electronics implemented???
             elif part.label.endswith("@liquid"):
                 raise NotImplementedError("Liquid is not handled yet.")
             elif part.label.endswith("@button"):

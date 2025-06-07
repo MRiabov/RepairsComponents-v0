@@ -18,3 +18,6 @@ sudo apt install libgl1-mesa-dev -y
 
 git config --global user.name "MRiabov"
 git config --global user.email "maksymriabov2004@gmail.com"
+
+# to run:
+# uv run /workspace/Repairs-v0/neural_nets/sac_repairs.py
