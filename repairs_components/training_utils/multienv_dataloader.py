@@ -111,6 +111,7 @@ class MultiEnvDataLoader:
         ):
             num_to_generate = int(num_to_generate_tensor)
             results_this_scene = []
+            #FIXME: why is qsize 0 in main thread at init?
             queue_size = self.prefetch_queues[scene_id].qsize()
 
             # find minimal between num_to_generate and queue_size
@@ -145,6 +146,8 @@ class MultiEnvDataLoader:
             for _ in range(num_to_generate):
                 self.prefetch_queues[scene_id].put(new_configs[scene_id])
 
+        # if there was starvation, add the new configs to the results
+        results.extend(new_configs)
         return results
 
     # def update_environment_state(self, env_idx: int, new_state: Any):
@@ -179,8 +182,6 @@ class MultiEnvDataLoader:
         if not self.active_envs:
             return
 
-        print("trigger happens before out of mem.")
-
         # build tensor of per-env prefetch counts
         num = torch.zeros(self.num_environments, dtype=torch.uint16)
         for i in self.active_envs:
@@ -192,23 +193,22 @@ class MultiEnvDataLoader:
 
     def _prefetch_worker(self):
         """Background worker that manages prefetching based on access patterns."""
-        while not self.shutdown_event.is_set():
-            # process batch futures
-            with self.prefetch_lock:
-                done = [f for f in self.pending_futures if f.done()]
-                self.pending_futures = [f for f in self.pending_futures if not f.done()]
-            for f in done:
-                batch = f.result()  # list of lists per scene
-                for idx, items in enumerate(batch):
-                    q = self.prefetch_queues[idx]
-                    for it in items:
-                        if not q.full():
-                            q.put_nowait(it)
+        #it would simply be called whenever necessary. (was in while loop.)
+        
+        # while not self.shutdown_event.is_set():
+        # process batch futures
+        with self.prefetch_lock:
+            done = [future for future in self.pending_futures if future.done()]
+            self.pending_futures = [future for future in self.pending_futures if not future.done()]
+        for future in done:
+            batch = future.result()  # list of lists per scene
+            for idx, items in enumerate(batch):
+                q = self.prefetch_queues[idx]
+                for it in items:
+                    q.put(it)
 
-            with self.prefetch_lock:
-                self._trigger_prefetch()
-
-            time.sleep(0.005)  # Small delay to prevent busy waiting
+        with self.prefetch_lock:
+            self._trigger_prefetch()
 
     # def _intelligent_prefetch(self):  # could be any prioritized prefetch.
     #     """Intelligently prefetch based on access patterns."""

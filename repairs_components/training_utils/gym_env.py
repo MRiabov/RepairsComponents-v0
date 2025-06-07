@@ -255,6 +255,7 @@ class RepairsEnv(gym.Env):
         reset_scene_data: list[ConcurrentSceneData] = (
             self.env_dataloader.get_processed_data(counts.to(dtype=torch.uint16))
         )
+        print("reset_scene_data", reset_scene_data)
 
         for scene_id, reset_scene_data in zip(unique_scene_idx, reset_scene_data):
             # get the number of environments to reset

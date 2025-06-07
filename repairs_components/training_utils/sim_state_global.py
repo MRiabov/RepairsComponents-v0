@@ -107,11 +107,17 @@ def merge_global_states(state_list: list[RepairsSimState]):
     assert len(state_list) > 0, "State list can not be zero."
     repairs_sim_state = RepairsSimState(len(state_list))
     repairs_sim_state.electronics_state = [
-        state.electronics_state for state in state_list
+        elec for state in state_list for elec in state.electronics_state
     ]
-    repairs_sim_state.physical_state = [state.physical_state for state in state_list]
-    repairs_sim_state.fluid_state = [state.fluid_state for state in state_list]
-    repairs_sim_state.tool_state = [state.tool_state for state in state_list]
+    repairs_sim_state.physical_state = [
+        phys for state in state_list for phys in state.physical_state
+    ]
+    repairs_sim_state.fluid_state = [
+        fluid for state in state_list for fluid in state.fluid_state
+    ]
+    repairs_sim_state.tool_state = [
+        tool for state in state_list for tool in state.tool_state
+    ]
     return repairs_sim_state
 
 
