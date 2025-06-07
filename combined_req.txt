@@ -1,12 +1,12 @@
 ## numpy==1.26.4
 genesis-world
-torch
-torch_geometric
+torch==2.7.1
+torch_geometric==2.6.1
 ## build123d==0.9.1
 ocp_vscode
 vtk
 libigl==2.5.1
-trimesh
+trimesh # note: not used in voxelization, but required for genesis.
 gymnasium
 ompl
 pyrender

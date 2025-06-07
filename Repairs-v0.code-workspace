@@ -2,11 +2,21 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "../Repairs-v0"
 		}
 	],
 	"settings": {
 		"python.languageServer": "None",
 		"editor.defaultFormatter": "charliermarsh.ruff",
 		"makefile.configureOnOpen": false
+	},
+	"launch": {
+		"version": "0.2.0",
+		"configurations": [
+			
+
+		]
 	}
 }

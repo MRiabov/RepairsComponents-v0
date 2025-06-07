@@ -1,6 +1,6 @@
 numpy==1.26.4
 genesis-world
-torch
+torch==2.5.1
 torch_geometric
 build123d==0.9.1
 ocp_vscode
@@ -10,6 +10,7 @@ trimesh
 gymnasium
 ompl
 pyrender
+kaolin
 #constrained as of 2025-06-01
 
 #also `sudo apt install libgl1-mesa-dev`
