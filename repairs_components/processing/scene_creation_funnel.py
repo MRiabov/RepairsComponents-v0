@@ -255,14 +255,19 @@ def move_entities_to_pos(
     if env_idx is None:
         env_idx = torch.arange(len(starting_sim_state.physical_state))
     for gs_entity_name, gs_entity in gs_entities.items():
-        if gs_entity_name not in starting_sim_state.physical_state[env_idx].indices:
+        if gs_entity_name not in starting_sim_state.physical_state[env_idx[0]].indices:
+            # note: env_idx[0] is safe because all entities names in physical states are equal.
             continue  # no need to move e.g. franka arm or base plate.
         entity_pos = torch.zeros((len(env_idx), 3))
 
+        entity_idx = starting_sim_state.physical_state[env_idx[0]].indices[
+            gs_entity_name
+        ]
         entity_pos[env_idx] = (
             torch.tensor(
-                starting_sim_state.physical_state[env_idx].graph.position[
-                    starting_sim_state.physical_state[env_idx].indices[gs_entity_name]
+                [
+                    starting_sim_state.physical_state[i].graph.position[entity_idx]
+                    for i in env_idx
                 ],
                 device=env_idx.device,
             )

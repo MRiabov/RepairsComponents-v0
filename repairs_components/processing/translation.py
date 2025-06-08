@@ -43,7 +43,7 @@ def translate_to_genesis_scene(
                     child.moved(Pos(-center)),
                     gltf_path,
                     unit=Unit.CM,
-                ) # note: maybe glb is better.
+                )  # note: maybe glb is better.
                 mesh = gs.morphs.Mesh(file=gltf_path)  # pos=center.to_tuple()
                 # technically, the `pos` should not do nothing, because it will be overriden by set_pos later.
                 # however it does? I don't see my object later.

@@ -74,7 +74,7 @@ class MultiEnvDataLoader:
             List of preprocessed data for each active environment (len=num_configs_to_generate_per_scene.shape[0])
         """
 
-        #impl note: num_configs_to_generate_per_scene is total configs to generate, and 
+        # impl note: num_configs_to_generate_per_scene is total configs to generate, and
         assert len(num_configs_to_generate_per_scene) == self.num_environments, (
             f"num_configs_to_generate_per_scene length ({len(num_configs_to_generate_per_scene)}) "
             f"mismatches count of registered envs ({self.num_environments})."
@@ -83,7 +83,9 @@ class MultiEnvDataLoader:
             "Expected num_configs_to_generate_per_scene to be a int16 tensor."
         )  # non-negative integer in general.
 
-        count_insufficient_configs_per_scene = torch.zeros_like(num_configs_to_generate_per_scene)
+        count_insufficient_configs_per_scene = torch.zeros_like(
+            num_configs_to_generate_per_scene
+        )
         results_from_queue = []
         for scene_id, num_to_generate_tensor in enumerate(
             num_configs_to_generate_per_scene
@@ -106,7 +108,9 @@ class MultiEnvDataLoader:
 
         # generator - count however much is not enough and gen it.
         if torch.any(count_insufficient_configs_per_scene > 0):
-            starved_configs = self.preprocessing_fn(count_insufficient_configs_per_scene)
+            starved_configs = self.preprocessing_fn(
+                count_insufficient_configs_per_scene
+            )
         else:
             starved_configs = []
 
@@ -123,7 +127,9 @@ class MultiEnvDataLoader:
 
         # put newly generated configs to queue (to alleviate starvation)
         # note: in future, configs should be reused 3-4 times before being discarded.
-        for scene_id, num_to_generate_tensor in enumerate(count_insufficient_configs_per_scene):
+        for scene_id, num_to_generate_tensor in enumerate(
+            count_insufficient_configs_per_scene
+        ):
             num_to_generate = int(num_to_generate_tensor.item())
             for _ in range(num_to_generate):
                 self.prefetch_queues[scene_id].put(starved_configs[scene_id])
@@ -159,9 +165,9 @@ class MultiEnvDataLoader:
         assert num_configs_to_generate_per_scene.dtype == torch.int16, (
             "Expected int16 tensor for num_configs_to_generate_per_scene."
         )
-        assert (
-            num_configs_to_generate_per_scene >= 0
-        ).all(), "num_configs_to_generate_per_scene must be non-negative"
+        assert (num_configs_to_generate_per_scene >= 0).all(), (
+            "num_configs_to_generate_per_scene must be non-negative"
+        )
         future = self.executor.submit(
             self._populate_worker, num_configs_to_generate_per_scene
         )
