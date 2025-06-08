@@ -123,28 +123,36 @@ class Fastener(Component):
 
 
 import numpy as np
+import torch
+from typing import Mapping
 
 
 def check_fastener_possible_insertion(
-    active_fastener_tip_position: tuple[float, float, float],
-    hole_positions: dict[str, tuple[float, float, float]],
+    active_fastener_tip_position: Mapping[str, np.ndarray] | torch.Tensor | np.ndarray,
+    hole_positions: Mapping[str, torch.Tensor | np.ndarray],
     connection_threshold: float = 0.75,
-):
-    # Convert inputs to numpy arrays
-    tip_pos = np.array(active_fastener_tip_position)
-    hole_names = list(hole_positions.keys())
-    hole_pos_array = np.array(list(hole_positions.values()))
-
-    # Calculate squared distances (avoids sqrt for better performance) # equal to math.dist but without sqrt, just a small trick
-    squared_distances = np.sum((hole_pos_array - tip_pos) ** 2, axis=1)
-
-    # Find the closest hole within threshold
-    within_threshold = squared_distances < (connection_threshold**2)
-    if np.any(within_threshold):
-        # Get the index of the first hole within threshold
-        first_match_idx = np.argmax(within_threshold)
-        return hole_names[first_match_idx]
-    return None
+) -> torch.Tensor:
+    """
+    Batch check: for each env, find first hole index within threshold or -1.
+    Returns tensor of shape [batch] with hole index or -1.
+    """
+    # prepare tip tensor [B,3]
+    tip = active_fastener_tip_position
+    tip = tip if isinstance(tip, torch.Tensor) else torch.tensor(tip)
+    # gather hole names and stack positions [B,H,3]
+    hole_keys = list(hole_positions.keys())
+    hole_vals = [hole_positions[k] for k in hole_keys]
+    hole_vals = [
+        v if isinstance(v, torch.Tensor) else torch.tensor(v) for v in hole_vals
+    ]
+    holes = torch.stack(hole_vals, dim=1)
+    # compute squared distances [B,H]
+    sq_dist = torch.sum((holes - tip.unsqueeze(1)) ** 2, dim=-1)
+    mask = sq_dist < (connection_threshold**2)
+    # find first match idx or -1
+    first_idx = mask.float().argmax(dim=1)
+    any_match = mask.any(dim=1)
+    return torch.where(any_match, first_idx, torch.full_like(first_idx, -1))
 
 
 def activate_connection(fastener_entity: RigidEntity, activate_joint_name: str):

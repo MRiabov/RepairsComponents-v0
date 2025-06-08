@@ -33,6 +33,7 @@ class PhysicalState:
     # Graph storing part nodes and fastener edges
     graph: Data = field(default_factory=Data)
     indices: dict[str, int] = field(default_factory=dict)
+    reverse_indices: dict[int, str] = field(default_factory=dict)
 
     # Fastener metadata (shared across batch)
     fastener_prototype: dict[str, Fastener] = field(default_factory=dict)
@@ -65,6 +66,7 @@ class PhysicalState:
 
         idx = len(self.indices)
         self.indices[name] = idx
+        self.reverse_indices[idx] = name
 
         self.graph.position = torch.cat(
             [

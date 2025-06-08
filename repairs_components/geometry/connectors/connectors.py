@@ -5,7 +5,9 @@ from build123d import Compound, Part, VectorLike, Color
 from genesis import gs
 from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np
+import torch
 from abc import ABC, abstractmethod
+from typing import Mapping
 
 
 class Connector(ElectricalComponent):
@@ -99,10 +101,10 @@ class Connector(ElectricalComponent):
 
 
 def check_connections(
-    male_connectors: dict[str, tuple[float, float, float]],
-    female_connectors: dict[str, tuple[float, float, float]],
+    male_connectors: Mapping[str, torch.Tensor | np.ndarray],
+    female_connectors: Mapping[str, torch.Tensor | np.ndarray],
     connection_threshold: float = 2.5,
-) -> list[tuple[str, str]]:
+) -> torch.Tensor:
     """
     Identify feasible male–female connector pairings based on Euclidean proximity.
 
@@ -123,35 +125,44 @@ def check_connections(
 
     Parameters
     ----------
-    male_connectors : Dict[str, Tuple[float, float, float]]
+    male_connectors : Mapping[str, torch.Tensor | np.ndarray]
         Dictionary mapping male connector IDs to their 3D coordinates.
-    female_connectors : Dict[str, Tuple[float, float, float]]
+    female_connectors : Mapping[str, torch.Tensor | np.ndarray]
         Dictionary mapping female connector IDs to their 3D coordinates.
     connection_threshold : float, default=2.5
         Maximum allowable Euclidean distance for a valid connection.
 
     Returns
     -------
-    connections : List[Tuple[str, str]]
-        List of (male_key, female_key) pairs where the distance between the
-        corresponding connectors is less than connection_threshold.
+    connections : torch.Tensor
+        Tensor of shape [num_pairs, 3] with (batch, male_idx, female_idx)
     """
-    # Extract keys and values, maintaining order
     male_keys = list(male_connectors.keys())
     female_keys = list(female_connectors.keys())
+    if not male_keys or not female_keys:
+        # determine batch size from first tensor
+        first = next(iter(male_connectors.values()))
+        batch = first.shape[0] if hasattr(first, "shape") else 1
+        return torch.empty((batch, 0, 3), dtype=torch.long)
+    # GPU-accelerated torch computation: compute batch distances
+    # detect device
+    first_val = next(iter(male_connectors.values()))
+    device = (
+        first_val.device if isinstance(first_val, torch.Tensor) else torch.device("cpu")
+    )
 
-    # Convert to numpy arrays for vectorized operations
-    X_m = np.array(list(male_connectors.values()))
-    X_f = np.array(list(female_connectors.values()))
+    def to_tensor(x):
+        return x if isinstance(x, torch.Tensor) else torch.tensor(x, device=device)
 
-    # Compute the full M×F distance matrix via broadcasting
-    D = np.linalg.norm(X_m[:, None, :] - X_f[None, :, :], axis=2)
-
-    # Build the binary adjacency mask and get indices of connected pairs
-    idx_pairs = np.argwhere(D < connection_threshold)
-
-    # Convert indices back to keys
-    return [(male_keys[i], female_keys[j]) for i, j in idx_pairs]
+    male_vals = torch.stack([to_tensor(male_connectors[k]) for k in male_keys], dim=1)
+    female_vals = torch.stack(
+        [to_tensor(female_connectors[k]) for k in female_keys], dim=1
+    )
+    # male_vals: [B, M, 3], female_vals: [B, F, 3]
+    D = torch.linalg.norm(male_vals[:, :, None, :] - female_vals[:, None, :, :], dim=-1)
+    mask = D < connection_threshold
+    # return indices tensor of shape [num_pairs, 3] with (batch, male_idx, female_idx)
+    return mask.nonzero(as_tuple=False)
 
 
 def get_socket_mesh_by_type(connector_type: str):
@@ -170,30 +181,3 @@ def get_socket_mesh_by_type(connector_type: str):
     # return gs.morphs.Mesh(
     #     file="geom_exports/electronics/connectors/" + connector_type + ".gltf"
     # )
-
-
-# note: it may be useful to call it like this... but probably not.
-# def get_socket_bd_geometry_by_type(connector_type: str):
-#     assert connector_type in [
-#         "iec13_male",
-#         "iec13_female",
-#         "XT60_male",
-#         "XT60_female",
-#         "round_laptop_female",
-#         "round_laptop_male",
-#     ]
-#     geom: Part | Compound
-#     match connector_type:
-#         case "iec13_male":
-#             geom = iec13iec_plug_male()
-#         case "iec13_female":
-#             geom = iec13.iec_plug_female()
-#         case "XT60_male":
-#             geom = round.round_plug()
-#         case "XT60_female":
-#             geom = round.round_socket()
-#         case "round_laptop_female":
-#             geom = round.round_plug()
-#         case "round_laptop_male":
-#             geom = round.round_socket()
-#     return geom

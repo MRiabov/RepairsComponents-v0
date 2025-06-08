@@ -255,18 +255,22 @@ def move_entities_to_pos(
     if env_idx is None:
         env_idx = torch.arange(len(starting_sim_state.physical_state))
     for gs_entity_name, gs_entity in gs_entities.items():
-        positions = torch.zeros((len(gs_entities), 3))
+        if gs_entity_name not in starting_sim_state.physical_state[env_idx].indices:
+            continue  # no need to move e.g. franka arm or base plate.
+        entity_pos = torch.zeros((len(env_idx), 3))
 
-        for env_i in env_idx:
-            positions[int(env_i.item())] = (
-                torch.tensor(
-                    starting_sim_state.physical_state[env_i].positions[gs_entity_name]
-                )
-                / 100  # cm to meters
+        entity_pos[env_idx] = (
+            torch.tensor(
+                starting_sim_state.physical_state[env_idx].graph.position[
+                    starting_sim_state.physical_state[env_idx].indices[gs_entity_name]
+                ],
+                device=env_idx.device,
             )
+            / 100  # cm to meters
+        )
         # No need to move because the position is already centered.
         # positions = positions + torch.tensor(tooling_stand_plate.SCENE_CENTER) / 100
-        gs_entity.set_pos(positions, envs_idx=env_idx)
+        gs_entity.set_pos(entity_pos, envs_idx=env_idx)
 
 
 # TODO why not used?

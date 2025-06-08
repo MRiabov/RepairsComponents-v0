@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, overload
 
 import torch
 from torch_geometric.data import Data
@@ -13,6 +13,8 @@ class ElectronicsState(SimState):
     components: dict[str, ElectricalComponent] = field(default_factory=dict)
     graph: Data = field(default_factory=Data)
     indices: dict[str, int] = field(default_factory=dict)
+    reverse_indices: dict[int, str] = field(default_factory=dict)
+    # TODO add reverse indices updates where they need to be.
     _graph_built: bool = field(default=False, init=False)
     device: torch.device = field(
         default_factory=lambda: torch.device(
@@ -300,12 +302,17 @@ class ElectronicsState(SimState):
 
     # def register_contacts(self, contacts: dict[str, tuple[str, str]]):
     #     "Register components of body A to bodies B"
-
     def connect(self, name: str, other_name: str):
         "Connect two components"
         self.components[name].connect(self.components[other_name])
         self.components[other_name].connect(self.components[name])
         self._graph_built = False
+
+    @overload
+    def connect(self, id_1: int, id_2: int):
+        "Connect two components"
+        # not good but will do
+        self.connect(self.reverse_indices[id_1], self.reverse_indices[id_2])
 
     def clear_connections(self):
         "Disconnect all connections between a component"

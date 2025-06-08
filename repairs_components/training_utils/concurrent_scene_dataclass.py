@@ -32,17 +32,19 @@ class ConcurrentSceneData:
 
 
 def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
-    # assert the scenes are meant to be equivalent.
+    # assert the scenes in configs are equivalent.
     assert all(scene_configs[0].scene == scene_cfg.scene for scene_cfg in scene_configs)
     assert all(
         scene_configs[0].scene_id == scene_cfg.scene_id for scene_cfg in scene_configs
     )
-    assert all(
-        set(scene_configs[0].gs_entities.keys()) == set(scene_cfg.gs_entities.keys())
+    assert all(  # handle partial configs.
+        scene_configs[0].gs_entities is None
+        or set(scene_configs[0].gs_entities.keys()) == set(scene_cfg.gs_entities.keys())
         for scene_cfg in scene_configs
     )
-    assert all(
-        len(scene_configs[0].cameras) == len(scene_cfg.cameras)
+    assert all(  # handle partial configs.
+        scene_configs[0].cameras is None
+        or len(scene_configs[0].cameras) == len(scene_cfg.cameras)
         for scene_cfg in scene_configs
     )
 
@@ -54,7 +56,7 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         vox_init=torch.cat([data.vox_init for data in scene_configs], dim=0),
         vox_des=torch.cat([data.vox_init for data in scene_configs], dim=0),
         initial_diffs={
-            k: torch.cat([data.initial_diffs[k] for data in scene_configs], dim=0)
+            k: [data.initial_diffs[k] for data in scene_configs]
             for k in scene_configs[0].initial_diffs.keys()
         },
         initial_diff_counts=torch.cat(

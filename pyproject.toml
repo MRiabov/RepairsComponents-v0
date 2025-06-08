@@ -5,7 +5,6 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-v --cov=repairs_components --cov-report=term-missing"
 
 [tool.coverage.run]
 source = ["src"]

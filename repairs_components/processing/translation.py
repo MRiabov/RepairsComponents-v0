@@ -4,6 +4,8 @@ import tempfile
 
 from genesis.engine.entities.rigid_entity.rigid_link import RigidLink
 from genesis.engine.entities import RigidEntity
+import torch
+
 from repairs_components.geometry.connectors.connectors import Connector
 from repairs_components.logic.electronics.component import ElectricalComponent
 import numpy as np
@@ -88,101 +90,83 @@ def translate_genesis_to_python(  # translate to sim state, really.
     sim_state: RepairsSimState,
 ):
     """
-    If a fastener is picked up by a screwdriver, get its position
-    Get from the scene:
-    1. All rigid body positions and rotations
-    2. All contacts of electronics to electronics
-    3. Whether fluid detectors register on or off.
-    4. Picked up fastener tip position
+    Get raw values from sim scene.
 
-    TODO: this docstring is pointless.
+    Returns:
+        sim_state: RepairsSimState with active bodies in the physical state.
+        picked_up_tip_positions: torch.Tensor[n_envs,3] - tip pos per env
+        fastener_hole_positions: dict[str, torch.Tensor] - [n_envs,3]
+        male_connector_positions: dict[str, torch.Tensor] - [n_envs,3]
+        female_connector_positions: dict[str, torch.Tensor] - [n_envs,3]
     """
     assert len(gs_entities) > 0, "Genesis entities can not be empty"
-    # get:
-    # positions of all solid bodies,
-    # all emitters (leds)
-    # all contacts
-    # all rotations
-    # all contacts specifically of electronics bodies.
-    # whether fastener joints are on or off.
-    # whether
-    for env_idx in range(scene.n_envs):
-        assert not isinstance(
-            sim_state.tool_state[env_idx].current_tool, Screwdriver
-        ) or (
-            sim_state.tool_state[env_idx].current_tool.picked_up_fastener is None
-            or sim_state.tool_state[
-                env_idx
-            ].current_tool.picked_up_fastener_name.endswith("@fastener")
-        ), "Passed name of a picked up fastener is not of that of a fastener."
+    # batch over all environments
+    n_envs = scene.n_envs
+    env_idx = torch.arange(n_envs)
 
-        entities = scene.entities
-        entity: RigidEntity  # type hint
-
-        fastener_hole_positions = {}
-        fastener_tip_pos = None
-
-        male_connector_positions = {}
-        female_connector_positions = {}
-
-        fluid_state_pos_checks: dict[str, bool] = {}
-
-        # NOTE for future: genesis is in meters, while build123d and physical state is in cm.
-        # xyz seems to be equal.
-
-        for entity_name, entity in gs_entities.items():
-            match entity_name:
-                case name if name.endswith("male@connector"):
-                    # NOTE: I had some issues with link.pos because it was not updated(!). So be careful and use get_link_pos in case of issues instead.
-                    male_connector_positions[name] = entity.get_links_pos(env_idx)[
-                        "connector_point"
-                    ]  # note: this does not work and I know, but maybe there's a better way to get index.
-                case name if name.endswith("female@connector"):
-                    # NOTE: I had some issues with link.pos because it was not updated(!). So be careful and use get_link_pos in case of issues instead.
-                    female_connector_positions[name] = entity.get_links_pos(env_idx)[
-                        "connector_point"
-                    ]
-
-                case name if name.endswith("@solid"):
-                    fastener_hole_positions[name] = get_fastener_hole_positions(entity)
-                    sim_state.physical_state[env_idx].register_body(
-                        name, entity.get_pos(env_idx), entity.get_ang(env_idx)
-                    )
-
-                case name if name.endswith("@liquid"):
-                    # TODO: check whether there is a particle in the fluid_state.positions[idx]
-                    # among particles = liquid.get_particles()
-                    # I'm quite positive there is a faster way, too.
-                    raise NotImplementedError
-
-                case name if (
-                    isinstance(sim_state.tool_state[env_idx].current_tool, Screwdriver)
-                    and name
-                    == sim_state.tool_state[
-                        env_idx
-                    ].current_tool.picked_up_fastener_name
-                ):
-                    link = next(
-                        link
-                        for link in entity.links
-                        if link.name.endswith("_to_screwdriver")
-                    )
-                    fastener_tip_pos = link.get_pos()
-
-                case name if name.endswith("@control"):  # ignore some here
-                    continue
-                case _:
-                    raise NotImplementedError(
-                        f"Entity {entity_name} not implemented for translation."
-                    )
-
-        return (
-            sim_state,
-            fastener_tip_pos,
-            fastener_hole_positions,
-            male_connector_positions,
-            female_connector_positions,
+    # sanity-check tool names
+    assert all(
+        (
+            not isinstance(ts.current_tool, Screwdriver)
+            or ts.current_tool.picked_up_fastener_name.endswith("@fastener")
         )
+        for ts in sim_state.tool_state
+    ), "picked_up_fastener_name must end with @fastener"
+
+    # prepare outputs
+    fastener_hole_positions: dict[str, torch.Tensor] = {}
+    male_connector_positions: dict[str, torch.Tensor] = {}
+    female_connector_positions: dict[str, torch.Tensor] = {}
+    picked_up_tip = torch.full((n_envs, 3), float("nan"))
+
+    # loop entities and dispatch by suffix
+    for full_name, entity in gs_entities.items():
+        parts = full_name.split("@")
+        tag2 = "@".join(parts[-2:]) if len(parts) > 1 else parts[-1]
+        if tag2 == "male@connector":
+            male_connector_positions[full_name] = entity.get_links_pos(env_idx)[
+                "connector_point"
+            ]
+        elif tag2 == "female@connector":
+            female_connector_positions[full_name] = entity.get_links_pos(env_idx)[
+                "connector_point"
+            ]
+        elif tag2 == "solid":
+            hole_pos = get_fastener_hole_positions(entity)
+            fastener_hole_positions[full_name] = hole_pos
+            pos_all = entity.get_pos(env_idx)
+            ang_all = entity.get_ang(env_idx)
+            for i in range(n_envs):
+                sim_state.physical_state[i].register_body(
+                    full_name, pos_all[i], ang_all[i]
+                )
+        elif tag2 == "control":
+            continue
+        else:
+            # note: it will be more troublesome to handle a non-implemented error in batching, so whatever.
+            # it should be really checked in a separate assertion.
+            mask = torch.tensor(
+                [
+                    isinstance(ts.current_tool, Screwdriver)
+                    and ts.current_tool.picked_up_fastener_name == full_name
+                    for ts in sim_state.tool_state
+                ],
+                dtype=torch.bool,
+            )
+            if mask.any():
+                link = next(
+                    l for l in entity.links if l.name.endswith("_to_screwdriver")
+                )
+                pos_full = link.get_pos(env_idx)
+                picked_up_tip[mask] = pos_full[mask]
+
+    return (
+        sim_state,
+        picked_up_tip,
+        fastener_hole_positions,
+        male_connector_positions,
+        female_connector_positions,
+    )
 
 
 def get_fastener_hole_positions(entity: RigidEntity):

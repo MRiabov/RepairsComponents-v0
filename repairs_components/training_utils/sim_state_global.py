@@ -20,6 +20,10 @@ class RepairsSimState(SimState):
     fluid_state: list[FluidState] = field(default_factory=list)
     tool_state: list[ToolState] = field(default_factory=list)
 
+    # to prevent computation of certain objects if they are not present.
+    has_electronics: bool = False
+    has_fluid: bool = False
+
     def __init__(self, batch_dim: int):
         super().__init__()
         self.electronics_state = [ElectronicsState() for _ in range(batch_dim)]
@@ -94,9 +98,19 @@ class RepairsSimState(SimState):
         # Create a dictionary with all states
         state_dict = asdict(self)
 
-        # Save to JSON file
+        # Serialize and save to JSON file, handling non-dataclass objects
+
         with open(filepath, "w") as f:
-            json.dump(state_dict, f)
+            # serializer for Data, tensors, and other objects
+            def _serialize(o):
+                if hasattr(o, "to_dict"):  # if PyG data
+                    return o.to_dict()
+                elif hasattr(o, "tolist"):  # elif tensor
+                    return o.tolist()
+                else:
+                    return str(o)
+
+            json.dump(state_dict, f, default=_serialize)
 
         print(f"Step state saved to: {output_dir}")
 
