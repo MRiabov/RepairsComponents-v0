@@ -5,7 +5,10 @@ import uuid
 from genesis.engine.entities import RigidEntity
 
 from repairs_components.geometry.base import Component
-from repairs_components.logic.tools.screwdriver import Screwdriver
+from repairs_components.logic.tools.screwdriver import (
+    Screwdriver,
+    receive_screw_in_action,
+)
 from repairs_components.logic.electronics import simulator
 import numpy as np
 from dataclasses import asdict
@@ -74,18 +77,21 @@ def step_repairs(
             dtype=torch.bool,
             device=actions.device,
         )
-        & actions["screw_in"]
+        & receive_screw_in_action(
+            actions
+        )  # note:if there are more tools, create an interface, I guess.
     )
-    insert_indices = check_fastener_possible_insertion(
-        picked_up_fastener_tip_position, fastener_hole_positions
-    )  # [B] int or -1
-    valid_insert = screw_mask & (insert_indices >= 0)
-    if valid_insert.any():
-        hole_keys = list(fastener_hole_positions.keys())
-        for scene_id in valid_insert.nonzero(as_tuple=False).squeeze(1).tolist():
-            name = sim_state.tool_state[scene_id].current_tool.picked_up_fastener_name
-            hole_name = hole_keys[insert_indices[scene_id].item()]
-            activate_connection(gs_entities[name], hole_name)
-            sim_state.physical_state[scene_id].connect(name, hole_name, None)
+    if screw_mask.any():
+        insert_indices = check_fastener_possible_insertion(
+            picked_up_fastener_tip_position, fastener_hole_positions
+        )  # [B] int or -1
+        valid_insert = screw_mask & (insert_indices >= 0)
+        if valid_insert.any():
+            hole_keys = list(fastener_hole_positions.keys())
+            for scene_id in valid_insert.nonzero(as_tuple=False).squeeze(1).tolist():
+                name = sim_state.tool_state[scene_id].current_tool.picked_up_fastener_name
+                hole_name = hole_keys[insert_indices[scene_id].item()]
+                activate_connection(gs_entities[name], hole_name)
+                sim_state.physical_state[scene_id].connect(name, hole_name, None)
 
     return success, total_diff_left, sim_state, diff
