@@ -15,6 +15,7 @@ from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.sim_state_global import merge_global_states
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
+    merge_concurrent_scene_configs,
 )
 import genesis as gs
 from repairs_components.training_utils.env_setup import EnvSetup
@@ -94,7 +95,7 @@ class MultiEnvDataLoader:
             timeout: Max time to wait for data for each scene
 
         Returns:
-            List of preprocessed data for each active environment
+            List of preprocessed data for each active environment (len=num_configs_to_generate_per_scene.shape[0])
         """
         assert len(self.active_envs) == len(num_configs_to_generate_per_scene), (
             f"num_configs_to_generate_per_scene length ({len(num_configs_to_generate_per_scene)}) "
@@ -105,7 +106,7 @@ class MultiEnvDataLoader:
         )  # non-negative integer in general.
 
         num_configs_to_generate = torch.zeros_like(num_configs_to_generate_per_scene)
-        results = []
+        results_from_queue = []
         for scene_id, num_to_generate_tensor in enumerate(
             num_configs_to_generate_per_scene
         ):
@@ -123,10 +124,10 @@ class MultiEnvDataLoader:
                     self.prefetch_queues[scene_id].get(timeout=timeout)
                 )
             num_configs_to_generate[scene_id] = num_to_generate - take
-            results.append(results_this_scene)
+            results_from_queue.append(results_this_scene)
 
         # generator - count however much is not enough and gen it.
-        new_configs = self.preprocessing_fn(num_configs_to_generate)
+        starved_configs = self.preprocessing_fn(num_configs_to_generate)
 
         # log issues is starvation is over 30%.
         total_insufficient_count = torch.sum(num_configs_to_generate)
@@ -144,11 +145,16 @@ class MultiEnvDataLoader:
         for scene_id, num_to_generate_tensor in enumerate(num_configs_to_generate):
             num_to_generate = int(num_to_generate_tensor.item())
             for _ in range(num_to_generate):
-                self.prefetch_queues[scene_id].put(new_configs[scene_id])
+                self.prefetch_queues[scene_id].put(starved_configs[scene_id])
 
-        # if there was starvation, add the new configs to the results
-        results.extend(new_configs)
-        return results
+        # Merge the queue configs and the starved configs
+        for i in range(len(num_configs_to_generate_per_scene)):
+            #currently the result is list of lists
+            total_configs_this_queue = results_from_queue[i] + starved_configs[i]
+            # process the result to be a single ConcurrentState
+            results_from_queue[i] = merge_concurrent_scene_configs(total_configs_this_queue)
+
+        return results_from_queue
 
     # def update_environment_state(self, env_idx: int, new_state: Any):
     #     """Update environment state (e.g., after reset or step)."""

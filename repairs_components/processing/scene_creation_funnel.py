@@ -37,7 +37,9 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     """`create_env_configs` is a general, high_level function responsible for creating of randomized configurations
     (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis.
 
-    `create_env_configs` should only be called from `multienv_dataloader`."""
+    `create_env_configs` should only be called from `multienv_dataloader`.
+    
+    Returns: a ConcurrentSceneData for each environment"""
     assert len(tasks) > 0, "Tasks can not be empty."
     assert any(num_configs_to_generate_per_scene) > 0, (
         "At least one scene must be generated."
