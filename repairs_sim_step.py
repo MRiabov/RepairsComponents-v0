@@ -65,8 +65,6 @@ def step_repairs(
     # sim-to-real assumes a small buffer between implementation and action, so let us just make reward compute first and action second which is equal to getting the reward and stepping the action.
     diff, total_diff_left = sim_state.diff(desired_state)
 
-    # Save the state to a JSON file
-    state_file = sim_state.save()
     success = total_diff_left == 0  # Tensor[batch] bool
     B = scene.n_envs
     # Fastener insertion batch
@@ -89,7 +87,9 @@ def step_repairs(
         if valid_insert.any():
             hole_keys = list(fastener_hole_positions.keys())
             for scene_id in valid_insert.nonzero(as_tuple=False).squeeze(1).tolist():
-                name = sim_state.tool_state[scene_id].current_tool.picked_up_fastener_name
+                name = sim_state.tool_state[
+                    scene_id
+                ].current_tool.picked_up_fastener_name
                 hole_name = hole_keys[insert_indices[scene_id].item()]
                 activate_connection(gs_entities[name], hole_name)
                 sim_state.physical_state[scene_id].connect(name, hole_name, None)

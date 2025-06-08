@@ -1,5 +1,7 @@
+from functools import partial
 import random
 from genesis.vis.visualizer import Camera
+from igl.helpers import os
 import torch
 import genesis as gs
 import gymnasium as gym
@@ -7,6 +9,8 @@ from genesis.engine.entities import RigidEntity
 import numpy as np
 from typing import List, Any
 
+from repairs_components.training_utils.failure_modes import out_of_bounds
+from repairs_components.training_utils.save import optional_save
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_sim_step import step_repairs
 from repairs_components.training_utils.final_reward_calc import (
@@ -79,6 +83,8 @@ class RepairsEnv(gym.Env):
         self.tasks = tasks
         self.env_setups = env_setups
         self.num_scenes_per_task = num_scenes_per_task
+        self.min_bounds = torch.tensor(env_cfg["min_bounds"], device=self.device)
+        self.max_bounds = torch.tensor(env_cfg["max_bounds"], device=self.device)
 
         # Store configuration dictionaries
         self.env_cfg = env_cfg
@@ -87,6 +93,27 @@ class RepairsEnv(gym.Env):
         self.batch_dim = batch_dim  # ML batch dim
         self.concurrent_scenes = concurrent_scenes  # todo implement concurrent scenes.
         # genesis batch dim = batch_dim // concurrent_scenes
+
+        # save config
+        if self.env_cfg["save_obs"]:
+            os.makedirs(self.env_cfg["save_obs"]["path"], exist_ok=True)
+            self.save_video: bool = self.env_cfg["save_obs"]["video"]
+            self.save_voxel: bool = self.env_cfg["save_obs"]["voxel"]
+            self.save_electronic_graph: bool = self.env_cfg["save_obs"][
+                "electronic_graph"
+            ]
+            self.save_path: str = self.env_cfg["save_obs"]["path"]
+            self.save_any: bool = (
+                self.save_video or self.save_voxel or self.save_electronic_graph
+            )
+            self.partial_save = partial(  # don't mess the `step()` code.
+                optional_save,
+                save_any=self.save_any,
+                save_path=self.save_path,
+                save_image=self.save_video,
+                save_voxel=self.save_voxel,
+                save_state=self.save_electronic_graph,
+            )
 
         # Using dataclass to store concurrent scene data for better organization and clarity
         self.concurrent_scenes_data: list[ConcurrentSceneData] = []
@@ -187,7 +214,7 @@ class RepairsEnv(gym.Env):
             gripper_force = action_by_scenes[
                 scene_idx, :, 7:9
             ]  # two gripper forces (grip push in/out)
-            # print("gripper_force.shape", gripper_force.shape)
+
             # Execute the motion planning trajectory using our dedicated module
             execute_straight_line_trajectory(
                 franka=scene_data.gs_entities["franka@control"],
@@ -216,8 +243,27 @@ class RepairsEnv(gym.Env):
             # Compute reward based on progress toward the goal
             reward, done = calculate_reward_and_done(scene_data)
 
+            # save the step information if necessary.
+            self.partial_save(
+                sim_state=scene_data.current_state,
+                obs_image=video_obs,
+                voxel_grids_initial=scene_data.vox_init,
+                voxel_grids_desired=scene_data.vox_des,
+                # NOTE: ideally save voxel only after reset.
+            )
+
+            # check if any entity is out of bounds # FIXME: should be per-scene.
+            out_of_bounds_fail = out_of_bounds(
+                min=self.min_bounds,
+                max=self.max_bounds,
+                gs_entities=self.concurrent_scenes_data[scene_idx].gs_entities,
+            )
+
+            reset_envs = done | out_of_bounds_fail  # or any other failure mode.
+
             # reset at done
-            self.reset_idx(done)
+            if reset_envs.any():
+                self.reset_idx(reset_envs.nonzero().squeeze(1))
 
             # Additional info for debugging
             info = {
@@ -234,12 +280,9 @@ class RepairsEnv(gym.Env):
         Args:
             envs_idx: Indices of environments to reset
         """
-
-        # FIXME: envs_idx or scene_idx? the dataloader returns for the whole scene. and I don't need it.
-
-        assert len(envs_idx) > 0, "Can't reset 0 environments"
+        assert envs_idx.shape[0] > 0, "Can't reset 0 environments."
         assert (envs_idx >= 0).all(), "Can't reset negative environments"
-        assert (envs_idx < self.batch_dim).all(), (
+        assert (envs_idx <= self.batch_dim).all(), (
             "Can't reset environments out of bounds"
         )
 
@@ -253,7 +296,7 @@ class RepairsEnv(gym.Env):
 
         # get data for the entire batch.
         reset_scene_data: list[ConcurrentSceneData | None] = (  # none if counts were 0.
-            self.env_dataloader.get_processed_data(counts.to(dtype=torch.uint16))
+            self.env_dataloader.get_processed_data(counts.to(dtype=torch.int16))
         )
         # print("reset_scene_data", reset_scene_data)
 
@@ -328,7 +371,7 @@ class RepairsEnv(gym.Env):
 
             all_env_obs.append(video_obs)
 
-        return torch.stack(all_env_obs, dim=0), {}
+        return torch.cat(all_env_obs, dim=0), {}  # cat along batch dim
 
 
 def _render_all_cameras(cameras: list[Camera]):

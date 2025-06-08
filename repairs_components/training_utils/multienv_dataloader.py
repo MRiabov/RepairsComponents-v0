@@ -73,15 +73,17 @@ class MultiEnvDataLoader:
         Returns:
             List of preprocessed data for each active environment (len=num_configs_to_generate_per_scene.shape[0])
         """
+
+        #impl note: num_configs_to_generate_per_scene is total configs to generate, and 
         assert len(num_configs_to_generate_per_scene) == self.num_environments, (
             f"num_configs_to_generate_per_scene length ({len(num_configs_to_generate_per_scene)}) "
             f"mismatches count of registered envs ({self.num_environments})."
         )
-        assert num_configs_to_generate_per_scene.dtype == torch.uint16, (
-            "Expected num_configs_to_generate_per_scene to be a uint16 tensor."
+        assert num_configs_to_generate_per_scene.dtype == torch.int16, (
+            "Expected num_configs_to_generate_per_scene to be a int16 tensor."
         )  # non-negative integer in general.
 
-        num_configs_to_generate = torch.zeros_like(num_configs_to_generate_per_scene)
+        count_insufficient_configs_per_scene = torch.zeros_like(num_configs_to_generate_per_scene)
         results_from_queue = []
         for scene_id, num_to_generate_tensor in enumerate(
             num_configs_to_generate_per_scene
@@ -99,14 +101,17 @@ class MultiEnvDataLoader:
                 results_this_scene.append(
                     self.prefetch_queues[scene_id].get(timeout=timeout)
                 )
-            num_configs_to_generate[scene_id] = num_to_generate - take
+            count_insufficient_configs_per_scene[scene_id] = num_to_generate - take
             results_from_queue.append(results_this_scene)
 
         # generator - count however much is not enough and gen it.
-        starved_configs = self.preprocessing_fn(num_configs_to_generate)
+        if torch.any(count_insufficient_configs_per_scene > 0):
+            starved_configs = self.preprocessing_fn(count_insufficient_configs_per_scene)
+        else:
+            starved_configs = []
 
         # log issues is starvation is over 30%.
-        total_insufficient_count = torch.sum(num_configs_to_generate)
+        total_insufficient_count = torch.sum(count_insufficient_configs_per_scene)
         total_requested_count = torch.sum(num_configs_to_generate_per_scene)
         if total_insufficient_count > total_requested_count * 0.3:
             print(
@@ -118,7 +123,7 @@ class MultiEnvDataLoader:
 
         # put newly generated configs to queue (to alleviate starvation)
         # note: in future, configs should be reused 3-4 times before being discarded.
-        for scene_id, num_to_generate_tensor in enumerate(num_configs_to_generate):
+        for scene_id, num_to_generate_tensor in enumerate(count_insufficient_configs_per_scene):
             num_to_generate = int(num_to_generate_tensor.item())
             for _ in range(num_to_generate):
                 self.prefetch_queues[scene_id].put(starved_configs[scene_id])
@@ -127,7 +132,8 @@ class MultiEnvDataLoader:
         total_configs = []
         for scene_id in range(len(num_configs_to_generate_per_scene)):
             # currently the result is list of lists
-            results_from_queue[scene_id].append(starved_configs[scene_id])
+            if count_insufficient_configs_per_scene[scene_id] > 0:
+                results_from_queue[scene_id].append(starved_configs[scene_id])
             # process the result to be a single ConcurrentState
             total_configs.append(
                 merge_concurrent_scene_configs(results_from_queue[scene_id])
@@ -150,9 +156,12 @@ class MultiEnvDataLoader:
         assert num_configs_to_generate_per_scene.shape[0] == self.num_environments, (
             "Expected tensor length equal to num_environments."
         )
-        assert num_configs_to_generate_per_scene.dtype == torch.uint16, (
-            "Expected uint16 tensor for num_configs_to_generate_per_scene."
+        assert num_configs_to_generate_per_scene.dtype == torch.int16, (
+            "Expected int16 tensor for num_configs_to_generate_per_scene."
         )
+        assert (
+            num_configs_to_generate_per_scene >= 0
+        ).all(), "num_configs_to_generate_per_scene must be non-negative"
         future = self.executor.submit(
             self._populate_worker, num_configs_to_generate_per_scene
         )

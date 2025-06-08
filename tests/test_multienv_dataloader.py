@@ -27,7 +27,7 @@ def dummy_preproc(requests: torch.Tensor):
 def test_get_processed_data_empty_queue():
     num_envs = 3
     dl = MultiEnvDataLoader(num_envs, dummy_preproc)
-    req = torch.tensor([2, 0, 1], dtype=torch.uint16)
+    req = torch.tensor([2, 0, 1], dtype=torch.int16)
     result = dl.get_processed_data(req)
     assert result == [["0-0", "0-1"], [], ["2-0"]]
 
@@ -35,7 +35,7 @@ def test_get_processed_data_empty_queue():
 def test_get_processed_data_invalid_length():
     dl = MultiEnvDataLoader(2, dummy_preproc)
     with pytest.raises(AssertionError):
-        dl.get_processed_data(torch.tensor([1], dtype=torch.uint16))
+        dl.get_processed_data(torch.tensor([1], dtype=torch.int16))
 
 
 def test_get_processed_data_invalid_dtype():
@@ -46,7 +46,7 @@ def test_get_processed_data_invalid_dtype():
 
 def test_populate_async_returns_future():
     dl = MultiEnvDataLoader(2, dummy_preproc)
-    req = torch.tensor([1, 1], dtype=torch.uint16)
+    req = torch.tensor([1, 1], dtype=torch.int16)
     future = dl.populate_async(req)
     assert isinstance(future, concurrent.futures.Future)
 
@@ -55,7 +55,7 @@ def test_populate_async_invalid_args():
     dl = MultiEnvDataLoader(2, dummy_preproc)
     # wrong length
     with pytest.raises(AssertionError):
-        dl.populate_async(torch.tensor([1], dtype=torch.uint16))
+        dl.populate_async(torch.tensor([1], dtype=torch.int16))
     # wrong dtype
     with pytest.raises(AssertionError):
         dl.populate_async(torch.tensor([1, 2], dtype=torch.int32))
@@ -64,7 +64,7 @@ def test_populate_async_invalid_args():
 def test_populate_async_fills_queue():
     num_envs = 2
     dl = MultiEnvDataLoader(num_envs, dummy_preproc)
-    req = torch.tensor([1, 2], dtype=torch.uint16)
+    req = torch.tensor([1, 2], dtype=torch.int16)
     future = dl.populate_async(req)
     # wait for the task to complete
     result = future.result(timeout=1.0)
