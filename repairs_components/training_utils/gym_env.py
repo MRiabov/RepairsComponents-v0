@@ -91,7 +91,7 @@ class RepairsEnv(gym.Env):
         # Using dataclass to store concurrent scene data for better organization and clarity
         self.concurrent_scenes_data: list[ConcurrentSceneData] = []
 
-        scenes = []
+        self.scenes = []
         task = tasks[0]  # any task will suffice for init.
 
         # if scene meshes don't exist yet, create them now.
@@ -110,7 +110,7 @@ class RepairsEnv(gym.Env):
                 sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
                 show_viewer=False,
             )
-            scenes.append(scene)
+            self.scenes.append(scene)
 
             scene, cameras, gs_entities, franka = initialize_and_build_scene(
                 scene,  # build scene.
@@ -136,7 +136,7 @@ class RepairsEnv(gym.Env):
             )
         # create the dataloader to update scenes.
         self.env_dataloader = RepairsEnvDataLoader(
-            scenes=scenes,
+            scenes=self.scenes,
             env_setups=env_setups,
             tasks=tasks,
             batch_dim=self.batch_dim,
@@ -252,12 +252,14 @@ class RepairsEnv(gym.Env):
         dof_pos = self.default_dof_pos.expand(envs_idx.shape[0], -1)
 
         # get data for the entire batch.
-        reset_scene_data: list[ConcurrentSceneData] = (
+        reset_scene_data: list[ConcurrentSceneData | None] = (  # none if counts were 0.
             self.env_dataloader.get_processed_data(counts.to(dtype=torch.uint16))
         )
-        print("reset_scene_data", reset_scene_data)
+        # print("reset_scene_data", reset_scene_data)
 
-        for scene_id, reset_scene_data in zip(unique_scene_idx, reset_scene_data):
+        for scene_id, reset_scene in enumerate(reset_scene_data):
+            if reset_scene is None:
+                continue
             # get the number of environments to reset
             envs_idx_to_reset_this_scene = torch.nonzero(scene_idx == scene_id).squeeze(
                 1
@@ -272,16 +274,20 @@ class RepairsEnv(gym.Env):
 
             # Create ConcurrentSceneData instance
             new_scene_data = ConcurrentSceneData(
-                scene=reset_scene_data.scene,
-                gs_entities=reset_scene_data.gs_entities,
-                cameras=reset_scene_data.cameras,
-                current_state=reset_scene_data.current_state,
-                desired_state=reset_scene_data.desired_state,
-                vox_init=reset_scene_data.vox_init,
-                vox_des=reset_scene_data.vox_des,
-                initial_diffs=reset_scene_data.initial_diffs,
-                initial_diff_counts=reset_scene_data.initial_diff_counts,
-                scene_id=reset_scene_data.scene_id,
+                scene=self.scenes[
+                    scene_id
+                ],  # configs don't create scenes. So, take the existing scenes and put them there, they will simply be updated.
+                gs_entities=self.concurrent_scenes_data[
+                    scene_id
+                ].gs_entities,  # and gs_entities
+                cameras=self.concurrent_scenes_data[scene_id].cameras,  # and cameras
+                current_state=reset_scene.current_state,  # the rest is reset
+                desired_state=reset_scene.desired_state,
+                vox_init=reset_scene.vox_init,
+                vox_des=reset_scene.vox_des,
+                initial_diffs=reset_scene.initial_diffs,
+                initial_diff_counts=reset_scene.initial_diff_counts,
+                scene_id=reset_scene.scene_id,
             )
             self.concurrent_scenes_data[scene_id] = new_scene_data
 

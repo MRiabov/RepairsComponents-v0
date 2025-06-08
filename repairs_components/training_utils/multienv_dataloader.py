@@ -124,16 +124,20 @@ class MultiEnvDataLoader:
                 self.prefetch_queues[scene_id].put(starved_configs[scene_id])
 
         # Merge the queue configs and the starved configs
-        for i in range(len(num_configs_to_generate_per_scene)):
+        total_configs = []
+        for scene_id in range(len(num_configs_to_generate_per_scene)):
             # currently the result is list of lists
-            total_configs_this_queue = results_from_queue[i] + starved_configs[i]
+            results_from_queue[scene_id].append(starved_configs[scene_id])
             # process the result to be a single ConcurrentState
-            results_from_queue[i] = merge_concurrent_scene_configs(
-                total_configs_this_queue
+            total_configs.append(
+                merge_concurrent_scene_configs(results_from_queue[scene_id])
             )
 
-        self.populate_async(num_configs_to_generate_per_scene)
-        return results_from_queue
+        # automatically refill the configs that were taken.
+        self.populate_async(
+            num_configs_to_generate_per_scene
+        )  # note: mb only ones which were *taken*.
+        return total_configs
 
     def populate_async(self, num_configs_to_generate_per_scene: torch.Tensor) -> Any:
         """
