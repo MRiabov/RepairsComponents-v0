@@ -38,7 +38,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis.
 
     `create_env_configs` should only be called from `multienv_dataloader`.
-    
+
     Returns: a ConcurrentSceneData for each environment"""
     assert len(tasks) > 0, "Tasks can not be empty."
     assert any(num_configs_to_generate_per_scene) > 0, (
