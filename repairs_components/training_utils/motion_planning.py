@@ -91,4 +91,4 @@ def execute_straight_line_trajectory(
         if camera is not None:
             camera.render()
 
-    print(franka.get_links_pos()[:, 7])  # hand.
+    # print(franka.get_links_pos()[:, 7])  # hand.

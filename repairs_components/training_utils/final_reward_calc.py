@@ -44,8 +44,9 @@ def calculate_partial_reward(
     ```
     """
     completion_percentage = calculate_completion_percentage(
-        initial_diff_count, final_diff_count
-    )
+        initial_diff_count.to(device=final_diff_count.device),
+        final_diff_count.to(device=final_diff_count.device),
+    )  # note: one of them is on cuda, the other is on CPU, and it shouldn't be.
     return torch.where(
         completion_percentage == 1.0,
         torch.ones_like(completion_percentage),
@@ -55,9 +56,6 @@ def calculate_partial_reward(
             torch.zeros_like(completion_percentage),
         ),
     )
-
-    
-
 
 
 def calculate_completion_percentage(

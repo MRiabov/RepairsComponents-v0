@@ -11,7 +11,10 @@ from repairs_components.processing.scene_creation_funnel import (
 )
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
-from repairs_components.training_utils.sim_state_global import merge_global_states, RepairsSimState
+from repairs_components.training_utils.sim_state_global import (
+    merge_global_states,
+    RepairsSimState,
+)
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     merge_concurrent_scene_configs,
@@ -148,7 +151,10 @@ class MultiEnvDataLoader:
         )  # note: mb only ones which were *taken*.
 
         assert all(
-            [cfg.initial_diff_counts.shape[0] == num_configs_to_generate_per_scene[i] for i, cfg in enumerate(total_configs)]
+            [
+                cfg.initial_diff_counts.shape[0] == num_configs_to_generate_per_scene[i]
+                for i, cfg in enumerate(total_configs)
+            ]
         ), "Total configs do not match the number of configs to generate."
         return total_configs
 
@@ -184,8 +190,9 @@ class MultiEnvDataLoader:
             for it in items:
                 # ensure prefetch items are individual scenes
                 try:
-                    assert it.current_state.scene_batch_dim == 1, \
+                    assert it.current_state.scene_batch_dim == 1, (
                         f"Prefetch item batch_dim={it.current_state.scene_batch_dim}, expected 1"
+                    )
                 except AssertionError as e:
                     print(f"[Warning] {e}")
                 q.put(it)
@@ -243,7 +250,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         # FIXME: I also need a possibility of returning controlled-size batches.
         # in fact, I don't need batches in memory at all, I need individual items.
 
-        #note: this method is expected to return individual configs, not batched/merged. 
+        # note: this method is expected to return individual configs, not batched/merged.
         assert len(self.env_setups) == self.num_environments, (
             "One env setup per one env"
         )
@@ -274,7 +281,9 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
                 curr.has_electronics = orig_curr.has_electronics
                 curr.has_fluid = orig_curr.has_fluid
                 # sanity check: ensure single-item state
-                assert curr.scene_batch_dim == 1, f"Expected batch_dim=1, got {curr.scene_batch_dim}"
+                assert curr.scene_batch_dim == 1, (
+                    f"Expected batch_dim=1, got {curr.scene_batch_dim}"
+                )
 
                 orig_des = scene_cfg.desired_state
                 des = RepairsSimState(batch_dim=1)
@@ -285,12 +294,16 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
                 des.has_electronics = orig_des.has_electronics
                 des.has_fluid = orig_des.has_fluid
                 # sanity check: ensure single-item state
-                assert des.scene_batch_dim == 1, f"Expected batch_dim=1, got {des.scene_batch_dim}"
+                assert des.scene_batch_dim == 1, (
+                    f"Expected batch_dim=1, got {des.scene_batch_dim}"
+                )
 
                 # slice voxel and diffs
                 vox_init_i = scene_cfg.vox_init[i : i + 1]
                 vox_des_i = scene_cfg.vox_des[i : i + 1]
-                diffs_i = {k: scene_cfg.initial_diffs[k][i] for k in scene_cfg.initial_diffs}
+                diffs_i = {
+                    k: scene_cfg.initial_diffs[k][i] for k in scene_cfg.initial_diffs
+                }
                 diff_counts_i = scene_cfg.initial_diff_counts[i : i + 1]
 
                 cfg_list.append(

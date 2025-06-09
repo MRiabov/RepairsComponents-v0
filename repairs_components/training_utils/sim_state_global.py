@@ -14,7 +14,8 @@ from repairs_components.training_utils.sim_state import SimState
 @dataclass
 class RepairsSimState(SimState):
     "A convenience sim state class to put diff logic out of a step function"
-    scene_batch_dim:int
+
+    scene_batch_dim: int
     """The batch dim of this scene. This is the number of scenes genesis sim batch.
     Primarily it for sanity checks."""
 

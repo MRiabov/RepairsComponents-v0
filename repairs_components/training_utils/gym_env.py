@@ -136,6 +136,7 @@ class RepairsEnv(gym.Env):
             scene = gs.Scene(  # empty scene
                 sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
                 show_viewer=False,
+                vis_options=gs.options.VisOptions(env_separate_rigid=True),  # type: ignore
             )
             self.scenes.append(scene)
 
@@ -171,7 +172,9 @@ class RepairsEnv(gym.Env):
         )
 
         # populate the dataloader with initial configs
-        self.env_dataloader.populate_async(init_generate_per_scene.to(dtype=torch.int16))
+        self.env_dataloader.populate_async(
+            init_generate_per_scene.to(dtype=torch.int16)
+        )
 
         # Set default joint positions from config
         self.default_dof_pos = torch.tensor(
@@ -274,11 +277,13 @@ class RepairsEnv(gym.Env):
                 "total_diff_left": total_diff_left,
                 "success": success,
             }
-        
-        #observe all environments
+
+        # observe all environments
         all_env_obs = []
         for scene_idx in range(self.concurrent_scenes):
-            all_env_obs.append(self._observe_scene(self.concurrent_scenes_data[scene_idx]))
+            all_env_obs.append(
+                self._observe_scene(self.concurrent_scenes_data[scene_idx])
+            )
 
         return torch.cat(all_env_obs, dim=0), reward, done, info
 
@@ -366,7 +371,7 @@ class RepairsEnv(gym.Env):
         idxs = torch.arange(self.batch_dim, device=self.device)
         self.reset_idx(idxs)
 
-        #observe all environments (ideally done in paralel.)
+        # observe all environments (ideally done in paralel.)
         all_env_obs = []
         for scene_data in self.concurrent_scenes_data:
             all_env_obs.append(self._observe_scene(scene_data))
@@ -392,14 +397,6 @@ def _render_all_cameras(cameras: list[Camera]):
             rgb=True, depth=True, normal=True
         )
 
-        # note: for whichever reason, in batch dim of 1, the cameras don't return batch shape. So I'd expand.
-        rgb = np.expand_dims(rgb, (0))
-        depth = np.expand_dims(depth, (0))[:, :, :, None]
-        normal = np.expand_dims(normal, (0))
-        assert all(lambda a: a.ndim == 4 for a in (rgb, depth, normal)), (
-            "Too many dims found."
-        )
-
         # Process camera observation
         camera_obs = obs_to_int8(rgb, depth, normal)  # type: ignore
         env_obs.append(camera_obs)
@@ -414,6 +411,7 @@ def obs_to_int8(rgb: np.ndarray, depth: np.ndarray, normal: np.ndarray):
     rgb_uint8 = (rgb * 255).astype(np.uint8)
     depth_normalized = (depth - depth.min()) / (depth.max() - depth.min() + 1e-6)
     depth_uint8 = (depth_normalized * 255).astype(np.uint8)
+    depth_uint8 = np.expand_dims(depth_uint8, axis=-1)
     normal_normalized = (normal * 0.5 + 0.5) * 255
     normal_uint8 = normal_normalized.astype(np.uint8)
     return torch.from_numpy(

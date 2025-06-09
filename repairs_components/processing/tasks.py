@@ -314,3 +314,20 @@ class AssembleTask(Task):
         # For example: compound = Compound(children=[info['part'] for info in part_info])
         new_compound = Compound(children=[info["part"] for info in part_info])
         return new_compound
+
+
+# Inverse of AssembleTask: disassemble for desired state, assemble for initial state
+class DisassembleTask(Task):
+    """Inverse of AssembleTask: initial state is the assembled desired state, and the desired state is disassembled desired state."""
+
+    def perturb_initial_state(
+        self, compound: Compound, env_size=(64, 64, 64)
+    ) -> Compound:
+        # Use AssembleTask's perturb_desired_state to create the assembled initial state
+        return AssembleTask().perturb_desired_state(compound, env_size)
+
+    def perturb_desired_state(
+        self, compound: Compound, env_size=(64, 64, 64)
+    ) -> Compound:
+        # Use AssembleTask's perturb_initial_state to create the disassembled desired state
+        return AssembleTask().perturb_initial_state(compound, env_size)

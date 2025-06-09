@@ -44,9 +44,9 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     assert any(num_configs_to_generate_per_scene) > 0, (
         "At least one scene must be generated."
     )
-    assert len(num_configs_to_generate_per_scene) == len(tasks), (
-        "Number of tasks and number of configs to generate must match."
-    )
+    # assert len(num_configs_to_generate_per_scene) == len(tasks), (
+    #     "Number of tasks and number of configs to generate must match."
+    # ) # not true. it must be split amongst tasks
 
     # FIXME: below generates only for starting states. This is a subcase of generating for however much we need.
     # instead it should generate as per num_configs_to_generate.
@@ -73,13 +73,15 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         init_diff_counts = []
 
         voxelization_cache = {}
+        task_ids = torch.randint(low=0, high=len(tasks), size=(scene_gen_count,))
         for _ in range(scene_gen_count):
+            task_id = task_ids[_]  # randomly select a task
             starting_scene_geom_ = starting_state_geom(
-                env_setups[scene_idx], tasks[scene_idx], env_size=(64, 64, 64)
+                env_setups[scene_idx], tasks[task_id], env_size=(64, 64, 64)
             )  # create task... in a for loop...
             # note: at the moment the starting scene goes out of bounds a little, but whatever, it'll only generalize better.
             desired_state_geom_ = desired_state_geom(
-                env_setups[scene_idx], tasks[scene_idx], env_size=(64, 64, 64)
+                env_setups[scene_idx], tasks[task_id], env_size=(64, 64, 64)
             )
 
             # voxelize both
