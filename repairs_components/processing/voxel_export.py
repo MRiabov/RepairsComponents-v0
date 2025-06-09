@@ -1,7 +1,6 @@
 import logging
 import numpy as np
-import torch
-import kaolin as kal
+import trimesh
 
 import tempfile
 import os
@@ -54,7 +53,7 @@ def export_voxel_grid(
     cache: dict[str, dict[str, Any]] | None = None,
 ):
     """
-    Voxelize an iterable of build123d Parts into a 3D int8 label grid using Kaolin (GPU).
+    Voxelize an iterable of build123d Parts into a 3D int8 label grid using trimesh (CPU).
 
     Args:
         compound: iterable of build123d Parts; each part should have .label with '@type'.
@@ -107,51 +106,46 @@ def export_voxel_grid(
         key = mesh_hash(part)
         mesh_keys.append(key)
         if cached and cache is not None and key in cache:
-            mesh_data = cache[key]["mesh"]
+            mesh = cache[key]["mesh"]
         else:
-            # Export glTF and load via Kaolin
-            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".gltf")
+            # Export STL and load via trimesh
+            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".stl")
             tmp_path = tmp_file.name
             tmp_file.close()
-            bd.export_gltf(part, tmp_path)
-            mesh_data = kal.io.gltf.import_mesh(tmp_path)
+            bd.export_stl(part, tmp_path)
+            mesh = trimesh.load(tmp_path)
             os.remove(tmp_path)
             if cached and cache is not None:
-                cache[key] = {"mesh": mesh_data}
-        meshes.append(mesh_data)
+                cache[key] = {"mesh": mesh}
+        meshes.append(mesh)
 
     if not meshes:
         padded = np.zeros(grid_size, dtype=np.int8)
         return (padded, cache) if cached else padded
 
     # Compute bounds from all meshes
-    all_vertices = torch.cat([m.vertices for m in meshes], dim=0)
-    mins = all_vertices.min(dim=0)[0].cpu().numpy()
-    maxs = all_vertices.max(dim=0)[0].cpu().numpy()
+    all_vertices = np.concatenate([m.vertices for m in meshes], axis=0)
+    mins = all_vertices.min(axis=0)
+    maxs = all_vertices.max(axis=0)
     grid_dims = np.ceil((maxs - mins) / voxel_size).astype(int)
 
     combined = np.zeros(grid_dims, dtype=np.int8)
-    # print("Exporting voxel grid (GPU, Kaolin)...")
+    # print("Exporting voxel grid (CPU, trimesh)...")
 
-    for mesh_data, part_type, key in zip(meshes, part_types, mesh_keys):
+    for mesh, part_type, key in zip(meshes, part_types, mesh_keys):
         # Voxel cache: reuse if available
         if cached and cache is not None and key in cache and "voxel" in cache[key]:
-            vox = cache[key]["voxel"]
-            # print("Using cached voxel grid for", key)
+            pts = cache[key]["voxel"]
         else:
-            # Prepare batched mesh vertices and unbatched faces for Kaolin
-            verts = mesh_data.vertices.to(device=torch.device("cuda"), dtype=torch.float32).unsqueeze(0)
-            faces = mesh_data.faces.to(device=torch.device("cuda"), dtype=torch.long)
-            voxels = kal.ops.conversions.trianglemeshes_to_voxelgrids(
-                verts, faces, resolution=grid_size[0]
-            )  # (1, D, H, W)
-            vox = voxels[0].cpu().numpy()
+            # Voxelize mesh using trimesh
+            vox_obj = trimesh.voxel.creation.voxelize(mesh, pitch=voxel_size)
+            if vox_obj is None:
+                continue
+            pts = vox_obj.points
             if cached and cache is not None:
-                cache[key]["voxel"] = vox
-        # Occupied indices
-        idx = np.argwhere(vox)
-        # Map to world coordinates
-        idx = idx + np.floor((mins / voxel_size)).astype(int)
+                cache[key]["voxel"] = pts
+        # Compute voxel indices from points
+        idx = np.floor((pts - mins) / voxel_size).astype(int)
         # Mask for bounds
         mask = np.all((idx >= 0) & (idx < grid_dims), axis=1)
         idx = idx[mask]
