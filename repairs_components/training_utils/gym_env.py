@@ -170,6 +170,9 @@ class RepairsEnv(gym.Env):
             prefetch_memory_size=prefetch_memory_size,
         )
 
+        # populate the dataloader with initial configs
+        self.env_dataloader.populate_async(init_generate_per_scene.to(dtype=torch.int16))
+
         # Set default joint positions from config
         self.default_dof_pos = torch.tensor(
             [env_cfg["default_joint_angles"][name] for name in env_cfg["joint_names"]],
@@ -238,7 +241,7 @@ class RepairsEnv(gym.Env):
             # Update the scene data with the new state
             scene_data.current_state = current_sim_state
 
-            video_obs = _render_all_cameras(scene_data.cameras)
+            video_obs = self._observe_scene(scene_data)
 
             # Compute reward based on progress toward the goal
             reward, done = calculate_reward_and_done(scene_data)
@@ -271,8 +274,13 @@ class RepairsEnv(gym.Env):
                 "total_diff_left": total_diff_left,
                 "success": success,
             }
+        
+        #observe all environments
+        all_env_obs = []
+        for scene_idx in range(self.concurrent_scenes):
+            all_env_obs.append(self._observe_scene(self.concurrent_scenes_data[scene_idx]))
 
-        return video_obs, reward, done, info
+        return torch.cat(all_env_obs, dim=0), reward, done, info
 
     def reset_idx(self, envs_idx: torch.Tensor):
         """Reset specific environments to their initial state.
@@ -287,7 +295,8 @@ class RepairsEnv(gym.Env):
         )
 
         # get from which scene(s) we are resetting
-        scene_idx = envs_idx // self.batch_dim
+        scene_size = self.batch_dim // self.concurrent_scenes
+        scene_idx = envs_idx // scene_size
         unique_scene_idx, counts = torch.unique(scene_idx, return_counts=True)
 
         # update the scene
@@ -357,21 +366,22 @@ class RepairsEnv(gym.Env):
         idxs = torch.arange(self.batch_dim, device=self.device)
         self.reset_idx(idxs)
 
-        # Get initial observations from all concurrent scenes
+        #observe all environments (ideally done in paralel.)
         all_env_obs = []
-
-        # Process each environment
-        for scene_idx in range(self.concurrent_scenes):
-            # Get the scene data for this environment
-            scene_data = self.concurrent_scenes_data[scene_idx]
-
-            # Extract cameras from scene data
-            cameras = scene_data.cameras
-            video_obs = _render_all_cameras(cameras)
-
-            all_env_obs.append(video_obs)
+        for scene_data in self.concurrent_scenes_data:
+            all_env_obs.append(self._observe_scene(scene_data))
 
         return torch.cat(all_env_obs, dim=0), {}  # cat along batch dim
+
+    def _observe_scene(self, scene_data: ConcurrentSceneData):
+        # Process a single environment
+        # Get the scene data for this environment
+
+        # Extract cameras from scene data
+        cameras = scene_data.cameras
+        video_obs = _render_all_cameras(cameras)
+
+        return video_obs
 
 
 def _render_all_cameras(cameras: list[Camera]):

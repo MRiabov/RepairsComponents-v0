@@ -25,6 +25,9 @@ ignore_missing_imports = true
 [tool.pylint.master]
 load-plugins = "pylint.extensions.docparams"
 
+[tool.uv.sources]
+genesis-world = { git = "https://github.com/Genesis-Embodied-AI/Genesis.git" }
+
 [project]
 name = "repairs_components"
 version = "0.1.0"
@@ -67,6 +70,8 @@ dependencies = [
     "flashbax",
     "torchvision",
     "kaolin==0.17.0",
+    "pip",
+    "install",
 ]
 
 [project.urls]

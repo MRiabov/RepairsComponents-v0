@@ -254,28 +254,26 @@ def move_entities_to_pos(
     """Move parts to their necessary positions. Can be used both in reset and init."""
     if env_idx is None:
         env_idx = torch.arange(len(starting_sim_state.physical_state))
-    for gs_entity_name, gs_entity in gs_entities.items():
-        if gs_entity_name not in starting_sim_state.physical_state[env_idx[0]].indices:
-            # note: env_idx[0] is safe because all entities names in physical states are equal.
-            continue  # no need to move e.g. franka arm or base plate.
-        entity_pos = torch.zeros((len(env_idx), 3))
-
-        entity_idx = starting_sim_state.physical_state[env_idx[0]].indices[
-            gs_entity_name
-        ]
-        entity_pos[env_idx] = (
-            torch.tensor(
-                [
-                    starting_sim_state.physical_state[i].graph.position[entity_idx]
-                    for i in env_idx
-                ],
-                device=env_idx.device,
-            )
-            / 100  # cm to meters
+    # batch collect all positions (cm to meters) across environments
+    all_positions = (
+        torch.stack(
+            [
+                torch.tensor(s.graph.position, device=env_idx.device)
+                for s in starting_sim_state.physical_state
+            ],
+            dim=0,
         )
-        # No need to move because the position is already centered.
-        # positions = positions + torch.tensor(tooling_stand_plate.SCENE_CENTER) / 100
-        gs_entity.set_pos(entity_pos, envs_idx=env_idx)
+        / 100
+    )
+
+    # set positions for each entity in batch
+    for gs_entity_name, entity_idx in starting_sim_state.physical_state[
+        env_idx[0]
+    ].indices.items():
+        entity = gs_entities[gs_entity_name]
+        entity_pos = all_positions[env_idx, entity_idx]
+        # No need to move because already centered
+        entity.set_pos(entity_pos, envs_idx=env_idx)
 
 
 # TODO why not used?

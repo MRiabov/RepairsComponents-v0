@@ -11,7 +11,7 @@ from repairs_components.processing.scene_creation_funnel import (
 )
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
-from repairs_components.training_utils.sim_state_global import merge_global_states
+from repairs_components.training_utils.sim_state_global import merge_global_states, RepairsSimState
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     merge_concurrent_scene_configs,
@@ -126,20 +126,17 @@ class MultiEnvDataLoader:
             )
 
         # put newly generated configs to queue (to alleviate starvation)
-        # note: in future, configs should be reused 3-4 times before being discarded.
-        for scene_id, num_to_generate_tensor in enumerate(
-            count_insufficient_configs_per_scene
-        ):
-            num_to_generate = int(num_to_generate_tensor.item())
-            for _ in range(num_to_generate):
-                self.prefetch_queues[scene_id].put(starved_configs[scene_id])
+        # enqueue each starved config individually per scene
+        for scene_id, cfg_list in enumerate(starved_configs):
+            for cfg in cfg_list:
+                self.prefetch_queues[scene_id].put(cfg)
 
         # Merge the queue configs and the starved configs
         total_configs = []
         for scene_id in range(len(num_configs_to_generate_per_scene)):
-            # currently the result is list of lists
+            # extend with any starved configs
             if count_insufficient_configs_per_scene[scene_id] > 0:
-                results_from_queue[scene_id].append(starved_configs[scene_id])
+                results_from_queue[scene_id].extend(starved_configs[scene_id])
             # process the result to be a single ConcurrentState
             total_configs.append(
                 merge_concurrent_scene_configs(results_from_queue[scene_id])
@@ -147,8 +144,12 @@ class MultiEnvDataLoader:
 
         # automatically refill the configs that were taken.
         self.populate_async(
-            num_configs_to_generate_per_scene
+            num_configs_to_generate_per_scene.to(dtype=torch.int16)
         )  # note: mb only ones which were *taken*.
+
+        assert all(
+            [cfg.initial_diff_counts.shape[0] == num_configs_to_generate_per_scene[i] for i, cfg in enumerate(total_configs)]
+        ), "Total configs do not match the number of configs to generate."
         return total_configs
 
     def populate_async(self, num_configs_to_generate_per_scene: torch.Tensor) -> Any:
@@ -181,6 +182,12 @@ class MultiEnvDataLoader:
         for idx, items in enumerate(batch):
             q = self.prefetch_queues[idx]
             for it in items:
+                # ensure prefetch items are individual scenes
+                try:
+                    assert it.current_state.scene_batch_dim == 1, \
+                        f"Prefetch item batch_dim={it.current_state.scene_batch_dim}, expected 1"
+                except AssertionError as e:
+                    print(f"[Warning] {e}")
                 q.put(it)
 
 
@@ -217,7 +224,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         def scene_preprocessing_fn(
             num_configs_to_generate_per_scene: torch.Tensor,
             _state_data: Any | None = None,
-        ) -> List[ConcurrentSceneData]:
+        ) -> List[List[ConcurrentSceneData]]:
             return self._generate_scene_batches(num_configs_to_generate_per_scene)
 
         super().__init__(
@@ -228,13 +235,15 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
 
     def _generate_scene_batches(
         self, num_configs_to_generate_per_scene: torch.Tensor
-    ) -> List[ConcurrentSceneData]:
-        """Generate batches for a specific scene.
+    ) -> List[List[ConcurrentSceneData]]:
+        """Generate batches of individual configs for a specific scene.
 
         Inputs:
         num_configs_to_generate_per_scene: torch.Tensor of shape [num_tasks_per_scene] with torch_bool."""
         # FIXME: I also need a possibility of returning controlled-size batches.
         # in fact, I don't need batches in memory at all, I need individual items.
+
+        #note: this method is expected to return individual configs, not batched/merged. 
         assert len(self.env_setups) == self.num_environments, (
             "One env setup per one env"
         )
@@ -250,33 +259,53 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         )
 
         batches = []
-        for scene_idx in range(len(num_configs_to_generate_per_scene)):
-            batch_starting_states = merge_global_states(
-                [scene_configs_per_scene[scene_idx].current_state]
-            )
-            batch_desired_states = merge_global_states(
-                [scene_configs_per_scene[scene_idx].desired_state]
-            )
-            vox_init = scene_configs_per_scene[scene_idx].vox_init
-            vox_des = scene_configs_per_scene[scene_idx].vox_des
+        # Split each batched scene config into individual items (batch dim =1)
+        for scene_idx, scene_cfg in enumerate(scene_configs_per_scene):
+            count = int(num_configs_to_generate_per_scene[scene_idx])
+            cfg_list: list[ConcurrentSceneData] = []
+            for i in range(count):
+                # slice global states
+                orig_curr = scene_cfg.current_state
+                curr = RepairsSimState(batch_dim=1)
+                curr.electronics_state = [orig_curr.electronics_state[i]]
+                curr.physical_state = [orig_curr.physical_state[i]]
+                curr.fluid_state = [orig_curr.fluid_state[i]]
+                curr.tool_state = [orig_curr.tool_state[i]]
+                curr.has_electronics = orig_curr.has_electronics
+                curr.has_fluid = orig_curr.has_fluid
+                # sanity check: ensure single-item state
+                assert curr.scene_batch_dim == 1, f"Expected batch_dim=1, got {curr.scene_batch_dim}"
 
-            initial_diffs, initial_diff_count = batch_starting_states.diff(
-                batch_desired_states
-            )
+                orig_des = scene_cfg.desired_state
+                des = RepairsSimState(batch_dim=1)
+                des.electronics_state = [orig_des.electronics_state[i]]
+                des.physical_state = [orig_des.physical_state[i]]
+                des.fluid_state = [orig_des.fluid_state[i]]
+                des.tool_state = [orig_des.tool_state[i]]
+                des.has_electronics = orig_des.has_electronics
+                des.has_fluid = orig_des.has_fluid
+                # sanity check: ensure single-item state
+                assert des.scene_batch_dim == 1, f"Expected batch_dim=1, got {des.scene_batch_dim}"
 
-            # Create ConcurrentSceneData object
-            batch_data = ConcurrentSceneData(
-                scene=None,
-                gs_entities=None,
-                cameras=None,
-                current_state=batch_starting_states,
-                desired_state=batch_desired_states,
-                vox_init=vox_init,
-                vox_des=vox_des,
-                initial_diffs=initial_diffs,
-                initial_diff_counts=initial_diff_count,
-                scene_id=scene_idx,
-            )
-            batches.append(batch_data)
+                # slice voxel and diffs
+                vox_init_i = scene_cfg.vox_init[i : i + 1]
+                vox_des_i = scene_cfg.vox_des[i : i + 1]
+                diffs_i = {k: scene_cfg.initial_diffs[k][i] for k in scene_cfg.initial_diffs}
+                diff_counts_i = scene_cfg.initial_diff_counts[i : i + 1]
 
+                cfg_list.append(
+                    ConcurrentSceneData(
+                        scene=None,
+                        gs_entities=None,
+                        cameras=None,
+                        current_state=curr,
+                        desired_state=des,
+                        vox_init=vox_init_i,
+                        vox_des=vox_des_i,
+                        initial_diffs=diffs_i,
+                        initial_diff_counts=diff_counts_i,
+                        scene_id=scene_idx,
+                    )
+                )
+            batches.append(cfg_list)
         return batches

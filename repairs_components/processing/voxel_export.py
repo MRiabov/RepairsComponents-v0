@@ -140,8 +140,8 @@ def export_voxel_grid(
             # print("Using cached voxel grid for", key)
         else:
             # Prepare batched mesh vertices and unbatched faces for Kaolin
-            verts = mesh_data.vertices.to(torch.float32).unsqueeze(0)
-            faces = mesh_data.faces.to(torch.long)
+            verts = mesh_data.vertices.to(device=torch.device("cuda"), dtype=torch.float32).unsqueeze(0)
+            faces = mesh_data.faces.to(device=torch.device("cuda"), dtype=torch.long)
             voxels = kal.ops.conversions.trianglemeshes_to_voxelgrids(
                 verts, faces, resolution=grid_size[0]
             )  # (1, D, H, W)

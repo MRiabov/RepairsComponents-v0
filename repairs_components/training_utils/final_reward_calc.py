@@ -32,18 +32,35 @@ def calculate_partial_reward(
     final_diff_count: torch.Tensor,
     partial_multiplier: float = 0.5,
 ) -> torch.Tensor:
-    completion_percentage = caclulate_completion_percentage(
-        initial_diff_count, final_diff_count
-    )
+    """
+    Computes final reward. Uses this logic, but batched:
+    ```
     if completion_percentage == 1.0:
         return torch.ones_like(completion_percentage)
     elif completion_percentage > 0:
         return completion_percentage * partial_multiplier
     else:
         return torch.zeros_like(completion_percentage)
+    ```
+    """
+    completion_percentage = calculate_completion_percentage(
+        initial_diff_count, final_diff_count
+    )
+    return torch.where(
+        completion_percentage == 1.0,
+        torch.ones_like(completion_percentage),
+        torch.where(
+            completion_percentage > 0,
+            completion_percentage * partial_multiplier,
+            torch.zeros_like(completion_percentage),
+        ),
+    )
+
+    
 
 
-def caclulate_completion_percentage(
+
+def calculate_completion_percentage(
     initial_diff_count: torch.Tensor, final_diff_count: torch.Tensor
 ) -> torch.Tensor:
     return (initial_diff_count - final_diff_count) / initial_diff_count

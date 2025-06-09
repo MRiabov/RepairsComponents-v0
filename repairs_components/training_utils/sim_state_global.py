@@ -14,7 +14,11 @@ from repairs_components.training_utils.sim_state import SimState
 @dataclass
 class RepairsSimState(SimState):
     "A convenience sim state class to put diff logic out of a step function"
+    scene_batch_dim:int
+    """The batch dim of this scene. This is the number of scenes genesis sim batch.
+    Primarily it for sanity checks."""
 
+    # the main states.
     electronics_state: list[ElectronicsState] = field(default_factory=list)
     physical_state: list[PhysicalState] = field(default_factory=list)
     fluid_state: list[FluidState] = field(default_factory=list)
@@ -26,6 +30,7 @@ class RepairsSimState(SimState):
 
     def __init__(self, batch_dim: int):
         super().__init__()
+        self.scene_batch_dim = batch_dim
         self.electronics_state = [ElectronicsState() for _ in range(batch_dim)]
         self.physical_state = [PhysicalState() for _ in range(batch_dim)]
         self.fluid_state = [FluidState() for _ in range(batch_dim)]

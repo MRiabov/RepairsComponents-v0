@@ -1,5 +1,5 @@
 numpy==1.26.4
-genesis-world
+git+https://github.com/Genesis-Embodied-AI/Genesis.git # genesis.
 torch==2.5.1
 torch_geometric
 build123d==0.9.1
