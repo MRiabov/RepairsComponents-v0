@@ -66,6 +66,8 @@ class Fastener(Component):
                 </body>
             </body>
             
+            <!-- NOTE: possibly unnecessary! there is rigid_solver.add_weld_constraint.-->
+
             <!-- Weld constraints to A and B (both active at spawn)-->
             <equality name="{self.name}_to_A" active="{self.a_constraint_active}">
                 <weld body1="{self.name}" body2="{self.initial_body_a}" relpose="true"/>
@@ -155,11 +157,65 @@ def check_fastener_possible_insertion(
     return torch.where(any_match, first_idx, torch.full_like(first_idx, -1))
 
 
-def activate_connection(fastener_entity: RigidEntity, activate_joint_name: str):
-    # scene.sim.rigid_solver.get_joint()
-    joint: RigidJoint = fastener_entity.get_joint(activate_joint_name)
-    joint.active = True
+def activate_hand_connection(
+    scene: gs.Scene,
+    fastener: Fastener,
+    fastener_entity: RigidEntity,
+    franka_arm: RigidEntity,
+):
+    rigid_solver = scene.sim.rigid_solver
+    hand_link = franka_arm.get_link("hand")
+    fastener_head_joint = np.array(fastener_entity.base_link.idx)
+    rigid_solver.add_weld_constraint(
+        fastener_head_joint, hand_link
+    )  # works is genesis's examples.
 
+
+def deactivate_hand_connection(
+    scene: gs.Scene,
+    fastener: Fastener,
+    fastener_entity: RigidEntity,
+    franka_arm: RigidEntity,
+):
+    rigid_solver = scene.sim.rigid_solver
+    hand_link = franka_arm.get_link("hand")
+    fastener_head_joint = np.array(fastener_entity.base_link.idx)
+    rigid_solver.delete_weld_constraint(
+        fastener_head_joint, hand_link
+    )  # works is genesis's examples.
+
+
+def activate_part_connection(
+    scene: gs.Scene,
+    fastener: Fastener,
+    fastener_entity: RigidEntity,
+    other_entity: RigidEntity,
+    hole_link_name: str,
+):
+    rigid_solver = scene.sim.rigid_solver
+    fastener_head_joint = np.array(fastener_entity.base_link.idx)
+    other_body_hole_link = np.array(other_entity.get_link(hole_link_name).idx)
+    rigid_solver.add_weld_constraint(
+        fastener_head_joint, other_body_hole_link
+    )  # works is genesis's examples.
+
+
+def deactivate_part_connection(
+    scene: gs.Scene,
+    fastener: Fastener,
+    fastener_entity: RigidEntity,
+    other_entity: RigidEntity,
+    hole_link_name: str,
+):
+    rigid_solver = scene.sim.rigid_solver
+    fastener_head_joint = np.array(fastener_entity.base_link.idx)
+    other_body_hole_link = np.array(other_entity.get_link(hole_link_name).idx)
+    rigid_solver.delete_weld_constraint(
+        fastener_head_joint, other_body_hole_link
+    )  # works is genesis's examples.
+
+
+# NOTE: see https://github.com/Genesis-Embodied-AI/Genesis/blob/main/examples/rigid/suction_cup.py for rigid constraint added in time
 
 # To remove A/B constraint and activate screwdriver constraint
 # model.eq_active[model.equality(name_to_id(model, "equality", f"{name}_to_ab"))] = 0

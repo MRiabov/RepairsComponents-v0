@@ -20,7 +20,7 @@ from genesis.vis.camera import Camera
 from repairs_components.geometry.connectors.connectors import check_connections
 
 from repairs_components.geometry.fasteners import (
-    activate_connection,
+    activate_hand_connection,
     check_fastener_possible_insertion,
 )
 from repairs_components.training_utils.sim_state_global import RepairsSimState
@@ -91,7 +91,7 @@ def step_repairs(
                     scene_id
                 ].current_tool.picked_up_fastener_name
                 hole_name = hole_keys[insert_indices[scene_id].item()]
-                activate_connection(gs_entities[name], hole_name)
+                activate_hand_connection(gs_entities[name], hole_name)
                 sim_state.physical_state[scene_id].connect(name, hole_name, None)
 
     return success, total_diff_left, sim_state, diff

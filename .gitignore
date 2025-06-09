@@ -18,6 +18,7 @@ coverage.xml
 *.egg-info/top_level.txt
 *.egg-info/**
 
+
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
