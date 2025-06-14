@@ -138,6 +138,9 @@ def export_voxel_grid(
             pts = cache[key]["voxel"]
         else:
             # Voxelize mesh using trimesh
+            assert (mesh.bounding_box.extents < (voxel_size * 256)).all(), (
+                "Mesh is too large for voxelization."
+            )
             vox_obj = trimesh.voxel.creation.voxelize(mesh, pitch=voxel_size)
             if vox_obj is None:
                 continue

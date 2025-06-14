@@ -170,12 +170,12 @@ class RepairsEnv(gym.Env):
             batch_dim=self.batch_dim,
             prefetch_memory_size=prefetch_memory_size,
         )
-
+        print("before populate_async")
         # populate the dataloader with initial configs
         self.env_dataloader.populate_async(
             init_generate_per_scene.to(dtype=torch.int16)
         )
-
+        print("after populate_async")
         # Set default joint positions from config
         self.default_dof_pos = torch.tensor(
             [env_cfg["default_joint_angles"][name] for name in env_cfg["joint_names"]],
