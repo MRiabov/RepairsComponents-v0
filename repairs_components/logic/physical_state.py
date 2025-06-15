@@ -289,6 +289,29 @@ class PhysicalState:
 
         return "\n".join(lines)
 
+    def check_if_fastener_inserted(self, body_id: int, fastener_id: int) -> bool:
+        """Check if a body (body_id) is still connected to a fastener (fastener_id)."""
+        edge_index = self.graph.edge_index
+        # No edges means no connection
+        if edge_index.numel() == 0:
+            return False
+        src, dst = edge_index
+        # Check for edge in either direction
+        connected_direct = ((src == body_id) & (dst == fastener_id)).any()
+        connected_reverse = ((src == fastener_id) & (dst == body_id)).any()
+        return bool(connected_direct or connected_reverse)
+
+    def check_if_part_placed(self, part_id: int, data_a: Data, data_b: Data) -> bool:
+        """Check if a part (part_id) is in its desired position (within thresholds)."""
+        # Compute node feature diffs (position & orientation) between data_a and data_b
+        diff_dict, _ = _diff_node_features(data_a, data_b)
+        changed = diff_dict["changed_indices"]
+        # Return True if this part_id did not exceed thresholds
+
+        #FIXME: this does not account for a) batch of environments, b) batch of parts.
+        # ^batch of environments would be cool, but batch of parts would barely ever happen.
+        return (changed == part_id).any() 
+
 
 def _quaternion_angle_diff(q1, q2):
     # q1, q2: [N, 4]
@@ -345,3 +368,5 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
 #         data_b = batch_b.get_example(i)
 #         results[i] = diff(data_a, data_b)[1]
 #     return results
+
+
