@@ -11,7 +11,7 @@ trimesh # note: not used in voxelization, but required for genesis.
 gymnasium
 ompl
 ruff
-git+https://github.com/mit-han-lab/torchsparse.git
+## git+https://github.com/mit-han-lab/torchsparse.git
 
 ## torch_scatter # note: something fails in uv, install separately.
 
