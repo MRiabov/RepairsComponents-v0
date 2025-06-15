@@ -16,9 +16,7 @@ In the end, if the environment is timed out, give penalty for half of the comple
 from dataclasses import dataclass, field
 import enum
 from typing import Callable
-from repairs_components.training_utils.concurrent_scene_dataclass import (
-    ConcurrentSceneData,
-)
+
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 import numpy as np
 import torch
@@ -77,7 +75,11 @@ class RewardHistory:  # note: this is stored per every environment yet, not batc
         ] = [RewardType.PART_PLACEMENT]
         self.reward_check_data[env_id][current_timestep] = part_id
 
-    def calculate_reward_this_timestep(self, scene_data: ConcurrentSceneData):
+    def calculate_reward_this_timestep(self, scene_data):
+        """Calculate reward for this timestep.
+        Args:
+            scene_data: ConcurrentSceneData
+        """ # note: scene data is not noted explicitly due to circular dependencies.
         reward_tensor = torch.zeros(scene_data.batch_dim)
         for env_id in range(scene_data.batch_dim):
             current_timestep = scene_data.step_count[env_id]
@@ -135,6 +137,10 @@ class RewardHistory:  # note: this is stored per every environment yet, not batc
         return reward_tensor
 
 
-def calculate_done(scene_data: ConcurrentSceneData):
+def calculate_done(scene_data):
+    """Calculate if the scene is done.
+    Args:
+        scene_data: ConcurrentSceneData
+    """
     _diff, diff_count = scene_data.current_state.diff(scene_data.desired_state)
     return diff_count == 0

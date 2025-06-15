@@ -53,6 +53,7 @@ def export_voxel_grid(
     grid_size=(256, 256, 256),
     cached=False,
     cache: dict[str, dict[str, Any]] | None = None,
+    device: str = 'cpu',
 ):
     """
     Voxelize an iterable of build123d Parts into a 3D int8 label grid using trimesh (CPU).
@@ -156,15 +157,16 @@ def export_voxel_grid(
             if coords_np.size == 0:
                 continue
             # build coordinates with batch dim
-            coords = torch.from_numpy(coords_np)
+            coords = torch.from_numpy(coords_np).to(device)
             coords = torch.cat(
-                [torch.zeros((coords.shape[0], 1), dtype=torch.int32), coords], dim=1
+                [torch.zeros((coords.shape[0], 1), dtype=torch.int32, device=device), coords], dim=1
             )
             # feature is part label as uint8
             feats = torch.full(
                 (coords.shape[0], 1),
                 PART_TYPE_LABEL.get(part_type, 0),
                 dtype=torch.uint8,
+                device=device,
             )
             sparse = torchsparse.SparseTensor(feats, coords)
             if cached and cache is not None:
@@ -174,15 +176,15 @@ def export_voxel_grid(
         mask4 = ((coords4[:, 1:] >= 0) & (coords4[:, 1:] < grid_dims_t)).all(dim=1)
         coords4 = coords4[mask4]
         feats4 = sparse.F[mask4]
-        coords_list.append(coords4)
-        feats_list.append(feats4)
+        coords_list.append(coords4.to(device))
+        feats_list.append(feats4.to(device))
 
     # Merge sparse tensors
     if coords_list:
         coords_all = torch.cat(coords_list, dim=0)
         feats_all = torch.cat(feats_list, dim=0)
     else:
-        coords_all = torch.zeros((0, 4), dtype=torch.int32)
-        feats_all = torch.zeros((0, 1), dtype=torch.uint8)
+        coords_all = torch.zeros((0, 4), dtype=torch.int32, device=device)
+        feats_all = torch.zeros((0, 1), dtype=torch.uint8, device=device)
     final_sparse = torchsparse.SparseTensor(feats_all, coords_all)
     return (final_sparse, cache) if cached else final_sparse
