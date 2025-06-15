@@ -1,6 +1,7 @@
 import copy
 from dataclasses import dataclass
 from genesis.vis.camera import Camera
+from repairs_components.training_utils.progressive_reward_calc import RewardHistory
 import torch
 import genesis as gs
 from genesis.engine.entities import RigidEntity
@@ -29,6 +30,12 @@ class ConcurrentSceneData:
     initial_diff_counts: torch.Tensor  # shape: (batch_dim // concurrent_scenes,)
     scene_id: int
     "A safety int to ensure we don't access the wrong scene."
+    reward_history: RewardHistory
+    batch_dim: int
+    """Batch dimension of this scene, must match length of all lists/tensors in this dataclass.
+    Primarily for sanity checks."""
+    step_count: torch.Tensor = torch.zeros((), dtype=torch.int)
+    "Step count in every scene. I don't think this should be diffed."
 
 
 def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):

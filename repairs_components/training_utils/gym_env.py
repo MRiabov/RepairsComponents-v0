@@ -2,6 +2,10 @@ from functools import partial
 import random
 from genesis.vis.visualizer import Camera
 from igl.helpers import os
+from repairs_components.training_utils.progressive_reward_calc import (
+    RewardHistory,
+    calculate_done,
+)
 import torch
 import genesis as gs
 import gymnasium as gym
@@ -160,6 +164,8 @@ class RepairsEnv(gym.Env):
                     initial_diffs=partial_env_configs.initial_diffs,
                     initial_diff_counts=partial_env_configs.initial_diff_counts,
                     scene_id=scene_idx,
+                    reward_history=RewardHistory(self.batch_dim),
+                    batch_dim=self.batch_dim,
                 )
             )
         # create the dataloader to update scenes.
@@ -247,7 +253,10 @@ class RepairsEnv(gym.Env):
             video_obs = self._observe_scene(scene_data)
 
             # Compute reward based on progress toward the goal
-            reward, done = calculate_reward_and_done(scene_data)
+            dones = calculate_done(scene_data)  # note: pretty expensive.
+            rewards = scene_data.reward_history.calculate_reward_this_timestep(
+                scene_data
+            )
 
             # save the step information if necessary.
             self.partial_save(
@@ -265,7 +274,7 @@ class RepairsEnv(gym.Env):
                 gs_entities=self.concurrent_scenes_data[scene_idx].gs_entities,
             )
 
-            reset_envs = done | out_of_bounds_fail  # or any other failure mode.
+            reset_envs = dones | out_of_bounds_fail  # or any other failure mode.
 
             # reset at done
             if reset_envs.any():
@@ -285,7 +294,7 @@ class RepairsEnv(gym.Env):
                 self._observe_scene(self.concurrent_scenes_data[scene_idx])
             )
 
-        return torch.cat(all_env_obs, dim=0), reward, done, info
+        return torch.cat(all_env_obs, dim=0), rewards, dones, info
 
     def reset_idx(self, envs_idx: torch.Tensor):
         """Reset specific environments to their initial state.

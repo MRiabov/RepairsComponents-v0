@@ -320,4 +320,12 @@ class ElectronicsState(SimState):
             component.connected_to = []
         self._graph_built = False
 
-    # def batch_diff(self, other: "ElectronicsState")
+    def check_if_electronics_connected(self, id_1: int, id_2: int):
+        "Check if two components are connected"
+        connection = self.graph.edge_index == torch.tensor(
+            [id_1, id_2], device=self.device
+        )
+        inverse_connection = self.graph.edge_index == torch.tensor(
+            [id_2, id_1], device=self.device
+        )
+        return connection.any() or inverse_connection.any()
