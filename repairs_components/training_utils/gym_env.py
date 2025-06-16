@@ -1,49 +1,37 @@
 from functools import partial
-import random
+from typing import List
+
+import genesis as gs
+import gymnasium as gym
+import numpy as np
+import torch
+from torch_geometric.data import Batch
 from genesis.vis.visualizer import Camera
 from igl.helpers import os
+
+from repairs_components.processing.scene_creation_funnel import (
+    create_env_configs,
+    generate_scene_meshes,
+    initialize_and_build_scene,
+    move_entities_to_pos,
+)
+from repairs_components.processing.tasks import Task
+from repairs_components.processing.voxel_export import batch_sparse_coo_to_torchsparse
+from repairs_components.training_utils.concurrent_scene_dataclass import (
+    ConcurrentSceneData,
+)
+from repairs_components.training_utils.env_setup import EnvSetup
+from repairs_components.training_utils.failure_modes import out_of_bounds
+from repairs_components.training_utils.motion_planning import (
+    execute_straight_line_trajectory,
+)
+from repairs_components.training_utils.multienv_dataloader import RepairsEnvDataLoader
 from repairs_components.training_utils.progressive_reward_calc import (
     RewardHistory,
     calculate_done,
 )
-import torch
-import genesis as gs
-import gymnasium as gym
-from genesis.engine.entities import RigidEntity
-import numpy as np
-from typing import List, Any
-
-from repairs_components.training_utils.failure_modes import out_of_bounds
 from repairs_components.training_utils.save import optional_save
-from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_sim_step import step_repairs
-from repairs_components.training_utils.final_reward_calc import (
-    calculate_reward_and_done,
-)
-from repairs_components.training_utils.motion_planning import (
-    execute_straight_line_trajectory,
-)
-
-# todo: change to progressive reward calc once it's ready ^
-from build123d import Compound
-from repairs_components.training_utils.env_setup import EnvSetup
-from repairs_components.processing.voxel_export import export_voxel_grid
-from repairs_components.processing.scene_creation_funnel import (
-    create_env_configs,
-    generate_scene_meshes,
-)
-from repairs_components.processing.tasks import Task, AssembleTask
-from torch.utils.data import DataLoader
-from repairs_components.processing.scene_creation_funnel import (
-    move_entities_to_pos,
-    initialize_and_build_scene,
-)
-from repairs_components.training_utils.multienv_dataloader import RepairsEnvDataLoader
-from repairs_components.training_utils.concurrent_scene_dataclass import (
-    ConcurrentSceneData,
-    merge_concurrent_scene_configs,
-    merge_scene_configs_at_idx,
-)
 
 
 def gs_rand_float(lower, upper, shape, device):
@@ -250,7 +238,7 @@ class RepairsEnv(gym.Env):
             # Update the scene data with the new state
             scene_data.current_state = current_sim_state
 
-            video_obs = self._observe_scene(scene_data)
+            obs_tuple = self._observe_scene(scene_data)
 
             # Compute reward based on progress toward the goal
             dones = calculate_done(scene_data)  # note: pretty expensive.
@@ -287,12 +275,16 @@ class RepairsEnv(gym.Env):
                 "success": success,
             }
 
-        # observe all environments
-        all_env_obs = []
+        all_voxel_init = []
+        all_voxel_des = []
+        all_video_obs = []
+        all_graph_obs = []
+        all_graph_des = []
         for scene_idx in range(self.concurrent_scenes):
-            all_env_obs.append(
+            voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
                 self._observe_scene(self.concurrent_scenes_data[scene_idx])
             )
+            all_env_obs.append((voxel_init, voxel_des, video_obs, graph_obs, graph_des))
 
         return torch.cat(all_env_obs, dim=0), rewards, dones, info
 
@@ -385,9 +377,7 @@ class RepairsEnv(gym.Env):
         self.reset_idx(idxs)
 
         # observe all environments (ideally done in paralel.)
-        all_env_obs = []
-        for scene_data in self.concurrent_scenes_data:
-            all_env_obs.append(self._observe_scene(scene_data))
+        all_env_obs = self._observe_all_scenes()
 
         return torch.cat(all_env_obs, dim=0), {}  # cat along batch dim
 
@@ -399,7 +389,47 @@ class RepairsEnv(gym.Env):
         cameras = scene_data.cameras
         video_obs = _render_all_cameras(cameras)
 
-        return video_obs
+        # get voxel obs
+        sparse_voxel_init = scene_data.vox_init
+        sparse_voxel_des = scene_data.vox_des
+
+        # combine sparse representations of both voxels # can be skipped on non-first envs.
+        # sparse_voxel_init = batch_sparse_coo_to_torchsparse(sparse_voxel_init)
+        # sparse_voxel_des = batch_sparse_coo_to_torchsparse(sparse_voxel_des)
+
+        # get graph obs
+        graph_obs = [
+            state.graph for state in scene_data.current_state.electronics_state
+        ]
+        graph_des = [
+            state.graph for state in scene_data.desired_state.electronics_state
+        ]  # return them as lists because they will be stacked to batch as global env.
+
+        return sparse_voxel_init, sparse_voxel_des, video_obs, graph_obs, graph_des
+
+    def _observe_all_scenes(self):
+        """A helper to merge all voxel and graph observations."""
+        all_voxel_init = []
+        all_voxel_des = []
+        all_video_obs = []
+        all_graph_obs = []
+        all_graph_des = []
+        for scene_data in self.concurrent_scenes_data:
+            voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
+                self._observe_scene(scene_data)
+            )
+            all_voxel_init.extend(voxel_init)
+            all_voxel_des.extend(voxel_des)
+            all_video_obs.append(video_obs)
+            all_graph_obs.extend(graph_obs)
+            all_graph_des.extend(graph_des)
+
+        voxel_init = batch_sparse_coo_to_torchsparse(all_voxel_init)
+        voxel_des = batch_sparse_coo_to_torchsparse(all_voxel_des)
+        graph_obs = Batch.from_data_list(all_graph_obs)
+        graph_des = Batch.from_data_list(all_graph_des)
+        video_obs = torch.stack(all_video_obs, dim=0)
+        return voxel_init, voxel_des, video_obs, graph_obs, graph_des
 
 
 def _render_all_cameras(cameras: list[Camera]):

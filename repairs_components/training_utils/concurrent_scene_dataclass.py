@@ -59,16 +59,21 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
     reward_history = RewardHistory(
         batch_dim=sum([data.batch_dim for data in scene_configs])
     )
+    vox_init=[]
+    vox_des=[]
     for data in scene_configs:  # and just merge it in.
         reward_history.merge_at_idx(data.reward_history, torch.arange(data.batch_dim))
+        vox_init.extend(data.vox_init)
+        vox_des.extend(data.vox_des)
 
     # TODO: gs entities should not be there... or at least I don't know how to merge them.
     # same for scene and desired state. they should be None.
 
     # Extend tensors and RepairsSimState with items from other scene_configs
+
     new_scene_config = ConcurrentSceneData(
-        vox_init=[data.vox_init for data in scene_configs],
-        vox_des=[data.vox_des for data in scene_configs],
+        vox_init=vox_init,
+        vox_des=vox_des,
         initial_diffs={
             k: [data.initial_diffs[k] for data in scene_configs]
             for k in scene_configs[0].initial_diffs.keys()
