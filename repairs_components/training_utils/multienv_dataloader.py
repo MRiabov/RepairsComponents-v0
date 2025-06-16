@@ -1,9 +1,6 @@
 import queue
-import time
-from collections import deque
-from typing import Dict, List, Optional, Callable, Any
-import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Dict, List, Callable, Any
+from concurrent.futures import ThreadPoolExecutor
 
 import torch
 from repairs_components.processing.scene_creation_funnel import (
@@ -12,7 +9,6 @@ from repairs_components.processing.scene_creation_funnel import (
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.sim_state_global import (
-    merge_global_states,
     RepairsSimState,
 )
 from repairs_components.training_utils.concurrent_scene_dataclass import (
@@ -20,8 +16,7 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
     merge_concurrent_scene_configs,
 )
 import genesis as gs
-from repairs_components.training_utils.env_setup import EnvSetup
-from repairs_components.processing.tasks import Task
+from repairs_components.training_utils.progressive_reward_calc import RewardHistory
 
 
 class MultiEnvDataLoader:
@@ -318,6 +313,8 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
                         initial_diffs=diffs_i,
                         initial_diff_counts=diff_counts_i,
                         scene_id=scene_idx,
+                        batch_dim=1,
+                        reward_history=RewardHistory(batch_dim=1),
                     )
                 )
             batches.append(cfg_list)

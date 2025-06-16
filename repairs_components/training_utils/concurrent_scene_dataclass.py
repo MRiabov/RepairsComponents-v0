@@ -24,8 +24,8 @@ class ConcurrentSceneData:
     cameras: tuple[Camera, Camera]
     current_state: RepairsSimState
     desired_state: RepairsSimState
-    vox_init: torch.Tensor
-    vox_des: torch.Tensor
+    vox_init: list[torch.Tensor]  # sparse tensor!
+    vox_des: list[torch.Tensor]  # sparse tensor!
     initial_diffs: dict[str, torch.Tensor]  # feature diffs and node diffs.
     initial_diff_counts: torch.Tensor  # shape: (batch_dim // concurrent_scenes,)
     scene_id: int
@@ -55,13 +55,20 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         for scene_cfg in scene_configs
     )
 
+    # create a single big RewardHistorys
+    reward_history = RewardHistory(
+        batch_dim=sum([data.batch_dim for data in scene_configs])
+    )
+    for data in scene_configs:  # and just merge it in.
+        reward_history.merge_at_idx(data.reward_history, torch.arange(data.batch_dim))
+
     # TODO: gs entities should not be there... or at least I don't know how to merge them.
     # same for scene and desired state. they should be None.
 
     # Extend tensors and RepairsSimState with items from other scene_configs
     new_scene_config = ConcurrentSceneData(
-        vox_init=torch.cat([data.vox_init for data in scene_configs], dim=0),
-        vox_des=torch.cat([data.vox_init for data in scene_configs], dim=0),
+        vox_init=[data.vox_init for data in scene_configs],
+        vox_des=[data.vox_des for data in scene_configs],
         initial_diffs={
             k: [data.initial_diffs[k] for data in scene_configs]
             for k in scene_configs[0].initial_diffs.keys()
@@ -79,6 +86,8 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         scene=scene_configs[0].scene,
         gs_entities=scene_configs[0].gs_entities,
         cameras=scene_configs[0].cameras,
+        batch_dim=sum([data.batch_dim for data in scene_configs]),  # right?
+        reward_history=reward_history,
     )
     return new_scene_config
 
@@ -86,7 +95,7 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
 def merge_scene_configs_at_idx(
     old_scene_config: "ConcurrentSceneData",
     new_scene_config: "ConcurrentSceneData",
-    reset_configs: torch.Tensor,
+    reset_configs: torch.BoolTensor,
 ) -> "ConcurrentSceneData":
     """Insert new scene configs at indices indicated by bool tensor `reset_configs`.
 
@@ -125,6 +134,10 @@ def merge_scene_configs_at_idx(
         scene=old_scene_config.scene,
         gs_entities=old_scene_config.gs_entities,
         cameras=old_scene_config.cameras,
+        batch_dim=old_scene_config.batch_dim,
+        reward_history=old_scene_config.reward_history.merge_at_idx(
+            new_scene_config.reward_history, reset_configs
+        ),
     )
 
     # Update vox_init and vox_des for reset states

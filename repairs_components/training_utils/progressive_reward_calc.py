@@ -79,7 +79,7 @@ class RewardHistory:  # note: this is stored per every environment yet, not batc
         """Calculate reward for this timestep.
         Args:
             scene_data: ConcurrentSceneData
-        """ # note: scene data is not noted explicitly due to circular dependencies.
+        """  # note: scene data is not noted explicitly due to circular dependencies.
         reward_tensor = torch.zeros(scene_data.batch_dim)
         for env_id in range(scene_data.batch_dim):
             current_timestep = scene_data.step_count[env_id]
@@ -135,6 +135,23 @@ class RewardHistory:  # note: this is stored per every environment yet, not batc
 
         # return sum of reward for this timestep (for this environment.)
         return reward_tensor
+
+    def reset_at_idx(self, idx: torch.IntTensor):
+        for id in idx:
+            self.triggered_reward_per_future_timestep[id] = {}
+            self.reward_check_data[id] = {}
+            self.already_triggered[id] = {
+                RewardType.FASTENER_INSERTION.name: [],
+                RewardType.PART_PLACEMENT.name: [],
+            }
+
+    def merge_at_idx(self, other: "RewardHistory", idx: torch.IntTensor):
+        """Merge another RewardHistory into this one."""
+        assert len(idx) == len(other.triggered_reward_per_future_timestep)
+        for new_id, this_id in enumerate(idx):
+            self.triggered_reward_per_future_timestep[this_id] = other.triggered_reward_per_future_timestep[new_id]
+            self.reward_check_data[this_id] = other.reward_check_data[new_id]
+            self.already_triggered[this_id] = other.already_triggered[new_id]
 
 
 def calculate_done(scene_data):

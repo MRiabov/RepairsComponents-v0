@@ -354,6 +354,10 @@ class RepairsEnv(gym.Env):
                 initial_diffs=reset_scene.initial_diffs,
                 initial_diff_counts=reset_scene.initial_diff_counts,
                 scene_id=reset_scene.scene_id,
+                batch_dim=reset_scene.batch_dim,
+                reward_history=reset_scene.reward_history.reset_at_idx(
+                    envs_idx_to_reset_this_scene
+                ),
             )
             self.concurrent_scenes_data[scene_id] = new_scene_data
 
