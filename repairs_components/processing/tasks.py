@@ -331,3 +331,50 @@ class DisassembleTask(Task):
     ) -> Compound:
         # Use AssembleTask's perturb_initial_state to create the disassembled desired state
         return AssembleTask().perturb_initial_state(compound, env_size)
+
+
+class ReplaceTask(Task):
+    """A task type that marks a single part as "to be replaced" and puts the right copy next to the location."""
+
+    # NOTE: this code was left unfinished.
+    def perturb_initial_state(
+        self, compound: Compound, env_size=(64, 64, 64)
+    ) -> Compound:
+        compound = super().perturb_desired_state(compound, env_size)
+        parts = [part for part in compound.descendants if isinstance(part, Part)]
+        random_part: Part = np.random.choice(parts)
+        new_part = random_part.moved(
+            Location((10, 10, 10))
+        )  # TODO: any position on the ground that is not occupied by another part.
+        random_part.label = "part_to_replace"
+        new_part.parent = compound
+        return compound
+
+    def perturb_desired_state(
+        self, compound: Compound, env_size=(64, 64, 64)
+    ) -> Compound:
+        # Use AssembleTask's perturb_desired_state to create the disassembled desired state
+        return AssembleTask().perturb_desired_state(
+            compound, env_size
+        )  # simply unchanged.
+
+
+class InsertTask(Task):
+    """A task type that marks a single part as "to be inserted", and detaches it from the compound."""
+
+    def perturb_initial_state(
+        self, compound: Compound, env_size=(64, 64, 64)
+    ) -> Compound:
+        compound = super().perturb_desired_state(compound, env_size)
+        parts = [part for part in compound.descendants if isinstance(part, Part)]
+        random_part: Part = np.random.choice(parts)
+        random_part.joints = {}  # I hope this detaches it. to be tested.
+        return compound
+
+    def perturb_desired_state(
+        self, compound: Compound, env_size=(64, 64, 64)
+    ) -> Compound:
+        # Use AssembleTask's perturb_desired_state to create the disassembled desired state
+        return AssembleTask().perturb_desired_state(
+            compound, env_size
+        )  # simply unchanged.
