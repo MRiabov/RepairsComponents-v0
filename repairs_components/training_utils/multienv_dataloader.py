@@ -127,7 +127,10 @@ class MultiEnvDataLoader:
         # enqueue each starved config individually per scene
         for scene_id, cfg_list in enumerate(starved_configs):
             for cfg in cfg_list:
-                self.prefetch_queues[scene_id].put(cfg)
+                try:
+                    self.prefetch_queues[scene_id].put_nowait(cfg)
+                except queue.Full:
+                    pass  # if it's already full, nothing bad happened, skip.
 
         # Merge the queue configs and the starved configs
         total_configs = []
@@ -294,8 +297,8 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
                 )
 
                 # slice voxel and diffs
-                vox_init_i = scene_cfg.vox_init[i : i + 1]
-                vox_des_i = scene_cfg.vox_des[i : i + 1]
+                vox_init_i = scene_cfg.vox_init[i].unsqueeze(0)
+                vox_des_i = scene_cfg.vox_des[i].unsqueeze(0)
                 diffs_i = {
                     k: scene_cfg.initial_diffs[k][i] for k in scene_cfg.initial_diffs
                 }

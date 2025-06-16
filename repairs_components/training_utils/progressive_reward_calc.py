@@ -32,7 +32,11 @@ class RewardType(enum.Enum):
 
 
 @dataclass
-class RewardHistory:  # note: this is stored per every environment yet, not batched.
+class RewardHistory:
+    batch_dim: int
+    """Batch dimension of this reward history, must match length of all lists/tensors in this dataclass.
+    Primarily for sanity checks."""
+
     triggered_reward_per_future_timestep: list[dict[int, list[RewardType]]] = field(
         default_factory=list
     )
@@ -49,6 +53,7 @@ class RewardHistory:  # note: this is stored per every environment yet, not batc
     "For every reward type, store which reward were already triggered."
 
     def __init__(self, batch_dim: int):
+        self.batch_dim = batch_dim
         self.triggered_reward_per_future_timestep = [{} for _ in range(batch_dim)]
         self.reward_check_data = [{} for _ in range(batch_dim)]
         self.already_triggered = [
@@ -144,14 +149,18 @@ class RewardHistory:  # note: this is stored per every environment yet, not batc
                 RewardType.FASTENER_INSERTION.name: [],
                 RewardType.PART_PLACEMENT.name: [],
             }
+        return self
 
     def merge_at_idx(self, other: "RewardHistory", idx: torch.IntTensor):
         """Merge another RewardHistory into this one."""
         assert len(idx) == len(other.triggered_reward_per_future_timestep)
         for new_id, this_id in enumerate(idx):
-            self.triggered_reward_per_future_timestep[this_id] = other.triggered_reward_per_future_timestep[new_id]
+            self.triggered_reward_per_future_timestep[this_id] = (
+                other.triggered_reward_per_future_timestep[new_id]
+            )
             self.reward_check_data[this_id] = other.reward_check_data[new_id]
             self.already_triggered[this_id] = other.already_triggered[new_id]
+        return self
 
 
 def calculate_done(scene_data):

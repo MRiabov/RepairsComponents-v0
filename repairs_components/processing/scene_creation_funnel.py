@@ -111,9 +111,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             init_diffs.append(diff)
             init_diff_counts.append(initial_diff_count)
 
-        # note: stacking sparse tensors does not work atm (torch presumably does not support 
-        # 3d sparse tensors), so just leave them in lists, it's good enough.
-
+        voxel_grids_initial = torch.stack(voxel_grids_initial, dim=0)
+        voxel_grids_desired = torch.stack(voxel_grids_desired, dim=0)
         starting_sim_state = merge_global_states(starting_sim_states)
         desired_sim_state = merge_global_states(desired_sim_states)
         this_scene_configs = ConcurrentSceneData(

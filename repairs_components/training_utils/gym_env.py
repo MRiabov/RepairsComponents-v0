@@ -43,8 +43,8 @@ class RepairsEnv(gym.Env):
         self,
         env_setups: List[EnvSetup],
         tasks: List[Task],
-        batch_dim: int,
-        # Batch dim number of parallel environments to simulate
+        ml_batch_dim: int,
+        # Batch dim number of parallel environments to simulate (ml batch dim)
         # and the num_scenes per task is the feed-in repetitions of training pipeline.
         env_cfg: dict,
         obs_cfg: dict,
@@ -59,7 +59,7 @@ class RepairsEnv(gym.Env):
         Args:
             env_setup: Environment setup instance that defines the base environment
             tasks: List of tasks to train on (e.g. AssembleTask)
-            num_envs: Number of parallel environments to simulate
+            ml_batch_dim: Batch dim number of parallel environments to simulate (ml batch dim)
             env_cfg: Configuration dictionary containing environment parameters
             obs_cfg: Configuration for observations
             reward_cfg: Configuration for reward function
@@ -82,7 +82,8 @@ class RepairsEnv(gym.Env):
         self.env_cfg = env_cfg
         self.obs_cfg = obs_cfg
         self.reward_cfg = reward_cfg
-        self.batch_dim = batch_dim  # ML batch dim
+        self.ml_batch_dim = ml_batch_dim  # ML batch dim. I want to make it explicit. (incl because I've failed on this).
+        self.per_scene_batch_dim = ml_batch_dim // concurrent_scenes
         self.concurrent_scenes = concurrent_scenes  # todo implement concurrent scenes.
         # genesis batch dim = batch_dim // concurrent_scenes
 
@@ -120,8 +121,12 @@ class RepairsEnv(gym.Env):
         init_generate_per_scene = torch.full((concurrent_scenes,), prefetch_memory_size)
 
         partial_env_configs = create_env_configs(
-            env_setups, tasks, init_generate_per_scene
-        )[0]  # for init I need only one. (it will be discarded later)
+            env_setups,
+            tasks,
+            torch.tensor(
+                [self.per_scene_batch_dim] * concurrent_scenes, dtype=torch.int16
+            ),
+        )[0]  # note: all of them are discarded, but just for the sake of init.
 
         # scene init setup # note: technically this should be the Dataloader worker init fn.
         for scene_idx in range(concurrent_scenes):
@@ -136,7 +141,7 @@ class RepairsEnv(gym.Env):
                 scene,  # build scene.
                 env_setups[scene_idx].desired_state_geom(),
                 partial_env_configs.desired_state,
-                self.batch_dim,
+                self.per_scene_batch_dim,
             )
 
             # Using dataclass to store concurrent scene data for better organization and clarity
@@ -152,8 +157,8 @@ class RepairsEnv(gym.Env):
                     initial_diffs=partial_env_configs.initial_diffs,
                     initial_diff_counts=partial_env_configs.initial_diff_counts,
                     scene_id=scene_idx,
-                    reward_history=RewardHistory(self.batch_dim),
-                    batch_dim=self.batch_dim,
+                    reward_history=RewardHistory(self.per_scene_batch_dim),
+                    batch_dim=self.per_scene_batch_dim,
                 )
             )
         # create the dataloader to update scenes.
@@ -161,7 +166,7 @@ class RepairsEnv(gym.Env):
             scenes=self.scenes,
             env_setups=env_setups,
             tasks=tasks,
-            batch_dim=self.batch_dim,
+            batch_dim=self.ml_batch_dim,  # ml batch dim.
             prefetch_memory_size=prefetch_memory_size,
         )
         print("before populate_async")
@@ -195,12 +200,12 @@ class RepairsEnv(gym.Env):
             done: Done tensor
             info: Additional information dictionary
         """
-        assert action.shape == (self.batch_dim, self.num_actions), (
+        assert action.shape == (self.ml_batch_dim, self.num_actions), (
             "Action must have shape (batch_dim, action_dim)"
         )
         action_by_scenes = action.reshape(
             self.concurrent_scenes,
-            self.batch_dim // self.concurrent_scenes,  # "genesis" batch dim
+            self.ml_batch_dim // self.concurrent_scenes,  # "genesis" batch dim
             self.num_actions,
         )
         # step through different, concurrent scenes.
@@ -238,7 +243,9 @@ class RepairsEnv(gym.Env):
             # Update the scene data with the new state
             scene_data.current_state = current_sim_state
 
-            obs_tuple = self._observe_scene(scene_data)
+            # voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
+            #     self._observe_scene(scene_data)
+            # )
 
             # Compute reward based on progress toward the goal
             dones = calculate_done(scene_data)  # note: pretty expensive.
@@ -246,14 +253,14 @@ class RepairsEnv(gym.Env):
                 scene_data
             )
 
-            # save the step information if necessary.
-            self.partial_save(
-                sim_state=scene_data.current_state,
-                obs_image=video_obs,
-                voxel_grids_initial=scene_data.vox_init,
-                voxel_grids_desired=scene_data.vox_des,
-                # NOTE: ideally save voxel only after reset.
-            )
+            # # save the step information if necessary.
+            # self.partial_save(
+            #     sim_state=scene_data.current_state,
+            #     obs_image=video_obs,
+            #     voxel_grids_initial=voxel_init,
+            #     voxel_grids_desired=voxel_des,
+            #     # NOTE: ideally save voxel only after reset.
+            # )
 
             # check if any entity is out of bounds # FIXME: should be per-scene.
             out_of_bounds_fail = out_of_bounds(
@@ -275,20 +282,22 @@ class RepairsEnv(gym.Env):
                 "success": success,
             }
 
-        all_voxel_init = []
-        all_voxel_des = []
-        all_video_obs = []
-        all_graph_obs = []
-        all_graph_des = []
-        for scene_idx in range(self.concurrent_scenes):
-            voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
-                self._observe_scene(self.concurrent_scenes_data[scene_idx])
-            )
-            all_env_obs.append((voxel_init, voxel_des, video_obs, graph_obs, graph_des))
+        voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
+            self._observe_all_scenes()
+        )
 
-        return torch.cat(all_env_obs, dim=0), rewards, dones, info
+        return (
+            voxel_init,
+            voxel_des,
+            video_obs,
+            graph_obs,
+            graph_des,
+            rewards,
+            dones,
+            info,
+        )
 
-    def reset_idx(self, envs_idx: torch.Tensor):
+    def reset_idx(self, envs_idx: torch.IntTensor):
         """Reset specific environments to their initial state.
 
         Args:
@@ -296,12 +305,12 @@ class RepairsEnv(gym.Env):
         """
         assert envs_idx.shape[0] > 0, "Can't reset 0 environments."
         assert (envs_idx >= 0).all(), "Can't reset negative environments"
-        assert (envs_idx <= self.batch_dim).all(), (
+        assert (envs_idx <= self.ml_batch_dim).all(), (
             "Can't reset environments out of bounds"
         )
 
         # get from which scene(s) we are resetting
-        scene_size = self.batch_dim // self.concurrent_scenes
+        scene_size = self.ml_batch_dim // self.concurrent_scenes
         scene_idx = envs_idx // scene_size
         unique_scene_idx, counts = torch.unique(scene_idx, return_counts=True)
 
@@ -365,7 +374,7 @@ class RepairsEnv(gym.Env):
 
         return self.concurrent_scenes_data
 
-    def reset(self) -> tuple[torch.Tensor, dict]:
+    def reset(self):
         """Reset all environments to initial state.
 
         Returns:
@@ -373,13 +382,15 @@ class RepairsEnv(gym.Env):
             info: Additional information
         """
         # Reset all environments # note: it was self.batch_dim - 1, but I don't think this is ri
-        idxs = torch.arange(self.batch_dim, device=self.device)
+        idxs = torch.arange(self.ml_batch_dim, device=self.device)
         self.reset_idx(idxs)
 
         # observe all environments (ideally done in paralel.)
-        all_env_obs = self._observe_all_scenes()
+        voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
+            self._observe_all_scenes()
+        )
 
-        return torch.cat(all_env_obs, dim=0), {}  # cat along batch dim
+        return voxel_init, voxel_des, video_obs, graph_obs, graph_des
 
     def _observe_scene(self, scene_data: ConcurrentSceneData):
         # Process a single environment
@@ -418,8 +429,8 @@ class RepairsEnv(gym.Env):
             voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
                 self._observe_scene(scene_data)
             )
-            all_voxel_init.extend(voxel_init)
-            all_voxel_des.extend(voxel_des)
+            all_voxel_init.append(voxel_init)
+            all_voxel_des.append(voxel_des)
             all_video_obs.append(video_obs)
             all_graph_obs.extend(graph_obs)
             all_graph_des.extend(graph_des)
@@ -428,7 +439,10 @@ class RepairsEnv(gym.Env):
         voxel_des = batch_sparse_coo_to_torchsparse(all_voxel_des)
         graph_obs = Batch.from_data_list(all_graph_obs)
         graph_des = Batch.from_data_list(all_graph_des)
-        video_obs = torch.stack(all_video_obs, dim=0)
+        video_obs = torch.cat(
+            all_video_obs, dim=0
+        )  # cat, not stack because it's already batched
+
         return voxel_init, voxel_des, video_obs, graph_obs, graph_des
 
 

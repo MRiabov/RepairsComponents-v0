@@ -13,6 +13,7 @@ import torchsparse
 
 # Define part type to color mapping (for priority extraction)
 PART_TYPE_COLORS = {
+    "part_to_replace": [1, 0.5, 0, 0.8],  # orange
     "connector": [1, 1, 0, 0.8],  # yellow
     "LED": [0, 1, 0, 0.8],  # green
     "switch": [1, 0.25, 0.25, 0.8],
@@ -26,14 +27,15 @@ PART_TYPE_COLORS = {
 
 # Map part types to integer labels
 PART_TYPE_LABEL = {
-    "connector": 1,
-    "LED": 2,
-    "fastener": 3,
-    "fastener_markup": 4,  # should be below fastener.
-    "switch": 5,
-    "button": 6,
-    "solid": 7,
-    "fluid": 8,
+    "part_to_replace": 1,  # this is the part that will be replaced in "ReplaceTask".
+    "connector": 2,
+    "LED": 3,
+    "fastener": 4,
+    "fastener_markup": 5,  # should be below fastener.
+    "switch": 6,
+    "button": 7,
+    "solid": 8,
+    "fluid": 9,
     "default": 0,
 }
 LABEL_TO_PART_TYPE = {v: k for k, v in PART_TYPE_LABEL.items()}
@@ -124,7 +126,7 @@ def export_voxel_grid(
 
     # Collect voxel coordinates and labels for sparse output
     all_sparse = []
-
+    # mesh all parts in a single scene
     for mesh, part_type, key in zip(meshes, part_types, mesh_keys):
         # Get or build sparse tensor
         cache_hit = (
@@ -144,6 +146,7 @@ def export_voxel_grid(
             # Get coordinates in grid space # of this shape to scene voxel grid.
             coords_np = np.floor((vox.points - mins) / voxel_size).astype(np.int8)
 
+            # Implementation note: below can be technically made outside of the loop.
             # Convert to tensor and get features
             coords = torch.from_numpy(coords_np).to(device)
             feats = torch.full(
@@ -157,10 +160,15 @@ def export_voxel_grid(
 
             if cached and cache is not None:
                 cache[key]["sparse"] = sparse
-        #dev note: this must be below the loop!
+        # dev note: this must be below the loop!
         all_sparse.append(sparse)
 
-    return (all_sparse, cache) if cached else all_sparse
+    # add all sparse tensors into one
+    # holdup. Does this not stack all shapes to start from 0,0?
+    sparse_scene = torch.cat(all_sparse, dim=0)
+    sparse_scene = sparse_scene.coalesce()
+
+    return (sparse_scene, cache) if cached else sparse_scene
 
 
 def to_sparse_coo(coords, labels, device):
@@ -176,56 +184,18 @@ def to_sparse_coo(coords, labels, device):
 
 def sparse_coo_to_torchsparse(sparse_coo: torch.Tensor):
     return torchsparse.SparseTensor(
-        feats=sparse_coo.values(), coords=sparse_coo.indices()
+        feats=sparse_coo.values(),
+        coords=sparse_coo.indices(),
+        spatial_range=(256, 256, 256),
     )
 
 
 def batch_sparse_coo_to_torchsparse(sparse_coos: list[torch.Tensor]):
-    coo = batch_coo_tensors(sparse_coos)
-    return torchsparse.SparseTensor(feats=coo.values(), coords=coo.indices())
-
-
-def batch_coo_tensors(sparse_coos: list[torch.Tensor]):
-    assert all(coo.is_sparse for coo in sparse_coos), "All tensors must be sparse."
-    # create indices with bdim.
-    batched_indices = []
-    for i, coo in enumerate(sparse_coos):
-        batch_dim = torch.full(
-            (1, coo.indices().shape[1]), i, dtype=torch.uint8, device=coo.device
-        )
-        indices_with_batch = torch.cat([batch_dim, coo.indices()], dim=0)
-        batched_indices.append(indices_with_batch)
-    all_indices = torch.cat(batched_indices, dim=1)
-    all_values = torch.cat([coo.values() for coo in sparse_coos])
-    return torch.sparse_coo_tensor(
-        all_indices, all_values, size=(len(sparse_coos),) + tuple(sparse_coos[0].shape)
-    )  # merge them.
-
-
-def concat_batched_sparse(sparse_coos: list[torch.Tensor]):
-    # Concatenate a list of 3D batched sparse COO tensors along the batch dimension.
-    assert len(sparse_coos) > 0, "Input list is empty."
-    assert all(sparse_coo.indices().ndim == 3 for sparse_coo in sparse_coos), (
-        "All tensors must be 3D."
+    assert all(sparse_coo.ndim == 4 for sparse_coo in sparse_coos), (
+        f"All tensors must be 4D, but got {[sparse_coo.ndim for sparse_coo in sparse_coos]}"
     )
-
-    all_indices = []
-    all_values = []
-    batch_size = 0
-    for coo in sparse_coos:
-        # coo shape: (B, X, Y, Z)
-        idx = coo.indices()
-        vals = coo.values()
-        # If tensors have batch dimension, adjust batch indices
-        idx = idx.clone()
-        idx[0] += batch_size
-        all_indices.append(idx)
-        all_values.append(vals)
-        batch_size += coo.shape[0]
-    indices = torch.cat(all_indices, dim=0)
-    values = torch.cat(all_values, dim=0)
-    shape = list(sparse_coos[0].shape)
-    shape[0] = batch_size
-    return torch.sparse_coo_tensor(
-        indices, values, size=tuple(shape), device=values.device
+    coo = torch.concat(sparse_coos, dim=0)
+    coo = coo.coalesce()
+    return torchsparse.SparseTensor(
+        feats=coo.values(), coords=coo.indices(), spatial_range=(256, 256, 256)
     )
