@@ -7,7 +7,6 @@ import os
 import build123d as bd
 from build123d import Compound, Part
 from typing import Any
-import torchsparse
 import torch
 
 # Define part type to color mapping (for priority extraction)
@@ -53,7 +52,7 @@ def export_voxel_grid(
     grid_size=(256, 256, 256),
     cached=False,
     cache: dict[str, dict[str, Any]] | None = None,
-    device: str = 'cpu',
+    device: str = "cpu",
 ):
     """
     Voxelize an iterable of build123d Parts into a 3D int8 label grid using trimesh (CPU).
@@ -90,12 +89,6 @@ def export_voxel_grid(
     part_types = [extract_part_type(p.label) for p in parts_list]
 
     # --- Caching ---
-    if cached:
-        if cache is None:
-            cache = {}
-    else:
-        cache = None
-
     def mesh_hash(part):
         # Simple key based on part label and rounded volume to avoid precision errors
         volume = round(
@@ -122,21 +115,13 @@ def export_voxel_grid(
                 cache[key] = {"mesh": mesh}
         meshes.append(mesh)
 
-    if not meshes:
-        padded = np.zeros(grid_size, dtype=np.int8)
-        return (padded, cache) if cached else padded
-
     # Compute bounds from all meshes
     all_vertices = np.concatenate([m.vertices for m in meshes], axis=0)
     mins = all_vertices.min(axis=0)
     maxs = all_vertices.max(axis=0)
-    grid_dims = np.ceil((maxs - mins) / voxel_size).astype(int)
-    grid_dims_t = torch.from_numpy(grid_dims.astype(np.int32))
 
     # Collect voxel coordinates and labels for sparse output
-    coords_list = []
-    feats_list = []
-    # print("Exporting voxel grid (CPU, trimesh)...")
+    all_sparse = []
 
     for mesh, part_type, key in zip(meshes, part_types, mesh_keys):
         # Get or build sparse tensor
@@ -146,45 +131,39 @@ def export_voxel_grid(
         if cache_hit:
             sparse = cache[key]["sparse"]
         else:
-            # Voxelize mesh and build sparse tensor
+            # Voxelize mesh and collect coordinates
             assert (mesh.bounding_box.extents < (voxel_size * 256)).all(), (
                 "Mesh is too large for voxelization."
             )
             vox = trimesh.voxel.creation.voxelize(mesh, pitch=voxel_size)
-            if vox is None:
-                continue
-            coords_np = np.floor((vox.points - mins) / voxel_size).astype(np.int32)
-            if coords_np.size == 0:
-                continue
-            # build coordinates with batch dim
+            assert vox is not None, "Voxelization has failed."
+            # note: coords_np are a tensor of (points, 3). In one case it is 60002*3
+
+            # Get coordinates in grid space # of this shape to scene voxel grid.
+            coords_np = np.floor((vox.points - mins) / voxel_size).astype(np.int8)
+
+            # Convert to tensor and get features
             coords = torch.from_numpy(coords_np).to(device)
-            coords = torch.cat(
-                [torch.zeros((coords.shape[0], 1), dtype=torch.int32, device=device), coords], dim=1
-            )
-            # feature is part label as uint8
             feats = torch.full(
                 (coords.shape[0], 1),
-                PART_TYPE_LABEL.get(part_type, 0),
+                PART_TYPE_LABEL.get(part_type, 0), # get type of the part.
                 dtype=torch.uint8,
                 device=device,
             )
-            sparse = torchsparse.SparseTensor(feats, coords)
+            # note: ideally csr for storage, but whatever.
+            sparse = to_sparse_coo(coords, feats, device)
+
             if cached and cache is not None:
                 cache[key]["sparse"] = sparse
-        # Filter sparse coords to grid bounds
-        coords4 = sparse.C  # shape (N,4)
-        mask4 = ((coords4[:, 1:] >= 0) & (coords4[:, 1:] < grid_dims_t)).all(dim=1)
-        coords4 = coords4[mask4]
-        feats4 = sparse.F[mask4]
-        coords_list.append(coords4.to(device))
-        feats_list.append(feats4.to(device))
+            all_sparse.append(sparse)
 
-    # Merge sparse tensors
-    if coords_list:
-        coords_all = torch.cat(coords_list, dim=0)
-        feats_all = torch.cat(feats_list, dim=0)
-    else:
-        coords_all = torch.zeros((0, 4), dtype=torch.int32, device=device)
-        feats_all = torch.zeros((0, 1), dtype=torch.uint8, device=device)
-    final_sparse = torchsparse.SparseTensor(feats_all, coords_all)
-    return (final_sparse, cache) if cached else final_sparse
+    return (all_sparse, cache) if cached else all_sparse
+
+
+def to_sparse_coo(coords, labels, device):
+    # Transpose coords from [N, 3] to [3, N] for sparse_coo_tensor
+    coords_t = coords.t().contiguous()
+    # Squeeze labels to [N] if it's [N, 1]
+    if labels.dim() == 2 and labels.size(1) == 1:
+        labels = labels.squeeze(1)
+    return torch.sparse_coo_tensor(coords_t, labels, size=(256, 256, 256), device=device)

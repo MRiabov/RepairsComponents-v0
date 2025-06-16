@@ -17,10 +17,14 @@ from repairs_components.processing.translation import (
     translate_to_genesis_scene,
 )
 
-from repairs_components.training_utils.sim_state_global import RepairsSimState
 import torch
 import genesis as gs
-from repairs_components.training_utils.sim_state_global import merge_global_states
+from repairs_components.training_utils.progressive_reward_calc import RewardHistory
+from repairs_components.training_utils.sim_state_global import (
+    RepairsSimState,
+    merge_global_states,
+)
+
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
 )
@@ -48,27 +52,19 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     #     "Number of tasks and number of configs to generate must match."
     # ) # not true. it must be split amongst tasks
 
-    # FIXME: below generates only for starting states. This is a subcase of generating for however much we need.
-    # instead it should generate as per num_configs_to_generate.
-
     scene_config_batches: list[ConcurrentSceneData] = []
     # create starting_state
     for scene_idx, scene_gen_count in enumerate(num_configs_to_generate_per_scene):
         if scene_gen_count == 0:
             scene_config_batches.append(None)
             continue
-        voxel_grids_initial = torch.zeros(
-            (scene_gen_count, 256, 256, 256), dtype=torch.uint8
-        )
-        voxel_grids_desired = torch.zeros(
-            (scene_gen_count, 256, 256, 256), dtype=torch.uint8
-        )
-
+        # Initialize lists to store sparse tensors and simulation states
+        voxel_grids_initial = []
+        voxel_grids_desired = []
         starting_sim_states = []
         desired_sim_states = []
 
         # training batches as for a dataloader/ML training batches.
-        training_batches = []
         init_diffs = []
         init_diff_counts = []
 
@@ -84,7 +80,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 env_setups[scene_idx], tasks[task_id], env_size=(64, 64, 64)
             )
 
-            # voxelize both
+            # voxelize both (sparsely!)
             starting_voxel_grid, voxelization_cache = export_voxel_grid(
                 starting_scene_geom_,
                 voxel_size=64 / 256,
@@ -98,8 +94,9 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 cache=voxelization_cache,
             )
 
-            voxel_grids_initial[scene_idx] = torch.from_numpy(starting_voxel_grid)
-            voxel_grids_desired[scene_idx] = torch.from_numpy(desired_voxel_grid)
+            # Store sparse tensors directly
+            voxel_grids_initial.append(starting_voxel_grid)
+            voxel_grids_desired.append(desired_voxel_grid)
 
             # create RepairsSimState for both
             starting_sim_state = translate_compound_to_sim_state([starting_scene_geom_])
@@ -114,6 +111,9 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             init_diffs.append(diff)
             init_diff_counts.append(initial_diff_count)
 
+        # note: stacking sparse tensors does not work atm (torch presumably does not support 
+        # 3d sparse tensors), so just leave them in lists, it's good enough.
+
         starting_sim_state = merge_global_states(starting_sim_states)
         desired_sim_state = merge_global_states(desired_sim_states)
         this_scene_configs = ConcurrentSceneData(
@@ -124,11 +124,13 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             desired_state=desired_sim_state,
             vox_init=voxel_grids_initial,
             vox_des=voxel_grids_desired,
-            initial_diffs={  # store list of Data diffs per config
+            initial_diffs={
                 k: [d[k][0] for d in init_diffs] for k in init_diffs[0].keys()
             },
             initial_diff_counts=torch.tensor(init_diff_counts),
             scene_id=scene_idx,
+            batch_dim=scene_gen_count,
+            reward_history=RewardHistory(batch_dim=scene_gen_count) 
         )
         scene_config_batches.append(this_scene_configs)
 
@@ -244,7 +246,7 @@ def add_base_scene_geometry(scene: gs.Scene):
         ),  # Look at the center of the working pos
         res=(256, 256),  # (1024, 1024),
     )
-    plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
+    _plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
     return scene, [camera_1, camera_2], franka
 
 
