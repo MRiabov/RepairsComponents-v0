@@ -16,7 +16,6 @@ from repairs_components.processing.scene_creation_funnel import (
     move_entities_to_pos,
 )
 from repairs_components.processing.tasks import Task
-from repairs_components.processing.voxel_export import batch_sparse_coo_to_torchsparse
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
 )
@@ -404,10 +403,6 @@ class RepairsEnv(gym.Env):
         sparse_voxel_init = scene_data.vox_init
         sparse_voxel_des = scene_data.vox_des
 
-        # combine sparse representations of both voxels # can be skipped on non-first envs.
-        # sparse_voxel_init = batch_sparse_coo_to_torchsparse(sparse_voxel_init)
-        # sparse_voxel_des = batch_sparse_coo_to_torchsparse(sparse_voxel_des)
-
         # get graph obs
         graph_obs = [
             state.graph for state in scene_data.current_state.electronics_state
@@ -435,8 +430,8 @@ class RepairsEnv(gym.Env):
             all_graph_obs.extend(graph_obs)
             all_graph_des.extend(graph_des)
 
-        voxel_init = batch_sparse_coo_to_torchsparse(all_voxel_init)
-        voxel_des = batch_sparse_coo_to_torchsparse(all_voxel_des)
+        voxel_init = torch.concat(all_voxel_init, dim=0)
+        voxel_des = torch.concat(all_voxel_des, dim=0)
         graph_obs = Batch.from_data_list(all_graph_obs)
         graph_des = Batch.from_data_list(all_graph_des)
         video_obs = torch.cat(

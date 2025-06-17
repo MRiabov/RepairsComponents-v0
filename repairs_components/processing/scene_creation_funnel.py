@@ -128,9 +128,9 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             },
             initial_diff_counts=torch.tensor(init_diff_counts),
             scene_id=scene_idx,
-            batch_dim=scene_gen_count,
-            reward_history=RewardHistory(batch_dim=scene_gen_count) 
-        )
+            batch_dim=scene_gen_count.item(),
+            reward_history=RewardHistory(batch_dim=scene_gen_count),
+        )  # type: ignore # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.

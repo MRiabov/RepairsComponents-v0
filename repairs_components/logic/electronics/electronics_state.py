@@ -8,7 +8,7 @@ from repairs_components.training_utils.sim_state import SimState
 from repairs_components.logic.physical_state import _diff_edge_features
 
 
-@dataclass
+@dataclass # note: possibly doable with @tensorclass. But it'll be not easy.
 class ElectronicsState(SimState):
     components: dict[str, ElectricalComponent] = field(default_factory=dict)
     graph: Data = field(default_factory=Data)
