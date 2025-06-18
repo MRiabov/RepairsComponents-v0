@@ -1,3 +1,4 @@
+import time
 from functools import partial
 from typing import List
 
@@ -5,9 +6,9 @@ import genesis as gs
 import gymnasium as gym
 import numpy as np
 import torch
-from torch_geometric.data import Batch
 from genesis.vis.visualizer import Camera
 from igl.helpers import os
+from torch_geometric.data import Batch
 
 from repairs_components.processing.scene_creation_funnel import (
     create_env_configs,
@@ -18,6 +19,7 @@ from repairs_components.processing.scene_creation_funnel import (
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
+    merge_scene_configs_at_idx,
 )
 from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.failure_modes import out_of_bounds
@@ -158,6 +160,7 @@ class RepairsEnv(gym.Env):
                     scene_id=scene_idx,
                     reward_history=RewardHistory(self.per_scene_batch_dim),
                     batch_dim=self.per_scene_batch_dim,
+                    step_count=torch.zeros(self.per_scene_batch_dim, dtype=torch.int),
                 )
             )
         # create the dataloader to update scenes.
@@ -179,6 +182,7 @@ class RepairsEnv(gym.Env):
             [env_cfg["default_joint_angles"][name] for name in env_cfg["joint_names"]],
             device=self.device,
         )
+        self.last_step_time = time.perf_counter()
 
         # Initialize environment to starting state
         self.reset()
@@ -261,7 +265,7 @@ class RepairsEnv(gym.Env):
             #     # NOTE: ideally save voxel only after reset.
             # )
 
-            # check if any entity is out of bounds # FIXME: should be per-scene.
+            # check if any entity is out of bounds
             out_of_bounds_fail = out_of_bounds(
                 min=self.min_bounds,
                 max=self.max_bounds,
@@ -279,11 +283,21 @@ class RepairsEnv(gym.Env):
                 "diff": diff,
                 "total_diff_left": total_diff_left,
                 "success": success,
+                "out_of_bounds": out_of_bounds_fail,
             }
 
         voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
             self._observe_all_scenes()
         )
+        print(
+            "step happened. Time elapsed:",
+            time.perf_counter() - self.last_step_time,
+            "Rewards:",
+            rewards.mean().item(),
+            "out_of_bounds_fail:",
+            out_of_bounds_fail.float().mean().item(),
+        )
+        self.last_step_time = time.perf_counter()
 
         return (
             voxel_init,
@@ -309,8 +323,10 @@ class RepairsEnv(gym.Env):
         )
 
         # get from which scene(s) we are resetting
-        scene_size = self.ml_batch_dim // self.concurrent_scenes
-        scene_idx = envs_idx // scene_size
+        num_env_per_scene = self.ml_batch_dim // self.concurrent_scenes
+        scene_idx = envs_idx // num_env_per_scene
+        env_in_scene_idx = envs_idx % num_env_per_scene
+        env_per_scene_idx = env_in_scene_idx.reshape(self.concurrent_scenes, -1)
         unique_scene_idx, counts = torch.unique(scene_idx, return_counts=True)
 
         # update the scene
@@ -323,47 +339,33 @@ class RepairsEnv(gym.Env):
         )
         # print("reset_scene_data", reset_scene_data)
 
-        for scene_id, reset_scene in enumerate(reset_scene_data):
+        for scene_id in range(len(reset_scene_data)):
+            reset_scene = reset_scene_data[scene_id]
+            reset_env_ids_this_scene = env_per_scene_idx[scene_id]
             if reset_scene is None:
                 continue
-            # get the number of environments to reset
-            envs_idx_to_reset_this_scene = torch.nonzero(scene_idx == scene_id).squeeze(
-                1
-            )
 
             self.concurrent_scenes_data[scene_id].gs_entities[
                 "franka@control"
-            ].set_dofs_position(
-                position=dof_pos,
-                envs_idx=envs_idx_to_reset_this_scene,
+            ].set_dofs_position(position=dof_pos, envs_idx=reset_env_ids_this_scene)
+
+            # Create a mask for which environments to reset in this scene
+            reset_mask = torch.zeros(
+                self.per_scene_batch_dim, dtype=torch.bool, device=self.device
+            )
+            reset_mask[reset_env_ids_this_scene] = True
+
+            # Merge states, only updating the environments that need to be reset
+            updated_scene_data = merge_scene_configs_at_idx(
+                self.concurrent_scenes_data[scene_id], reset_scene, reset_mask
             )
 
-            # Create ConcurrentSceneData instance
-            new_scene_data = ConcurrentSceneData(
-                scene=self.scenes[
-                    scene_id
-                ],  # configs don't create scenes. So, take the existing scenes and put them there, they will simply be updated.
-                gs_entities=self.concurrent_scenes_data[
-                    scene_id
-                ].gs_entities,  # and gs_entities
-                cameras=self.concurrent_scenes_data[scene_id].cameras,  # and cameras
-                current_state=reset_scene.current_state,  # the rest is reset
-                desired_state=reset_scene.desired_state,
-                vox_init=reset_scene.vox_init,
-                vox_des=reset_scene.vox_des,
-                initial_diffs=reset_scene.initial_diffs,
-                initial_diff_counts=reset_scene.initial_diff_counts,
-                scene_id=reset_scene.scene_id,
-                batch_dim=reset_scene.batch_dim,
-                reward_history=reset_scene.reward_history.reset_at_idx(
-                    envs_idx_to_reset_this_scene
-                ),
-            )
-            self.concurrent_scenes_data[scene_id] = new_scene_data
+            # merge the
+            self.concurrent_scenes_data[scene_id] = updated_scene_data
 
             # Move entities to their starting positions
             move_entities_to_pos(
-                new_scene_data.gs_entities, new_scene_data.current_state
+                updated_scene_data.gs_entities, updated_scene_data.current_state
             )
 
             # Update visual states to show the new positions

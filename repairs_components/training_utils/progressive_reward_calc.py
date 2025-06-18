@@ -153,7 +153,8 @@ class RewardHistory:
 
     def merge_at_idx(self, other: "RewardHistory", idx: torch.IntTensor):
         """Merge another RewardHistory into this one."""
-        assert len(idx) == len(other.triggered_reward_per_future_timestep)
+        assert idx.dtype == torch.int64
+        assert idx.shape[0] == len(other.triggered_reward_per_future_timestep)
         for new_id, this_id in enumerate(idx):
             self.triggered_reward_per_future_timestep[this_id] = (
                 other.triggered_reward_per_future_timestep[new_id]

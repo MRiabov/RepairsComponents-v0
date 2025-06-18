@@ -130,6 +130,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             scene_id=scene_idx,
             batch_dim=scene_gen_count.item(),
             reward_history=RewardHistory(batch_dim=scene_gen_count),
+            step_count=torch.zeros(scene_gen_count, dtype=torch.int),
         )  # type: ignore # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
 
@@ -208,6 +209,7 @@ def add_base_scene_geometry(scene: gs.Scene):
             scale=1,  # Use 1.0 scale since we're working in cm
             pos=(0, -(0.64 / 2 + 0.2), -0.2),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
+            fixed=True,
         ),
         surface=gs.surfaces.Plastic(color=(1.0, 0.7, 0.3, 0.3)),  # Add color material
         # 0.3 alpha for debug.

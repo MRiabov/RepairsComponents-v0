@@ -141,33 +141,30 @@ def merge_global_states(state_list: list[RepairsSimState]):
     return repairs_sim_state
 
 
-def merge_global_states_at_idx(
-    old_state: RepairsSimState, new_state: RepairsSimState, reset_states: torch.Tensor
-):
-    "Insert new states at indicated by bool tensor `reset_states`."
-    assert len(old_state.electronics_state) == len(new_state.electronics_state), (
-        "States lists must have the same length."
-    )
+def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
+    old_state: RepairsSimState, new_state: RepairsSimState, reset_mask: torch.Tensor
+):  # not fixing that this is a bool tensor only because maybe, gods of JIT will reward me later.
+    "Insert new states at indicated by bool tensor `reset_mask`."
+    # assert len(old_state.electronics_state) == len(new_state.electronics_state), (
+    #     "States lists must have the same length."
+    # )
     assert len(old_state.electronics_state) > 0, "States lists can not be empty."
-    assert len(reset_states) == len(old_state.electronics_state), (
-        "Reset states must have the same length as states."
+    assert len(reset_mask) == len(old_state.electronics_state), (
+        "Reset mask must have the same length as states."
     )
-    assert reset_states.dtype == torch.bool, "Reset states must be a bool tensor."
-    assert reset_states.ndim == 1, (
-        "reset states has ndim of one because it's only for this scene."
+    assert reset_mask.dtype == torch.bool, "Reset mask must be a bool tensor."
+    assert reset_mask.ndim == 1, (
+        "reset mask has ndim of one because it's only for this scene."
     )
+    assert len(new_state.electronics_state) == reset_mask.int().sum(), (
+        "Count of reset states must be equal to the batch dimension of the incoming states."
+    )
+    old_idx = reset_mask.nonzero().squeeze(1)
 
-    repaired_sim_state = RepairsSimState(len(old_state.electronics_state))
+    for new_id, old_id in enumerate(old_idx):
+        old_state.electronics_state[old_id] = new_state.electronics_state[new_id]
+        old_state.physical_state[old_id] = new_state.physical_state[new_id]
+        old_state.fluid_state[old_id] = new_state.fluid_state[new_id]
+        old_state.tool_state[old_id] = new_state.tool_state[new_id]
 
-    for i in range(len(old_state.electronics_state)):
-        if reset_states[i]:
-            repaired_sim_state.electronics_state[i] = new_state.electronics_state[i]
-            repaired_sim_state.physical_state[i] = new_state.physical_state[i]
-            repaired_sim_state.fluid_state[i] = new_state.fluid_state[i]
-            repaired_sim_state.tool_state[i] = new_state.tool_state[i]
-        else:
-            repaired_sim_state.electronics_state[i] = old_state.electronics_state[i]
-            repaired_sim_state.physical_state[i] = old_state.physical_state[i]
-            repaired_sim_state.fluid_state[i] = old_state.fluid_state[i]
-            repaired_sim_state.tool_state[i] = old_state.tool_state[i]
-    return repaired_sim_state
+    return old_state

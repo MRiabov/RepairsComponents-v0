@@ -318,6 +318,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
                         scene_id=scene_idx,
                         batch_dim=1,
                         reward_history=RewardHistory(batch_dim=1),
+                        step_count=torch.zeros(1, dtype=torch.int),
                     )
                 )
             batches.append(cfg_list)

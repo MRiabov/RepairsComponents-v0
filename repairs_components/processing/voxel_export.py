@@ -182,6 +182,104 @@ def to_sparse_coo(coords, labels, device):
     )
 
 
+# sparse arrays utils:
+def sparse_arr_remove(
+    sparse_tensor: torch.Tensor, remove_idx: torch.Tensor, dim: int = 0
+) -> torch.Tensor:
+    """Remove all values at the specified dimension.
+
+    Args:
+        remove_idx: The index to remove values from
+        dim: The dimension to remove values from
+
+    Note:
+        This only removes the values at the specified dimension but doesn't
+        reduce the size of the buffer. The buffer size remains the same, but the
+        removed positions become available for new additions.
+    """
+    # Ensure the batch dimension is within bounds
+    assert ((0 <= remove_idx) & (remove_idx < sparse_tensor.size(dim))).all(), (
+        f"Tried to remove at idx {remove_idx} is out of bounds [0, {sparse_tensor.size(dim)})"
+    )
+
+    # Remove all values at the specified batch dimension
+    sparse_tensor = sparse_tensor.coalesce()
+    dim_indices = sparse_tensor.indices()[dim]
+    bool_mask = torch.isin(dim_indices, remove_idx, invert=True)
+    # ^ are remove_idx in dim_indices.
+
+    return torch.sparse_coo_tensor(
+        sparse_tensor.indices()[:, bool_mask],
+        sparse_tensor.values()[bool_mask],
+        size=sparse_tensor.size(),
+        device=sparse_tensor.device,
+    )
 
 
+def sparse_arr_put(
+    dest_tensor: torch.Tensor,
+    src_tensor: torch.Tensor,
+    index: torch.Tensor,
+    dim: int = 0,
+) -> torch.Tensor:
+    """Put values from src_tensor into dest_tensor at the specified dimension using the provided indices.
 
+    Args:
+        dest_tensor: The destination sparse tensor
+        src_tensor: The source sparse tensor to copy values from
+        index: 1D tensor of indices where each element in src_tensor should be placed along the specified dimension
+        dim: The dimension along which to place the values
+
+    Returns:
+        A new sparse tensor with values from src_tensor placed at the specified positions
+    """
+    src_tensor = src_tensor.coalesce()
+    dest_tensor = dest_tensor.coalesce()
+    assert src_tensor.is_sparse, "Source tensor must be a sparse tensor"
+    assert dest_tensor.is_sparse, "Destination tensor must be a sparse tensor"
+    assert index.dim() == 1, "Index must be a 1D tensor"
+    assert index.shape[0] == src_tensor.shape[0], (
+        "Index must have the same length as the number of non-zero elements in src_tensor"
+    )
+
+    # Ensure the tensors are on the same device
+    if src_tensor.device != dest_tensor.device:
+        src_tensor = src_tensor.to(dest_tensor.device)
+    if index.device != dest_tensor.device:
+        index = index.to(dest_tensor.device)
+
+    # Coalesce both tensors
+    dest_tensor = dest_tensor.coalesce()
+    src_tensor = src_tensor.coalesce()
+
+    # Get the indices and values
+    dest_indices = dest_tensor.indices()
+    dest_values = dest_tensor.values()
+    src_indices = src_tensor.indices()
+    src_values = src_tensor.values()
+
+    # Create new indices for the source tensor with the specified dim remapped
+    new_indices = src_indices.clone()
+
+    # # Remap the dimension of interest using a loop
+    # unique_indices = torch.unique(src_indices[dim]) # note: doable without loop, but whatever.
+    # for i in range(len(unique_indices)):
+    #     src_idx = unique_indices[i]
+    #     mask = src_indices[dim] == src_idx
+    #     new_indices[dim, mask] = index[i]
+
+    # Remap the dimension of interest using unique and inverse mapping
+    _, inverse_indices = torch.unique(src_indices[dim], return_inverse=True)
+    new_indices[dim] = index[inverse_indices]  # just a little optimization.
+
+    # Combine the indices and values
+    combined_indices = torch.cat([dest_indices, new_indices], dim=1)
+    combined_values = torch.cat([dest_values, src_values])
+
+    # Create the new sparse tensor
+    return torch.sparse_coo_tensor(
+        combined_indices,
+        combined_values,
+        size=dest_tensor.size(),
+        device=dest_tensor.device,
+    ).coalesce()
