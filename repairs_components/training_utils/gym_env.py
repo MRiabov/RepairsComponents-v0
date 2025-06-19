@@ -439,7 +439,8 @@ class RepairsEnv(gym.Env):
         video_obs = torch.cat(
             all_video_obs, dim=0
         )  # cat, not stack because it's already batched
-
+        video_obs = video_obs.permute(0, 1, 4, 2, 3)  # to torch format
+        
         return voxel_init, voxel_des, video_obs, graph_obs, graph_des
 
 

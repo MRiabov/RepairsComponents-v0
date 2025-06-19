@@ -8,10 +8,11 @@ from repairs_components.training_utils.sim_state import SimState
 from repairs_components.logic.physical_state import _diff_edge_features
 
 
-@dataclass # note: possibly doable with @tensorclass. But it'll be not easy.
+@dataclass  # note: possibly doable with @tensorclass. But it'll be not easy.
 class ElectronicsState(SimState):
     components: dict[str, ElectricalComponent] = field(default_factory=dict)
     graph: Data = field(default_factory=Data)
+    "Note: don't take this graph. Use export_graph() instead."  # TODO: merge all node features into one.
     indices: dict[str, int] = field(default_factory=dict)
     reverse_indices: dict[int, str] = field(default_factory=dict)
     # TODO add reverse indices updates where they need to be.
@@ -31,8 +32,8 @@ class ElectronicsState(SimState):
         )
         # fixme: better go from graph.x to individual features... I think.
         self.graph.x = torch.empty(
-            (0, 2), dtype=torch.float32, device=self.device
-        )  # [max_voltage, max_current]
+            (0, 4), dtype=torch.float32, device=self.device
+        )  # [max_voltage, max_current, component type, component ID]
         self.graph.num_nodes = 0
         self._graph_built = False
 
