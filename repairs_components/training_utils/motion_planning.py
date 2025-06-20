@@ -10,9 +10,9 @@ def execute_straight_line_trajectory(
     target_pos: torch.Tensor,
     target_quat: torch.Tensor,
     gripper_force: torch.Tensor,
+    render: bool,
     keypoint_distance=0.1,
     num_steps_between_keypoints=10,
-    camera: Camera | None = None,
 ):
     """
     Execute a straight-line trajectory for a robot arm in Cartesian space.
@@ -29,6 +29,7 @@ def execute_straight_line_trajectory(
         pos: Target position tensor with shape (num_envs, 3)
         quat: Target orientation quaternion tensor with shape (num_envs, 4)
         gripper_force: Force in newtons applied to gripper fingers.
+        render: Whether to render the trajectory to store for visualization. Will not affect training, but will slow it down.
         keypoint_distance: Distance between keypoints in meters (default: 0.1m or 10cm)
         num_steps_between_keypoints: Number of interpolation steps between keypoints
 
@@ -79,16 +80,23 @@ def execute_straight_line_trajectory(
         # print("keypoint_ik.shape", keypoint_ik.shape)
         franka.control_dofs_position(keypoint_ik)
         franka.control_dofs_force(gripper_force, dofs_idx_local=[7, 8])
-        scene.step()
-        if camera is not None:
-            camera.render()  # todo: remove, from physics-only steps at least.
+        scene.step(update_visualizer=render, refresh_visualizer=render)
+
+        if render:
+            cameras = scene.visualizer.cameras
+            for camera in cameras:
+                camera.render()
 
     # let dry-run for 80 steps.
     for _ in range(100):
-        scene.step()  # let it actually run.
+        scene.step(
+            update_visualizer=render, refresh_visualizer=render
+        )  # let it actually run.
         franka.control_dofs_position(keypoint_ik)  # set at the last point.
         franka.control_dofs_force(gripper_force, dofs_idx_local=[7, 8])
-        if camera is not None:
-            camera.render()
+        if render:
+            cameras = scene.visualizer.cameras
+            for camera in cameras:
+                camera.render()
 
     # print(franka.get_links_pos()[:, 7])  # hand.

@@ -230,6 +230,7 @@ class RepairsEnv(gym.Env):
                 target_pos=pos,
                 target_quat=quat,
                 gripper_force=gripper_force,
+                render=False,
                 keypoint_distance=0.1,  # 10cm as suggested
                 num_steps_between_keypoints=10,
             )
@@ -291,7 +292,7 @@ class RepairsEnv(gym.Env):
         )
         print(
             "step happened. Time elapsed:",
-            time.perf_counter() - self.last_step_time,
+            str(time.perf_counter() - self.last_step_time) + "s",
             "Rewards:",
             rewards.mean().item(),
             "out_of_bounds_fail:",
@@ -440,7 +441,7 @@ class RepairsEnv(gym.Env):
             all_video_obs, dim=0
         )  # cat, not stack because it's already batched
         video_obs = video_obs.permute(0, 1, 4, 2, 3)  # to torch format
-        
+
         return voxel_init, voxel_des, video_obs, graph_obs, graph_des
 
 
