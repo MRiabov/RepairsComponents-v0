@@ -9,6 +9,7 @@ from repairs_components.logic.physical_state import PhysicalState
 from repairs_components.logic.fluid_state import FluidState
 from repairs_components.logic.tools.tools_state import ToolState
 from repairs_components.training_utils.sim_state import SimState
+from torch_geometric.data import Data
 
 
 @dataclass
@@ -81,46 +82,37 @@ class RepairsSimState(SimState):
             # "fluid_diff_count": fluid_diff_counts,
         }, total_diff_counts
 
-    def save(self, output_dir: str = "./step_states") -> str:
-        """Save the current state to a JSON file with a unique identifier.
-
-        Args:
-            electronics_state: Current electronics state
-            physical_state: Current physical state
-            fluid_state: Current fluid state
-            output_dir: Directory to save the state file
-
-        Returns:
-            str: Path to the saved state file
-        """
+    def save(self, path: Path, scene_id, env_idx: torch.Tensor):
+        """Save the current state to a JSON file with a unique identifier."""
         # Create output directory if it doesn't exist
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Generate a unique filename
-        uid = str(uuid.uuid4())
-        filename = f"step_state_{uid}.json"
-        filepath = Path(output_dir) / filename
+        # # Generate a unique filename
+        # uid = str(uuid.uuid4())
+        # filename = f"step_state_{uid}.json"
+        # filepath = path / filename
 
         # Create a dictionary with all states
         state_dict = asdict(self)
 
-        # Serialize and save to JSON file, handling non-dataclass objects
+        # save graphs, everything else can be reconstructed from the build123d scene.
 
-        with open(filepath, "w") as f:
-            # serializer for Data, tensors, and other objects
-            def _serialize(o):
-                if hasattr(o, "to_dict"):  # if PyG data
-                    return o.to_dict()
-                elif hasattr(o, "tolist"):  # elif tensor
-                    return o.tolist()
-                else:
-                    return str(o)
+        for env_id in env_idx:
+            mech_graph_path = (
+                path.parent / "graphs" / f"mechanical_graphs_{scene_id}_{env_id}.pt"
+            )
+            elec_graph_path = (
+                path.parent / "graphs" / f"electronic_graphs_{scene_id}_{env_id}.pt"
+            )
+            torch.save(self.physical_state[env_id].graph, mech_graph_path)
+            torch.save(self.electronics_state[env_id].graph, elec_graph_path)
 
-            json.dump(state_dict, f, default=_serialize)
+        state_dict.pop("physical_state")
+        state_dict.pop("electronics_state")
 
-        print(f"Step state saved to: {output_dir}")
-
-        return str(filepath)
+        electronics_indices = self.electronics_state[0].indices
+        physical_indices = self.physical_state[0].indices
+        return electronics_indices, physical_indices
 
 
 def merge_global_states(state_list: list[RepairsSimState]):
@@ -168,3 +160,17 @@ def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
         old_state.tool_state[old_id] = new_state.tool_state[new_id]
 
     return old_state
+
+
+def reconstruct_sim_state(
+    electronics_graphs:list[Data], mechanical_graphs:list[Data], electronics_indices:list[dict[str, int]], mechanical_indices:list[dict[str, int]]
+) -> RepairsSimState:
+    """Load a single simulation state from graphs and indices."""
+    from repairs_components.training_utils.sim_state_global import RepairsSimState
+    batch_dim = len(electronics_graphs)
+    repairs_sim_state = RepairsSimState(batch_dim)
+    repairs_sim_state.electronics_state = [ElectronicsState.rebuild_from_graph(graph, indices) for graph, indices in zip(electronics_graph, electronics_indices)]
+    repairs_sim_state.physical_state = [PhysicalState.rebuild_from_graph(graph, indices) for graph, indices in zip(mechanical_graph, mechanical_indices)]
+    
+
+    return RepairsSimState()

@@ -37,6 +37,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     ],  # note: there must be one gs scene per EnvSetup. So this could be done in for loop.
     tasks: list[Task],
     num_configs_to_generate_per_scene: torch.Tensor,  # int [len]
+    save: bool = False,
+    save_path: pathlib.Path | None = None,
 ) -> list[ConcurrentSceneData]:
     """`create_env_configs` is a general, high_level function responsible for creating of randomized configurations
     (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis.
@@ -86,12 +88,16 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 voxel_size=64 / 256,
                 cached=True,
                 cache=voxelization_cache,
+                save=save,
+                save_path=save_path,
             )
             desired_voxel_grid, voxelization_cache = export_voxel_grid(
                 desired_state_geom_,
                 voxel_size=64 / 256,
                 cached=True,
                 cache=voxelization_cache,
+                save=save,
+                save_path=save_path,
             )
 
             # Store sparse tensors directly

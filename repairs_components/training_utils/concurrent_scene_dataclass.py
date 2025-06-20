@@ -131,8 +131,8 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
 
 
 def merge_scene_configs_at_idx(
-    old_scene_config: "ConcurrentSceneData",
-    new_scene_config: "ConcurrentSceneData",
+    old_scene_config: ConcurrentSceneData,
+    new_scene_config: ConcurrentSceneData,
     reset_mask: torch.BoolTensor,
 ) -> "ConcurrentSceneData":
     """Insert new scene configs at indices indicated by bool tensor `reset_mask`.
@@ -210,3 +210,61 @@ def merge_scene_configs_at_idx(
         )
 
     return merged_scene_config
+
+def split_scene_config(scene_config:ConcurrentSceneData):
+    batch = scene_config.batch_dim
+    cfg_list: list[ConcurrentSceneData] = []
+    for i in range(batch):
+        # slice global states
+        orig_curr = scene_config.current_state
+        curr = RepairsSimState(batch_dim=1)
+        curr.electronics_state = [orig_curr.electronics_state[i]]
+        curr.physical_state = [orig_curr.physical_state[i]]
+        curr.fluid_state = [orig_curr.fluid_state[i]]
+        curr.tool_state = [orig_curr.tool_state[i]]
+        curr.has_electronics = orig_curr.has_electronics
+        curr.has_fluid = orig_curr.has_fluid
+        # sanity check: ensure single-item state
+        assert curr.scene_batch_dim == 1, (
+            f"Expected batch_dim=1, got {curr.scene_batch_dim}"
+        )
+
+        orig_des = scene_config.desired_state
+        des = RepairsSimState(batch_dim=1)
+        des.electronics_state = [orig_des.electronics_state[i]]
+        des.physical_state = [orig_des.physical_state[i]]
+        des.fluid_state = [orig_des.fluid_state[i]]
+        des.tool_state = [orig_des.tool_state[i]]
+        des.has_electronics = orig_des.has_electronics
+        des.has_fluid = orig_des.has_fluid
+        # sanity check: ensure single-item state
+        assert des.scene_batch_dim == 1, (
+            f"Expected batch_dim=1, got {des.scene_batch_dim}"
+        )
+
+        # slice voxel and diffs
+        vox_init_i = scene_config.vox_init[i].unsqueeze(0)
+        vox_des_i = scene_config.vox_des[i].unsqueeze(0)
+        diffs_i = {
+            k: scene_config.initial_diffs[k][i] for k in scene_config.initial_diffs
+        }
+        diff_counts_i = scene_config.initial_diff_counts[i : i + 1]
+
+        cfg_list.append(
+            ConcurrentSceneData(
+                scene=scene_config.scene,
+                gs_entities=scene_config.gs_entities,
+                cameras=scene_config.cameras,
+                current_state=curr,
+                desired_state=des,
+                vox_init=vox_init_i,
+                vox_des=vox_des_i,
+                initial_diffs=diffs_i,
+                initial_diff_counts=diff_counts_i,
+                scene_id=scene_config.scene_id,
+                batch_dim=1,
+                reward_history=RewardHistory(batch_dim=1),
+                step_count=scene_config.step_count[i].item(),
+            )
+        )
+    return cfg_list

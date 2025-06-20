@@ -21,9 +21,9 @@ def fastener_hole(radius: float, depth: float, joint_name: str = "fastener_hole1
     fastener_loc = Locations((0, 0, -radius))
     # tuple_pos=[loc.position.to_tuple() for loc in fastener_loc.locations]
     joint_axis = Axis.Z
-    RevoluteJoint(joint_name, axis=Axis.Z, to_part=None)
+    
 
-    return fastener_hole1, fastener_loc
+    return fastener_hole1, fastener_loc, axis=joint_axis
 
 
 ###debug:

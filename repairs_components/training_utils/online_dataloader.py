@@ -1,22 +1,25 @@
-import queue
-from typing import Dict, List, Callable, Any
-from concurrent.futures import ThreadPoolExecutor
+from __future__ import annotations
 
+import queue
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
+import genesis as gs
 import torch
-from repairs_components.processing.scene_creation_funnel import (
-    create_env_configs,
-)
+
+from repairs_components.processing.scene_creation_funnel import create_env_configs
 from repairs_components.processing.tasks import Task
-from repairs_components.training_utils.env_setup import EnvSetup
-from repairs_components.training_utils.sim_state_global import (
-    RepairsSimState,
-)
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     merge_concurrent_scene_configs,
+    split_scene_config,
 )
-import genesis as gs
-from repairs_components.training_utils.progressive_reward_calc import RewardHistory
+from repairs_components.training_utils.env_setup import EnvSetup
+from repairs_components.training_utils.offline_utils import (
+    load_env_configs_from_disk,
+    save_env_configs_to_disk,
+)
 
 
 class MultiEnvDataLoader:
@@ -196,7 +199,7 @@ class MultiEnvDataLoader:
                 q.put(it)
 
 
-class RepairsEnvDataLoader(MultiEnvDataLoader):
+class OnlineRepairsEnvDataLoader(MultiEnvDataLoader[ConcurrentSceneData]):
     def __init__(
         self,
         scenes: List[gs.Scene],
@@ -213,8 +216,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             env_setups: List of environment setups
             tasks: List of tasks
             batch_dim: Batch dimension size
-            num_scenes_per_task: Number of scenes per task
-            batches_in_memory_per_scene: How many batches to keep in memory per scene
+            prefetch_memory_size: How many batches to keep in memory
         """
         self.scenes = scenes
         self.env_setups = env_setups
@@ -225,7 +227,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             "Count of scenes and env_setups must match."
         )
 
-        # Create preprocessing function that generates batches for scenes
+        # Create preprocessing function that generates or loads batches for scenes
         def scene_preprocessing_fn(
             num_configs_to_generate_per_scene: torch.Tensor,
             _state_data: Any | None = None,
@@ -266,60 +268,8 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         batches = []
         # Split each batched scene config into individual items (batch dim =1)
         for scene_idx, scene_cfg in enumerate(scene_configs_per_scene):
-            count = int(num_configs_to_generate_per_scene[scene_idx])
-            cfg_list: list[ConcurrentSceneData] = []
-            for i in range(count):
-                # slice global states
-                orig_curr = scene_cfg.current_state
-                curr = RepairsSimState(batch_dim=1)
-                curr.electronics_state = [orig_curr.electronics_state[i]]
-                curr.physical_state = [orig_curr.physical_state[i]]
-                curr.fluid_state = [orig_curr.fluid_state[i]]
-                curr.tool_state = [orig_curr.tool_state[i]]
-                curr.has_electronics = orig_curr.has_electronics
-                curr.has_fluid = orig_curr.has_fluid
-                # sanity check: ensure single-item state
-                assert curr.scene_batch_dim == 1, (
-                    f"Expected batch_dim=1, got {curr.scene_batch_dim}"
-                )
-
-                orig_des = scene_cfg.desired_state
-                des = RepairsSimState(batch_dim=1)
-                des.electronics_state = [orig_des.electronics_state[i]]
-                des.physical_state = [orig_des.physical_state[i]]
-                des.fluid_state = [orig_des.fluid_state[i]]
-                des.tool_state = [orig_des.tool_state[i]]
-                des.has_electronics = orig_des.has_electronics
-                des.has_fluid = orig_des.has_fluid
-                # sanity check: ensure single-item state
-                assert des.scene_batch_dim == 1, (
-                    f"Expected batch_dim=1, got {des.scene_batch_dim}"
-                )
-
-                # slice voxel and diffs
-                vox_init_i = scene_cfg.vox_init[i].unsqueeze(0)
-                vox_des_i = scene_cfg.vox_des[i].unsqueeze(0)
-                diffs_i = {
-                    k: scene_cfg.initial_diffs[k][i] for k in scene_cfg.initial_diffs
-                }
-                diff_counts_i = scene_cfg.initial_diff_counts[i : i + 1]
-
-                cfg_list.append(
-                    ConcurrentSceneData(
-                        scene=None,
-                        gs_entities=None,
-                        cameras=None,
-                        current_state=curr,
-                        desired_state=des,
-                        vox_init=vox_init_i,
-                        vox_des=vox_des_i,
-                        initial_diffs=diffs_i,
-                        initial_diff_counts=diff_counts_i,
-                        scene_id=scene_idx,
-                        batch_dim=1,
-                        reward_history=RewardHistory(batch_dim=1),
-                        step_count=torch.zeros(1, dtype=torch.int),
-                    )
-                )
+            assert scene_cfg.batch_dim == num_configs_to_generate_per_scene[scene_idx]
+            cfg_list = split_scene_config(scene_cfg)
             batches.append(cfg_list)
+
         return batches

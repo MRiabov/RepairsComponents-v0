@@ -26,7 +26,12 @@ from repairs_components.training_utils.failure_modes import out_of_bounds
 from repairs_components.training_utils.motion_planning import (
     execute_straight_line_trajectory,
 )
-from repairs_components.training_utils.multienv_dataloader import RepairsEnvDataLoader
+from repairs_components.training_utils.online_dataloader import (
+    OnlineRepairsEnvDataLoader,
+)
+from repairs_components.training_utils.offline_dataloader import (
+    OfflineDataset,
+)
 from repairs_components.training_utils.progressive_reward_calc import (
     RewardHistory,
     calculate_done,
@@ -54,6 +59,7 @@ class RepairsEnv(gym.Env):
         show_viewer: bool = False,
         num_scenes_per_task: int = 1,
         concurrent_scenes: int = 1,
+        use_offline_dataset: bool = False,
     ):
         """Initialize the Repairs environment.
 
@@ -164,20 +170,33 @@ class RepairsEnv(gym.Env):
                 )
             )
         # create the dataloader to update scenes.
-        self.env_dataloader = RepairsEnvDataLoader(
-            scenes=self.scenes,
-            env_setups=env_setups,
-            tasks=tasks,
-            batch_dim=self.ml_batch_dim,  # ml batch dim.
-            prefetch_memory_size=prefetch_memory_size,
-        )
-        print("before populate_async")
-        # populate the dataloader with initial configs
-        self.env_dataloader.populate_async(
-            init_generate_per_scene.to(dtype=torch.int16)
-        )
-        print("after populate_async")
+        if not use_offline_dataset:
+            self.env_dataloader = OnlineRepairsEnvDataLoader(
+                scenes=self.scenes,
+                env_setups=env_setups,
+                tasks=tasks,
+                batch_dim=self.ml_batch_dim,
+                prefetch_memory_size=prefetch_memory_size,
+            )
+            print("before populate_async")
+            # populate the dataloader with initial configs
+            start_time = time.time()
+            self.env_dataloader.populate_async(
+                init_generate_per_scene.to(dtype=torch.int16)
+            )
+            print(
+                f"after populate_async. Generation of {init_generate_per_scene.sum()} configs took {time.time() - start_time} seconds."
+            )
         # Set default joint positions from config
+        else:
+            assert "offline_dataloader_settings" in env_cfg, (
+                "Offline dataloader settings not found in env_cfg."
+            )
+            self.env_dataloader = OfflineDataset(
+                data_dir=env_cfg["offline_dataloader_settings"]["data_dir"],
+                scene_ids=env_cfg["offline_dataloader_settings"]["scene_ids"],
+            )
+
         self.default_dof_pos = torch.tensor(
             [env_cfg["default_joint_angles"][name] for name in env_cfg["joint_names"]],
             device=self.device,

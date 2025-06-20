@@ -3,12 +3,11 @@ import numpy as np
 import trimesh
 
 import tempfile
-import os
 import build123d as bd
 from build123d import Compound, Part
 from typing import Any
 import torch
-import torchsparse
+from pathlib import Path
 
 
 # Define part type to color mapping (for priority extraction)
@@ -56,6 +55,8 @@ def export_voxel_grid(
     grid_size=(256, 256, 256),
     cached=False,
     cache: dict[str, dict[str, Any]] | None = None,
+    save: bool = False,
+    save_path: Path | None = None,
     device: str = "cpu",
 ):
     """
@@ -109,12 +110,17 @@ def export_voxel_grid(
             mesh = cache[key]["mesh"]
         else:
             # Export STL and load via trimesh
-            tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".stl")
-            tmp_path = tmp_file.name
-            tmp_file.close()
-            bd.export_stl(part, tmp_path)
-            mesh = trimesh.load(tmp_path)
-            os.remove(tmp_path)
+            if save:
+                save_path = Path(save_path, f"{key}.stl")
+                bd.export_stl(part, save_path)
+                mesh = trimesh.load(save_path)
+            else:
+                tmp_file = tempfile.NamedTemporaryFile(delete=True, suffix=".stl")
+                tmp_path = tmp_file.name
+                bd.export_stl(part, tmp_path)
+                mesh = trimesh.load(tmp_path)
+                tmp_file.close()
+            # os.remove(tmp_path)
             if cached and cache is not None:
                 cache[key] = {"mesh": mesh}
         meshes.append(mesh)
@@ -157,6 +163,8 @@ def export_voxel_grid(
             )
             # note: ideally csr for storage, but whatever.
             sparse = to_sparse_coo(coords, feats, device)
+
+            # note: I won't save sparse matrix here because I'll do it later and batched. Because why not.
 
             if cached and cache is not None:
                 cache[key]["sparse"] = sparse
