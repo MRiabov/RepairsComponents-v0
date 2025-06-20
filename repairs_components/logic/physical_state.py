@@ -10,6 +10,7 @@ Provides diff methods:
 diff(): combines both into {'fasteners', 'bodies'} with total change count
 """
 
+from _typeshed import NoneType
 from dataclasses import dataclass, field
 
 import torch
@@ -32,27 +33,83 @@ class PhysicalState:
 
     # Graph storing part nodes and fastener edges
     graph: Data = field(default_factory=Data)
+    """The graph storing part nodes and fastener edges."""
+    
     indices: dict[str, int] = field(default_factory=dict)
     reverse_indices: dict[int, str] = field(default_factory=dict)
+    fastener_ids: dict[int, str] = field(default_factory=dict)
 
     # Fastener metadata (shared across batch)
     fastener_prototype: dict[str, Fastener] = field(default_factory=dict)
 
-    def __post_init__(self):
-        # Initialize graph attributes
-        self.graph.edge_index = torch.empty(
-            (2, 0), dtype=torch.long, device=self.device
-        )
-        self.graph.edge_attr = torch.empty(
-            (0, 12), dtype=torch.float32, device=self.device
-        )  # placeholder size
 
-        # Node attributes
-        self.graph.position = torch.empty(
-            (0, 3), dtype=torch.float32, device=self.device
-        )  # note: torch_geomeric conventionally uses `pos` for 2d or 3d positions. You could too.
-        self.graph.quat = torch.empty((0, 4), dtype=torch.float32, device=self.device)
+    #Free fasteners - not attached to two parts, but to one or none
+    free_fasteners_loc = torch.zeros((0, 3), dtype=torch.float32, device=device)
+    free_fasteners_quat = torch.zeros((0, 4), dtype=torch.float32, device=device)
+    free_fasteners_attached_to = torch.zeros((0,), dtype=torch.int8, device=device)
+    "When the fastener is inserted only into one body, it is stored here. Otherwise, it is -1."
 
+    def __init__(
+        self,
+        graph: Data | None = None,
+        indices: dict[str, int] | None = None,
+        fasteners: dict[str, Fastener] | None = None,
+        fastener_id_to_name: dict[int, str] | None = None,
+        free_fasteners_loc: torch.Tensor | None = None,
+        free_fasteners_quat: torch.Tensor | None = None,
+        free_fasteners_attached_to: torch.Tensor | None = None,
+    ):
+        #for empty creation (which is the case in online loading), do not require a graph
+        if graph is None:
+            graph = Data()
+            # Initialize graph attributes
+
+            self.graph.edge_index = torch.empty(
+                (2, 0), dtype=torch.long, device=self.device
+            )
+            self.graph.edge_attr = torch.empty(
+                (0, 12), dtype=torch.float32, device=self.device
+            )  # placeholder size
+
+            # Node attributes
+            self.graph.position = torch.empty(
+                (0, 3), dtype=torch.float32, device=self.device
+            )  # note: torch_geomeric conventionally uses `pos` for 2d or 3d positions. You could too.
+            self.graph.quat = torch.empty((0, 4), dtype=torch.float32, device=self.device)
+
+            if indices is None:
+                indices = {}
+                
+        else:
+            assert indices is not None, "Indices must be provided if graph is not None"
+            assert fastener_id_to_name is not None, "Fastener names must be provided if graph is not None"
+            self.graph = graph
+            self.indices = indices
+            self.reverse_indices = {v: k for k, v in indices.items()}
+            # TODO logic for fastener rebuild...
+            for edge_index, edge_attr in zip(graph.edge_index.t(), graph.edge_attr):
+                fastener_id = edge_attr[0]  # assume it is the first element
+                fastener_size = edge_attr[1] 
+                fastener_name = fastener_id_to_name[fastener_id]
+                connected_to_1 = self.reverse_indices[edge_index[0].item()]
+                connected_to_2 = self.reverse_indices[edge_index[1].item()]
+                fastener = Fastener(constraint_a_active fastener_name, fastener_size)
+                self.fastener_prototype[fastener_name] = fastener
+
+                #next: there is something that needs to be figured out with data storage and reconstruction.
+                # So 1. I do save STL/gltf files,
+                # but during offline I don't want to scan meshes because that's costly. 
+                # I only want to scan physical and electrical states, and load meshes to genesis only once. build123d should not be used at all.
+                # Consequently, I need to store meshes, and their positions for genesis to read.
+                # this is stored in the graph, however fasteners are stored in the graph too.
+                # so I need an extra container for free fasteners.
+                #however what's critical is to ensure no disparity between offline and online loads. 
+                # It must be fully deterministic, which it currently is not due to fastener connections not specifying A or B.  
+                # wait, do I not register free fasteners in the graph at all?
+            
+
+            
+            
     def register_body(self, name: str, position: tuple, rotation: tuple):
         assert name not in self.indices, f"Body {name} already registered"
         # assert position.shape == (3,) and rotation.shape == (4,) # was a tensor.
@@ -308,9 +365,49 @@ class PhysicalState:
         changed = diff_dict["changed_indices"]
         # Return True if this part_id did not exceed thresholds
 
-        #FIXME: this does not account for a) batch of environments, b) batch of parts.
+        # FIXME: this does not account for a) batch of environments, b) batch of parts.
         # ^batch of environments would be cool, but batch of parts would barely ever happen.
-        return (changed == part_id).any() 
+        return (changed == part_id).any()
+
+        @staticmethod
+    def rebuild_from_graph(graph: Data, indices: dict[str, int]) -> "PhysicalState":
+        "Rebuild an ElectronicsState from a graph"
+        assert graph.num_nodes == len(indices), "Graph and indices do not match"
+        for component_id in range(graph.num_nodes):
+            reverse_indices = {v: k for k, v in indices.items()}
+            component_name = reverse_indices[component_id]
+            # TODO: `match` selection of electrical components.
+            max_voltage, max_current, component_type, component_id = (
+                self.decompose_graph_x(graph.x)
+            )
+            component = ElectricalComponentsEnum(component_type)
+            match component:
+                case ElectricalComponentsEnum.CONNECTOR:
+                    component = ConnectorsEnum(component_name)
+
+                # case ElectricalComponentsEnum.MOTOR:
+                #     component = Motor(component_name)
+                # case ElectricalComponentsEnum.BUTTON:
+                #     component = Button(component_name)
+                # case ElectricalComponentsEnum.LED:
+                #     component = LED(component_name)
+                # case ElectricalComponentsEnum.RESISTOR:
+                #     component = Resistor(component_name)
+                # case ElectricalComponentsEnum.VOLTAGE_SOURCE:
+                #     component = VoltageSource(component_name)
+                case _:
+                    raise NotImplementedError(
+                        f"Unknown component type: {component_type}"
+                    )
+
+    def decompose_graph_x(self, x: torch.Tensor):
+        "Decompose graph x into meaningful values"
+        max_voltage = x[:, 0]
+        max_current = x[:, 1]
+        component_type = x[:, 2]
+        component_id = x[:, 3]
+        return max_voltage, max_current, component_type, component_id
+
 
 
 def _quaternion_angle_diff(q1, q2):
@@ -359,6 +456,9 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
 
     return {"added": added, "removed": removed}, len(added) + len(removed)
 
+    
+
+
 
 # def batch_graph_diff(batch_a: Batch, batch_b: Batch):
 #     assert batch_a.batch_size == batch_b.batch_size
@@ -368,5 +468,3 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
 #         data_b = batch_b.get_example(i)
 #         results[i] = diff(data_a, data_b)[1]
 #     return results
-
-

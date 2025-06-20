@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from enum import IntEnum
 from repairs_components.geometry.base import Component
 import numpy as np
 
@@ -19,7 +20,8 @@ class ElectricalComponent(Component):
 
     @property
     @abstractmethod
-    def component_type(self):
+    def component_type(self) -> int:
+        "Type from ElectricalComponentsEnum using IntEnum.value"
         raise NotImplementedError
 
 
@@ -39,3 +41,13 @@ class ElectricalGate(ElectricalComponent):
         self, voltage: float, current: float, property
     ) -> tuple[float, float]:
         pass
+
+
+class ElectricalComponentsEnum(IntEnum):
+    CONNECTOR = 0
+    WIRE = 1
+    MOTOR = 2
+    BUTTON = 3
+    LED = 4
+    RESISTOR = 5
+    VOLTAGE_SOURCE = 6

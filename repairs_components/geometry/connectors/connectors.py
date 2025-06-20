@@ -1,9 +1,13 @@
+from enum import IntEnum
 import sys
 import os
 
 from build123d import Compound, Part, VectorLike, Color
 from genesis import gs
-from repairs_components.logic.electronics.component import ElectricalComponent
+from repairs_components.logic.electronics.component import (
+    ElectricalComponent,
+    ElectricalComponentsEnum,
+)
 import numpy as np
 import torch
 from abc import ABC, abstractmethod
@@ -11,15 +15,12 @@ from typing import Mapping
 
 
 class Connector(ElectricalComponent):
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        raise NotImplementedError
+    def propagate(self, voltage: float, current: float) -> tuple[float, float]:
+        return voltage, current  # pass through.
 
     @property
-    @abstractmethod
-    def connector_pos_relative_to_center(self) -> tuple[float, float, float]:
-        raise NotImplementedError
+    def component_type(self) -> int:
+        return ElectricalComponentsEnum.CONNECTOR.value
 
     def get_mjcf(
         self, connector_position: np.ndarray | None = None, density: float = 1000
@@ -165,19 +166,26 @@ def check_connections(
     return mask.nonzero(as_tuple=False)
 
 
-def get_socket_mesh_by_type(connector_type: str):
-    assert connector_type in [
-        "europlug",
-        "XT60",
-        "round_laptop_female",
-        "round_laptop_male",
-    ]
+class ConnectorsEnum(IntEnum):
+    "Enum to select connectors"
 
-    return gs.morphs.MJCF(
-        file="geom_exports/electronics/connectors/" + connector_type + ".xml"
-    )  # note: these mjcf files are simply meshes + connection site.
+    EUROPLUG = 0
+    XT60 = 1
+    ROUND_LAPTOP = 2
 
-    # site = np.array([0, 0, 0])
-    # return gs.morphs.Mesh(
-    #     file="geom_exports/electronics/connectors/" + connector_type + ".gltf"
-    # )
+    # Note: these kinds of enums are better moved away, but for an unscalable version this is fine.
+    @staticmethod
+    def by_id(id: int, name: str) -> Connector:
+        # import everything here because of circular dependencies
+        # from repairs_components.geometry.connectors.models.xt60 import XT60
+
+        from repairs_components.geometry.connectors.models.europlug import Europlug
+        enum_= ConnectorsEnum(id)
+        if enum_ == ConnectorsEnum.EUROPLUG:
+            return Europlug(name)
+        if enum_ == ConnectorsEnum.XT60:
+            raise NotImplementedError
+        elif enum_ == ConnectorsEnum.ROUND_LAPTOP:
+            raise NotImplementedError
+        else:
+            raise ValueError(f"Unknown connector id: {id}")

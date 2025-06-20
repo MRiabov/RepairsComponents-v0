@@ -3,7 +3,11 @@ from typing import Dict, List, overload
 
 import torch
 from torch_geometric.data import Data
-from repairs_components.logic.electronics.component import ElectricalComponent
+from repairs_components.geometry.connectors.connectors import ConnectorsEnum
+from repairs_components.logic.electronics.component import (
+    ElectricalComponent,
+    ElectricalComponentsEnum,
+)
 from repairs_components.training_utils.sim_state import SimState
 from repairs_components.logic.physical_state import _diff_edge_features
 
@@ -330,3 +334,42 @@ class ElectronicsState(SimState):
             [id_2, id_1], device=self.device
         )
         return connection.any() or inverse_connection.any()
+
+    @staticmethod
+    def rebuild_from_graph(graph: Data, indices: dict[str, int]) -> "ElectronicsState":
+        "Rebuild an ElectronicsState from a graph"
+        assert graph.num_nodes == len(indices), "Graph and indices do not match"
+        for component_id in range(graph.num_nodes):
+            reverse_indices = {v: k for k, v in indices.items()}
+            component_name = reverse_indices[component_id]
+            # TODO: `match` selection of electrical components.
+            max_voltage, max_current, component_type, component_id = (
+                self.decompose_graph_x(graph.x)
+            )
+            component = ElectricalComponentsEnum(component_type)
+            match component:
+                case ElectricalComponentsEnum.CONNECTOR:
+                    component = ConnectorsEnum(component_name)
+
+                # case ElectricalComponentsEnum.MOTOR:
+                #     component = Motor(component_name)
+                # case ElectricalComponentsEnum.BUTTON:
+                #     component = Button(component_name)
+                # case ElectricalComponentsEnum.LED:
+                #     component = LED(component_name)
+                # case ElectricalComponentsEnum.RESISTOR:
+                #     component = Resistor(component_name)
+                # case ElectricalComponentsEnum.VOLTAGE_SOURCE:
+                #     component = VoltageSource(component_name)
+                case _:
+                    raise NotImplementedError(
+                        f"Unknown component type: {component_type}"
+                    )
+
+    def decompose_graph_x(self, x: torch.Tensor):
+        "Decompose graph x into meaningful values"
+        max_voltage = x[:, 0]
+        max_current = x[:, 1]
+        component_type = x[:, 2]
+        component_id = x[:, 3]
+        return max_voltage, max_current, component_type, component_id
