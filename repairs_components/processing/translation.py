@@ -8,15 +8,20 @@ import torch
 
 from repairs_components.geometry.connectors.connectors import Connector
 from repairs_components.logic.electronics.component import ElectricalComponent
-import numpy as np
-from repairs_components.processing.voxel_export import PART_TYPE_COLORS
+from repairs_components.processing.textures import get_color_by_type, get_random_texture
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.geometry.fasteners import Fastener
 
 
+# TODO translation from offline to genesis scene.
+
+
 def translate_to_genesis_scene(
-    scene: gs.Scene, b123d_assembly: Compound, sim_state: RepairsSimState
+    scene: gs.Scene,
+    b123d_assembly: Compound,
+    sim_state: RepairsSimState,
+    random_textures: bool = False,
 ):
     assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
 
@@ -28,6 +33,12 @@ def translate_to_genesis_scene(
         assert label is not None and "@" in label, "Label must contain '@'"
         _, part_type = label.split("@", 1)
         part_type = part_type.lower()
+
+        if random_textures:
+            surface = get_random_texture(part_type)
+        else:
+            # get color by type
+            surface = gs.surfaces.Plastic(color=get_color_by_type(part_type))
         if part_type in (
             "connector",
             "solid",
@@ -56,16 +67,12 @@ def translate_to_genesis_scene(
                     tmp2.write(mjcf)
                     tmp2_path = tmp2.name
                 mesh = gs.morphs.MJCF(file=tmp2_path, name=label, links_to_keep=True)
-            new_entity = scene.add_entity(
-                mesh,
-                surface=gs.surfaces.Plastic(
-                    color=tuple(PART_TYPE_COLORS[part_type][:3])
-                ),
-            )
+
+            new_entity = scene.add_entity(mesh, surface=surface)
         elif part_type in ("button", "led", "switch"):
-            connector: ElectricalComponent = sim_state.electronics_state.components[
+            connector: ElectricalComponent = sim_state.electronics_state[0].components[
                 label
-            ]  # type: ignore
+            ]  # note: [0] because can use any env - they are equal.
             mjcf = connector.get_mjcf()
             with tempfile.NamedTemporaryFile(
                 suffix=label + ".xml", mode="w", encoding="utf-8", delete=False
@@ -73,7 +80,7 @@ def translate_to_genesis_scene(
                 tmp2.write(mjcf)
                 tmp2_path = tmp2.name
             mjcf_ent = gs.morphs.MJCF(file=tmp2_path, name=label)
-            new_entity = scene.add_entity(mjcf_ent)
+            new_entity = scene.add_entity(mjcf_ent, surface=surface)
         else:
             raise NotImplementedError(
                 f"Not implemented for translation part type: {part_type}"
