@@ -137,6 +137,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             batch_dim=scene_gen_count.item(),
             reward_history=RewardHistory(batch_dim=scene_gen_count),
             step_count=torch.zeros(scene_gen_count, dtype=torch.int),
+            task_ids=task_ids,
         )  # type: ignore # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
 

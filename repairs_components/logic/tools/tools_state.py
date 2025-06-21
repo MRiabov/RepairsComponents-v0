@@ -26,6 +26,8 @@ class ToolState(SimState):
         if current_tool_id == ToolsEnum.GRIPPER.value:
             return ToolState(current_tool=Gripper(), current_tool_id=current_tool_id)
         elif current_tool_id == ToolsEnum.SCREWDRIVER.value:
-            return ToolState(current_tool=Screwdriver(), current_tool_id=current_tool_id)
+            return ToolState(
+                current_tool=Screwdriver(), current_tool_id=current_tool_id
+            )
         else:
             raise ValueError(f"Invalid tool id: {current_tool_id}")

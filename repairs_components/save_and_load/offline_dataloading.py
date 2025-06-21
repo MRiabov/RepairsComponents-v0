@@ -21,7 +21,7 @@ from repairs_components.training_utils.sim_state_global import reconstruct_sim_s
 # Genesis scene (from RepairsEnvState, which is in turn reconstructed from graphs.)
 
 
-class OfflineDataset:
+class OfflineDataloader:
     """Offline dataset for loading pre-generated environment configurations."""
 
     # note: I know that technically this isn't the most efficient way to do it - better
@@ -48,8 +48,10 @@ class OfflineDataset:
         metadata_path = self.data_dir / "scenes_metadata.json"
         assert metadata_path.exists(), f"Metadata file not found at {metadata_path}"
 
-        self.loaded_pyg_batch_dict_mech = {}
-        self.loaded_pyg_batch_dict_elec = {}
+        self.loaded_pyg_batch_dict_mech_init = {}
+        self.loaded_pyg_batch_dict_elec_init = {}
+        self.loaded_pyg_batch_dict_mech_des = {}
+        self.loaded_pyg_batch_dict_elec_des = {}
 
         self.vox_init_dict = {}
         self.vox_des_dict = {}
@@ -62,10 +64,10 @@ class OfflineDataset:
         for scene_id in scene_ids:
             # get this scene metadata
             scene_metadata = self.metadata["scene_" + str(scene_id)]
-            scene_config = self.load_scene_config(scene_metadata)
+            init_scene_config = self.load_scene_config(scene_metadata)
             self.scene_configs.append(scene_config)
 
-    def get_processed_data(
+    def get_processed_offline_data(
         self, num_envs_per_scene: torch.Tensor
     ) -> List[ConcurrentSceneData]:
         """Get a list of batched scene configurations as ConcurrentSceneData objects.
@@ -99,7 +101,7 @@ class OfflineDataset:
             all_cfgs.append(merge_concurrent_scene_configs(cfgs_this_scene))
         return all_cfgs
 
-    def load_scene_config(self, scene_metadata: dict) -> Dict[str, Any]:
+    def load_scene_config(self, scene_metadata: dict) -> ConcurrentSceneData:
         """Load a single scene configuration from disk."""
         scene_id = scene_metadata["scene_id"]
 
@@ -112,36 +114,45 @@ class OfflineDataset:
         self.vox_des_dict[scene_id] = self._load_sparse_tensor(vox_des_path)
         # ^ memory calculation: 100k samples*max 15 items * 10 datapoints * float16 =36mil = 36mbytes
         # graphs
-        elec_graphs, mech_graphs = self._load_graphs(scene_id)
+        elec_graphs_init, mech_graphs_init, elec_graphs_des, mech_graphs_des = (
+            self._load_graphs(scene_id)
+        )
 
         # tool idx
-        tool_idx_path = self.data_dir / "tool_idx_" + str(scene_id) + ".pt"
-        tool_data = torch.load(tool_idx_path)
+        tool_idx_path_init = self.data_dir / "tool_idx_" + str(scene_id) + ".pt"
+        tool_idx_path_des = self.data_dir / "tool_idx_" + str(scene_id) + ".pt"
+        tool_data_init = torch.load(tool_idx_path_init)
+        tool_data_des = torch.load(tool_idx_path_des)
 
         # load RepairsEnvState
-        sim_state = reconstruct_sim_state(
-            elec_graphs,
-            mech_graphs,
+        init_sim_state = reconstruct_sim_state(
+            elec_graphs_init,
+            mech_graphs_init,
             scene_metadata["electronics_indices"],
             scene_metadata["mechanical_indices"],
-            tool_data,
+            tool_data_init,
         )
-
-        assert scene_metadata["batch_dim"] == self.vox_init_dict[scene_id].shape[0], (
-            f"Batch dim of vox_init and scene_data do not match. "
-            f"Expected {self.vox_init_dict[scene_id].shape[0]}, got {scene_metadata['batch_dim']}"
+        des_sim_state = reconstruct_sim_state(
+            elec_graphs_des,
+            mech_graphs_des,
+            scene_metadata["electronics_indices"],
+            scene_metadata["mechanical_indices"],
+            tool_data_des,
         )
-        assert scene_metadata["batch_dim"] == elec_graphs.num_graphs, (
-            f"Batch dim of elec_graphs and scene_data do not match. "
-            f"Expected {elec_graphs.num_graphs}, got {scene_metadata['batch_dim']}"
-        )
-        assert scene_metadata["batch_dim"] == mech_graphs.num_graphs, (
-            f"Batch dim of mech_graphs and scene_data do not match. "
-            f"Expected {mech_graphs.num_graphs}, got {scene_metadata['batch_dim']}"
-        )
-        assert scene_metadata["batch_dim"] == tool_data.shape[0], (
-            f"Batch dim of tool_data and scene_data do not match. "
-            f"Expected {tool_data.shape[0]}, got {scene_metadata['batch_dim']}"
+        sim_state = ConcurrentSceneData(
+            scene=None,
+            gs_entities=None,
+            cameras=None,
+            current_state=init_sim_state,
+            desired_state=des_sim_state,
+            vox_init=self.vox_init_dict[scene_id],
+            vox_des=self.vox_des_dict[scene_id],
+            initial_diffs=None,
+            initial_diff_counts=None,
+            scene_id=scene_id,
+            reward_history=None,
+            batch_dim=scene_metadata["batch_dim"],
+            step_count=torch.zeros(scene_metadata["batch_dim"], dtype=torch.int32),
         )
 
         return sim_state
@@ -176,42 +187,83 @@ class OfflineDataset:
     ) -> tuple[Batch, Batch]:
         """Load the graphs for a scene."""
         if (
-            scene_id not in self.loaded_pyg_batch_dict_mech
-            or scene_id not in self.loaded_pyg_batch_dict_elec
+            scene_id not in self.loaded_pyg_batch_dict_mech_init
+            or scene_id not in self.loaded_pyg_batch_dict_elec_init
         ):
-            mech_graph_path = (
+            # load initial and desired graphs: mech init, mech des, elec init, elec des
+            # note: not in a for loop, but it's OK.
+            mech_graph_init_path = (
                 self.data_dir / "graphs" / f"mechanical_graphs_{scene_id}.pt"
             )
-            elec_graph_path = (
+            mech_graph_des_path = (
+                self.data_dir / "graphs" / f"mechanical_graphs_{scene_id}.pt"
+            )
+            elec_graph_init_path = (
                 self.data_dir / "graphs" / f"electronic_graphs_{scene_id}.pt"
             )
-            assert mech_graph_path.exists(), (
-                f"Mechanical graph file not found at {mech_graph_path}"
+            elec_graph_des_path = (
+                self.data_dir / "graphs" / f"electronic_graphs_{scene_id}.pt"
             )
-            assert elec_graph_path.exists(), (
-                f"Electronic graph file not found at {elec_graph_path}"
+            assert mech_graph_init_path.exists(), (
+                f"Mechanical graph file not found at {mech_graph_init_path}"
+            )
+            assert elec_graph_init_path.exists(), (
+                f"Electronic graph file not found at {elec_graph_init_path}"
+            )
+            assert mech_graph_des_path.exists(), (
+                f"Mechanical graph file not found at {mech_graph_des_path}"
+            )
+            assert elec_graph_des_path.exists(), (
+                f"Electronic graph file not found at {elec_graph_des_path}"
             )
 
-            loaded_graphs_mech = Batch.from_data_list(torch.load(mech_graph_path))
-            loaded_graphs_elec = Batch.from_data_list(torch.load(elec_graph_path))
-
-            assert loaded_graphs_mech.num_graphs == loaded_graphs_elec.num_graphs, (
-                "Num graphs in mechanical and electronic batches do not match."
+            loaded_graphs_mech_init = Batch.from_data_list(
+                torch.load(mech_graph_init_path)
             )
-            assert loaded_graphs_mech[0].scene_id == scene_id, (
+            loaded_graphs_elec_init = Batch.from_data_list(
+                torch.load(elec_graph_init_path)
+            )
+            loaded_graphs_mech_des = Batch.from_data_list(
+                torch.load(mech_graph_des_path)
+            )
+            loaded_graphs_elec_des = Batch.from_data_list(
+                torch.load(elec_graph_des_path)
+            )
+
+            assert (
+                loaded_graphs_mech_init.num_graphs == loaded_graphs_elec_init.num_graphs
+            ), "Num graphs in mechanical and electronic batches do not match."
+            assert loaded_graphs_mech_init[0].scene_id == scene_id, (
                 f"The loaded (mechanical) dataset graph does not seem to belong to this scene. "
-                f"Expected {scene_id}, got {loaded_graphs_mech[0].scene_id}"
+                f"Expected {scene_id}, got {loaded_graphs_mech_init[0].scene_id}"
             )
-            assert loaded_graphs_elec[0].scene_id == scene_id, (
+            assert loaded_graphs_elec_init[0].scene_id == scene_id, (
                 f"The loaded (electronic) dataset graph does not seem to belong to this scene. "
-                f"Expected {scene_id}, got {loaded_graphs_elec[0].scene_id}"
+                f"Expected {scene_id}, got {loaded_graphs_elec_init[0].scene_id}"
             )
 
-            self.loaded_pyg_batch_dict_mech[scene_id] = loaded_graphs_mech
-            self.loaded_pyg_batch_dict_elec[scene_id] = loaded_graphs_elec
+            self.loaded_pyg_batch_dict_mech_init[scene_id] = loaded_graphs_mech_init
+            self.loaded_pyg_batch_dict_mech_des[scene_id] = loaded_graphs_mech_des
+            self.loaded_pyg_batch_dict_elec_init[scene_id] = loaded_graphs_elec_init
+            self.loaded_pyg_batch_dict_elec_des[scene_id] = loaded_graphs_elec_des
 
         if env_idx is not None:
-            loaded_graphs_mech = self.loaded_pyg_batch_dict_mech[scene_id][env_idx]
-            loaded_graphs_elec = self.loaded_pyg_batch_dict_elec[scene_id][env_idx]
+            loaded_graphs_mech_init = self.loaded_pyg_batch_dict_mech_init[scene_id][
+                env_idx
+            ]
+            loaded_graphs_elec_init = self.loaded_pyg_batch_dict_elec_init[scene_id][
+                env_idx
+            ]
+            loaded_graphs_mech_des = self.loaded_pyg_batch_dict_mech_des[scene_id][
+                env_idx
+            ]
+            loaded_graphs_elec_des = self.loaded_pyg_batch_dict_elec_des[scene_id][
+                env_idx
+            ]
 
-        return loaded_graphs_mech, loaded_graphs_elec
+        return (
+            loaded_graphs_mech_init,
+            loaded_graphs_elec_init,
+            loaded_graphs_mech_des,
+            loaded_graphs_elec_des,
+        )

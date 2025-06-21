@@ -115,7 +115,6 @@ class RepairsSimState(SimState):
         return electronics_indices, physical_indices
 
 
-
 def merge_global_states(state_list: list[RepairsSimState]):
     assert len(state_list) > 0, "State list can not be zero."
     repairs_sim_state = RepairsSimState(len(state_list))
@@ -168,13 +167,18 @@ def reconstruct_sim_state(
     mechanical_graphs: list[Data],
     electronics_indices: list[dict[str, int]],
     mechanical_indices: list[dict[str, int]],
-    tool_data: list[dict[str, int]],
-    fluid_data_placeholder: list[dict[str, int]]|None=None,
-    
+    tool_data: torch.Tensor,  # int tensor of tool ids
+    fluid_data_placeholder: list[dict[str, int]] | None = None,
 ) -> RepairsSimState:
-    """Load a single simulation state from graphs and indices."""
+    """Load a single simulation state from graphs and indices (i.e. from the offline dataset)"""
     from repairs_components.training_utils.sim_state_global import RepairsSimState
-    assert fluid_data_placeholder is None, NotImplementedError("Fluid data reconstruction is not implemented.")
+
+    assert fluid_data_placeholder is None, NotImplementedError(
+        "Fluid data reconstruction is not implemented."
+    )
+    assert len(electronics_graphs) == len(mechanical_graphs), (
+        "Electronics and mechanical graphs must have the same length."
+    )
 
     batch_dim = len(electronics_graphs)
     repairs_sim_state = RepairsSimState(batch_dim)
@@ -187,8 +191,7 @@ def reconstruct_sim_state(
         for graph, indices in zip(mechanical_graphs, mechanical_indices)
     ]
     repairs_sim_state.tool_state = [
-        ToolState.rebuild_from_graph(graph, indices)
-        for graph, indices in zip(tool_graphs, tool_indices)
+        ToolState.rebuild_from_saved(indices) for indices in tool_data
     ]
 
     return repairs_sim_state

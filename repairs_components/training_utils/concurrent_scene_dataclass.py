@@ -37,6 +37,8 @@ class ConcurrentSceneData:
     Primarily for sanity checks."""
     step_count: torch.IntTensor
     "Step count in every scene. I don't think this should be diffed."
+    task_ids: torch.IntTensor
+    "Task ids in for every scene."
 
     # debug
     def __post_init__(self):
@@ -59,6 +61,9 @@ class ConcurrentSceneData:
         )
         assert self.reward_history.batch_dim == self.batch_dim, (
             f"reward_history must have the same batch dimension as batch_dim, but got {self.reward_history.batch_dim} and {self.batch_dim}"
+        )
+        assert self.task_ids.shape[0] == self.batch_dim, (
+            f"task_ids must have the same batch dimension as batch_dim, but got {self.task_ids.shape[0]} and {self.batch_dim}"
         )
         if self.step_count.ndim == 0:
             self.step_count = torch.zeros(self.batch_dim, dtype=torch.int)
@@ -126,6 +131,7 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         batch_dim=new_batch_dim,
         reward_history=reward_history,
         step_count=torch.zeros(new_batch_dim, dtype=torch.int),
+        task_ids=torch.cat([data.task_ids for data in scene_configs], dim=0),
     )
     return new_scene_config
 
@@ -183,6 +189,7 @@ def merge_scene_configs_at_idx(
                 new_scene_config.reward_history, old_idx
             ),
             step_count=old_scene_config.step_count.clone(),
+            task_ids=old_scene_config.task_ids.clone(),
         )
         # Update vox_init and vox_des for reset states
         merged_scene_config.vox_init = sparse_arr_put(
@@ -208,7 +215,9 @@ def merge_scene_configs_at_idx(
         merged_scene_config.step_count[old_idx] = new_scene_config.step_count.to(
             old_scene_config.step_count.device
         )
-
+        merged_scene_config.task_ids[old_idx] = new_scene_config.task_ids.to(
+            old_scene_config.task_ids.device
+        )
     return merged_scene_config
 
 
@@ -265,7 +274,8 @@ def split_scene_config(scene_config: ConcurrentSceneData):
                 scene_id=scene_config.scene_id,
                 batch_dim=1,
                 reward_history=RewardHistory(batch_dim=1),
-                step_count=scene_config.step_count[i].item(),
+                step_count=scene_config.step_count[i],
+                task_ids=scene_config.task_ids[i : i + 1],
             )
         )
     return cfg_list

@@ -26,17 +26,15 @@ from repairs_components.training_utils.failure_modes import out_of_bounds
 from repairs_components.training_utils.motion_planning import (
     execute_straight_line_trajectory,
 )
-from repairs_components.training_utils.online_dataloader import (
-    OnlineRepairsEnvDataLoader,
+from repairs_components.save_and_load.multienv_dataloader import (
+    RepairsEnvDataLoader,
 )
-from repairs_components.training_utils.offline_dataloader import (
-    OfflineDataset,
-)
+
 from repairs_components.training_utils.progressive_reward_calc import (
     RewardHistory,
     calculate_done,
 )
-from repairs_components.training_utils.save import optional_save
+from repairs_components.save_and_load.save import optional_save
 from repairs_sim_step import step_repairs
 
 
@@ -167,15 +165,25 @@ class RepairsEnv(gym.Env):
                     reward_history=RewardHistory(self.per_scene_batch_dim),
                     batch_dim=self.per_scene_batch_dim,
                     step_count=torch.zeros(self.per_scene_batch_dim, dtype=torch.int),
+                    task_ids=partial_env_configs.task_ids,
                 )
             )
         # create the dataloader to update scenes.
-        if not use_offline_dataset:
-            self.env_dataloader = OnlineRepairsEnvDataLoader(
-                scenes=self.scenes,
+        if use_offline_dataset:
+            assert "offline_dataloader_settings" in env_cfg, (
+                "Offline dataloader settings not found in env_cfg."
+            )
+            self.env_dataloader = RepairsEnvDataLoader(
+                online=False,
+                offline_data_dir=env_cfg["offline_dataloader_settings"]["data_dir"],
+                scene_ids=env_cfg["offline_dataloader_settings"]["scene_ids"],
+            )
+        # Set default joint positions from config
+        else:
+            self.env_dataloader = RepairsEnvDataLoader(
+                online=True,
                 env_setups=env_setups,
-                tasks=tasks,
-                batch_dim=self.ml_batch_dim,
+                tasks_to_generate=tasks,
                 prefetch_memory_size=prefetch_memory_size,
             )
             print("before populate_async")
@@ -187,15 +195,7 @@ class RepairsEnv(gym.Env):
             print(
                 f"after populate_async. Generation of {init_generate_per_scene.sum()} configs took {time.time() - start_time} seconds."
             )
-        # Set default joint positions from config
-        else:
-            assert "offline_dataloader_settings" in env_cfg, (
-                "Offline dataloader settings not found in env_cfg."
-            )
-            self.env_dataloader = OfflineDataset(
-                data_dir=env_cfg["offline_dataloader_settings"]["data_dir"],
-                scene_ids=env_cfg["offline_dataloader_settings"]["scene_ids"],
-            )
+            
 
         self.default_dof_pos = torch.tensor(
             [env_cfg["default_joint_angles"][name] for name in env_cfg["joint_names"]],

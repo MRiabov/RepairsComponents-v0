@@ -10,6 +10,7 @@ import torch
 
 from repairs_components.processing.scene_creation_funnel import create_env_configs
 from repairs_components.processing.tasks import Task
+from repairs_components.save_and_load.offline_dataloading import OfflineDataloader
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     merge_concurrent_scene_configs,
@@ -199,46 +200,82 @@ class MultiEnvDataLoader:
                 q.put(it)
 
 
-class OnlineRepairsEnvDataLoader(MultiEnvDataLoader[ConcurrentSceneData]):
+class RepairsEnvDataLoader(MultiEnvDataLoader):
     def __init__(
         self,
-        scenes: List[gs.Scene],
-        env_setups: List[EnvSetup],
-        tasks: List[Task],
-        batch_dim: int = 128,
+        online: bool,
+        *,
+        # online
+        tasks_to_generate: List[Task] | None = None,
+        env_setups: List[EnvSetup] | None = None,
         prefetch_memory_size=256,
+        # offline
+        env_setup_ids: List[int] | None = None,
+        scene_ids: List[int] | None = None,
+        offline_data_dir: str | Path | None = "/workspace/data",
     ):
         """
         Repairs environment dataloader that prefetches scene data.
 
         Args:
-            scenes: List of scene templates
-            env_setups: List of environment setups
-            tasks: List of tasks
-            batch_dim: Batch dimension size
-            prefetch_memory_size: How many batches to keep in memory
+            online - whether to load online or offline data.
+            env_setup_ids: ONLINE and OFFLINE: List of environment setup ids
+            env_setups: ONLINE: List of environment setups to generate from
+            scene_ids: OFFLINE: List of scene ids
+            tasks_to_generate: ONLINE: List of tasks to generate
+            prefetch_memory_size: ONLINE: How many batches to keep in memory (during offline they are all held in memory)
         """
-        self.scenes = scenes
-        self.env_setups = env_setups
-        self.tasks = tasks
-        self.batch_dim = batch_dim
-
-        assert len(scenes) == len(env_setups), (
-            "Count of scenes and env_setups must match."
-        )
+        self.online = online
+        self.env_setup_ids = env_setup_ids
+        self.tasks_to_generate = tasks_to_generate
+        self.offline_dataloader = None
 
         # Create preprocessing function that generates or loads batches for scenes
-        def scene_preprocessing_fn(
+        def online_preprocessing_fn(
             num_configs_to_generate_per_scene: torch.Tensor,
-            _state_data: Any | None = None,
         ) -> List[List[ConcurrentSceneData]]:
             return self._generate_scene_batches(num_configs_to_generate_per_scene)
 
-        super().__init__(
-            num_environments=len(scenes),
-            preprocessing_fn=scene_preprocessing_fn,
-            prefetch_memory_size=prefetch_memory_size,
-        )
+        def get_offline_data_fn(
+            num_configs_to_generate_per_scene: torch.Tensor,
+        ) -> List[List[ConcurrentSceneData]]:
+            return self._load_offline_data(num_configs_to_generate_per_scene)
+
+        if online:
+            assert env_setups is not None, (
+                "env_setups must be provided for online dataloader"
+            )
+            assert tasks_to_generate is not None, (
+                "tasks_to_generate must be provided for online dataloader"
+            )
+            self.env_setups = env_setups
+            self.tasks = tasks_to_generate
+            super().__init__(
+                num_environments=len(env_setups),
+                preprocessing_fn=online_preprocessing_fn,
+                prefetch_memory_size=prefetch_memory_size,
+            )
+        else:  # offline
+            assert env_setup_ids is not None, (
+                "env_setup_ids must be provided for offline dataloader"
+            )
+            assert scene_ids is not None, (
+                "scene_ids must be provided for offline dataloader"
+            )
+            assert offline_data_dir is not None, (
+                "data_dir must be provided for offline dataloader"
+            )
+            # create a cache storage buffer/dataclass
+            self.offline_dataloader = OfflineDataloader(
+                offline_data_dir,
+                env_setup_ids,
+            )
+            super().__init__(
+                num_environments=len(env_setup_ids),
+                preprocessing_fn=get_offline_data_fn,
+                prefetch_memory_size=prefetch_memory_size,
+            )
+            # TODO: here - load offline data. Also rename the module back to MultienvDataLoader
 
     def _generate_scene_batches(
         self, num_configs_to_generate_per_scene: torch.Tensor
@@ -259,7 +296,7 @@ class OnlineRepairsEnvDataLoader(MultiEnvDataLoader[ConcurrentSceneData]):
         )
         # Generate one "chunk" of data for this scene # even though I don't need to generate a chunk.
 
-        scene_configs_per_scene = create_env_configs(
+        scene_configs_per_scene, _ = create_env_configs(
             env_setups=self.env_setups,
             tasks=self.tasks,
             num_configs_to_generate_per_scene=num_configs_to_generate_per_scene,
@@ -269,6 +306,24 @@ class OnlineRepairsEnvDataLoader(MultiEnvDataLoader[ConcurrentSceneData]):
         # Split each batched scene config into individual items (batch dim =1)
         for scene_idx, scene_cfg in enumerate(scene_configs_per_scene):
             assert scene_cfg.batch_dim == num_configs_to_generate_per_scene[scene_idx]
+            cfg_list = split_scene_config(scene_cfg)
+            batches.append(cfg_list)
+
+        return batches
+
+    def _load_offline_data(self, num_envs_per_scene: torch.Tensor):
+        """Load and process batches of individual configs for a specific scene."""
+        assert self.offline_dataloader is not None, (
+            "Offline dataloader not initialized."
+        )
+        scene_configs_per_scene = self.offline_dataloader.get_processed_offline_data(
+            num_envs_per_scene=num_envs_per_scene,
+        )
+
+        batches = []
+        # Split each batched scene config into individual items (batch dim =1)
+        for scene_idx, scene_cfg in enumerate(scene_configs_per_scene):
+            assert scene_cfg.batch_dim == num_envs_per_scene[scene_idx]
             cfg_list = split_scene_config(scene_cfg)
             batches.append(cfg_list)
 

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from build123d import Compound, Location, Part, Pos
 import numpy as np
+from enum import IntEnum
 
 
 class Task(ABC):
@@ -378,3 +379,15 @@ class InsertTask(Task):
         return AssembleTask().perturb_desired_state(
             compound, env_size
         )  # simply unchanged.
+
+
+class TaskTypes(IntEnum):
+    "Enum necessary for persistence"
+
+    # TODO: can be used at some point to generate more of certain type of tasks. Now it's equally random.
+    # it would probably be done by user since it's a single torch.random.(...) function.
+
+    ASSEMBLE = 0
+    DISASSEMBLE = 1
+    REPLACE = 2
+    INSERT = 3
