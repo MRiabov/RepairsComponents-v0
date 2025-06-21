@@ -180,7 +180,8 @@ class ConnectorsEnum(IntEnum):
         # from repairs_components.geometry.connectors.models.xt60 import XT60
 
         from repairs_components.geometry.connectors.models.europlug import Europlug
-        enum_= ConnectorsEnum(id)
+
+        enum_ = ConnectorsEnum(id)
         if enum_ == ConnectorsEnum.EUROPLUG:
             return Europlug(name)
         if enum_ == ConnectorsEnum.XT60:

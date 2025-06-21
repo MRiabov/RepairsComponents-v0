@@ -33,17 +33,17 @@ class PhysicalState:
 
     # Graph storing part nodes and fastener edges
     graph: Data = field(default_factory=Data)
-    """The graph storing part nodes and fastener edges."""
-    
-    indices: dict[str, int] = field(default_factory=dict)
+    """The graph storing part nodes and fastener edges.
+    *Note*: don't use this graph for ML purposes. Use `export_graph` instead."""
+
+    body_indices: dict[str, int] = field(default_factory=dict)
     reverse_indices: dict[int, str] = field(default_factory=dict)
     fastener_ids: dict[int, str] = field(default_factory=dict)
 
     # Fastener metadata (shared across batch)
-    fastener_prototype: dict[str, Fastener] = field(default_factory=dict)
+    fastener: dict[str, Fastener] = field(default_factory=dict)
 
-
-    #Free fasteners - not attached to two parts, but to one or none
+    # Free fasteners - not attached to two parts, but to one or none
     free_fasteners_loc = torch.zeros((0, 3), dtype=torch.float32, device=device)
     free_fasteners_quat = torch.zeros((0, 4), dtype=torch.float32, device=device)
     free_fasteners_attached_to = torch.zeros((0,), dtype=torch.int8, device=device)
@@ -55,11 +55,10 @@ class PhysicalState:
         indices: dict[str, int] | None = None,
         fasteners: dict[str, Fastener] | None = None,
         fastener_id_to_name: dict[int, str] | None = None,
-        free_fasteners_loc: torch.Tensor | None = None,
-        free_fasteners_quat: torch.Tensor | None = None,
-        free_fasteners_attached_to: torch.Tensor | None = None,
+        # free_fasteners_loc: torch.Tensor | None = None,
+        # free_fasteners_quat: torch.Tensor | None = None,
     ):
-        #for empty creation (which is the case in online loading), do not require a graph
+        # for empty creation (which is the case in online loading), do not require a graph
         if graph is None:
             graph = Data()
             # Initialize graph attributes
@@ -75,43 +74,62 @@ class PhysicalState:
             self.graph.position = torch.empty(
                 (0, 3), dtype=torch.float32, device=self.device
             )  # note: torch_geomeric conventionally uses `pos` for 2d or 3d positions. You could too.
-            self.graph.quat = torch.empty((0, 4), dtype=torch.float32, device=self.device)
-
+            self.graph.quat = torch.empty(
+                (0, 4), dtype=torch.float32, device=self.device
+            )
+            self.graph.count_fasteners_held = torch.empty(
+                (0,), dtype=torch.int8, device=self.device
+            )
             if indices is None:
                 indices = {}
-                
+
         else:
             assert indices is not None, "Indices must be provided if graph is not None"
-            assert fastener_id_to_name is not None, "Fastener names must be provided if graph is not None"
+            assert fastener_id_to_name is not None, (
+                "Fastener names must be provided if graph is not None"
+            )
             self.graph = graph
-            self.indices = indices
+            self.body_indices = indices
             self.reverse_indices = {v: k for k, v in indices.items()}
             # TODO logic for fastener rebuild...
             for edge_index, edge_attr in zip(graph.edge_index.t(), graph.edge_attr):
                 fastener_id = edge_attr[0]  # assume it is the first element
-                fastener_size = edge_attr[1] 
+                fastener_size = edge_attr[1]
                 fastener_name = fastener_id_to_name[fastener_id]
                 connected_to_1 = self.reverse_indices[edge_index[0].item()]
                 connected_to_2 = self.reverse_indices[edge_index[1].item()]
-                fastener = Fastener(constraint_a_active fastener_name, fastener_size)
-                self.fastener_prototype[fastener_name] = fastener
+                fastener = Fastener(constraint_a_active, fastener_name, fastener_size)
+                self.fastener[fastener_name] = fastener
 
-                #next: there is something that needs to be figured out with data storage and reconstruction.
+                # next: there is something that needs to be figured out with data storage and reconstruction.
                 # So 1. I do save STL/gltf files,
-                # but during offline I don't want to scan meshes because that's costly. 
+                # but during offline I don't want to scan meshes because that's costly.
                 # I only want to scan physical and electrical states, and load meshes to genesis only once. build123d should not be used at all.
                 # Consequently, I need to store meshes, and their positions for genesis to read.
                 # this is stored in the graph, however fasteners are stored in the graph too.
                 # so I need an extra container for free fasteners.
-                #however what's critical is to ensure no disparity between offline and online loads. 
-                # It must be fully deterministic, which it currently is not due to fastener connections not specifying A or B.  
+                # however what's critical is to ensure no disparity between offline and online loads.
+                # It must be fully deterministic, which it currently is not due to fastener connections not specifying A or B.
                 # wait, do I not register free fasteners in the graph at all?
-            
 
-            
-            
+    def export_graph(self):
+        """Export the graph to a torch_geometric Data object usable by ML."""
+        Data(  # expected len of x - 8.
+            x=torch.cat(
+                [
+                    self.graph.position,
+                    self.graph.quat,
+                    self.graph.count_fasteners_held.float(),
+                ],
+                dim=1,
+            ).bfloat16(),
+            edge_index=self.graph.edge_index,
+            edge_attr=self.graph.edge_attr,  # e.g. fastener size.
+            num_nodes=len(self.body_indices),
+        )
+
     def register_body(self, name: str, position: tuple, rotation: tuple):
-        assert name not in self.indices, f"Body {name} already registered"
+        assert name not in self.body_indices, f"Body {name} already registered"
         # assert position.shape == (3,) and rotation.shape == (4,) # was a tensor.
         assert len(position) == 3 and len(rotation) == 3, (
             f"Position must be 3D vector, got {position}"
@@ -121,8 +139,8 @@ class PhysicalState:
 
         rotation = R.from_euler("xyz", rotation).as_quat()
 
-        idx = len(self.indices)
-        self.indices[name] = idx
+        idx = len(self.body_indices)
+        self.body_indices[name] = idx
         self.reverse_indices[idx] = name
 
         self.graph.position = torch.cat(
@@ -136,16 +154,37 @@ class PhysicalState:
             [self.graph.quat, torch.tensor(rotation, device=self.device).unsqueeze(0)],
             dim=0,
         )
+        self.graph.count_fasteners_held = torch.cat(
+            [
+                self.graph.count_fasteners_held,
+                torch.zeros(1, dtype=torch.int8, device=self.device),
+            ],
+            dim=0,
+        )
         # set num_nodes manually because otherwise there is no way for PyG to know the number of nodes.
-        self.graph.num_nodes = len(self.indices)
+        self.graph.num_nodes = len(self.body_indices)
 
     def register_fastener(self, name: str, fastener: Fastener):
-        self.fastener_prototype[name] = fastener
-        # FIXME should automatically connect if there are part labels
+        assert name not in self.body_indices, f"Fastener {name} already registered"
+        assert fastener.initial_body_a is not None, (
+            "Fastener must have at least one body"
+        )
+        assert fastener.initial_body_a in self.body_indices, (
+            f"Body {fastener.initial_body_a} marked as connected to fastener {name} not registered"
+        )
+        self.fastener[name] = fastener
+        if fastener.initial_body_a is not None and fastener.initial_body_b is not None:
+            self.connect(name, fastener.initial_body_a, fastener.initial_body_b)
+        elif fastener.initial_body_a is not None:
+            self.graph.count_fasteners_held[
+                self.body_indices[fastener.initial_body_a]
+            ] += 1
+        else:
+            raise ValueError("Fastener must have at least one body")
 
     def connect(self, fastener_name: str, body_a: str, body_b: str):
-        src = self.indices[body_a]
-        dst = self.indices[body_b]
+        src = self.body_indices[body_a]
+        dst = self.body_indices[body_b]
 
         # Undirected: add both directions
         new_edges = torch.tensor(
@@ -153,7 +192,7 @@ class PhysicalState:
         )
 
         # Construct edge features from prototype fastener
-        base_attr = self.fastener_prototype[fastener_name]
+        base_attr = self.fastener[fastener_name]
         attr_vec = torch.cat([v.view(-1) for v in base_attr.values()])
         edge_attr = attr_vec.repeat(2, 1).to(self.device)
 
@@ -161,8 +200,8 @@ class PhysicalState:
         self.graph.edge_attr = torch.cat([self.graph.edge_attr, edge_attr], dim=0)
 
     def disconnect(self, fastener_name: str, disconnected_body: str):
-        fastener_id = self.indices[fastener_name]
-        body_id = self.indices[disconnected_body]
+        fastener_id = self.body_indices[fastener_name]
+        body_id = self.body_indices[disconnected_body]
 
         # Find edge indices to remove (brute-force based on node match only)
         edge_index = self.graph.edge_index
@@ -307,7 +346,7 @@ class PhysicalState:
     def diff_to_str(self, diff_graph: Data) -> str:
         """Convert the graph diff to a human-readable string.
 
-        Args:
+        Args:indices
             diff_graph: The graph diff returned by diff()
 
         Returns:
@@ -369,45 +408,30 @@ class PhysicalState:
         # ^batch of environments would be cool, but batch of parts would barely ever happen.
         return (changed == part_id).any()
 
-        @staticmethod
+    @staticmethod
     def rebuild_from_graph(graph: Data, indices: dict[str, int]) -> "PhysicalState":
         "Rebuild an ElectronicsState from a graph"
         assert graph.num_nodes == len(indices), "Graph and indices do not match"
-        for component_id in range(graph.num_nodes):
-            reverse_indices = {v: k for k, v in indices.items()}
-            component_name = reverse_indices[component_id]
-            # TODO: `match` selection of electrical components.
-            max_voltage, max_current, component_type, component_id = (
-                self.decompose_graph_x(graph.x)
-            )
-            component = ElectricalComponentsEnum(component_type)
-            match component:
-                case ElectricalComponentsEnum.CONNECTOR:
-                    component = ConnectorsEnum(component_name)
+        new_graph = Data()
+        reverse_indices = {v: k for k, v in indices.items()}
+        position, quat, count_fasteners_held = self._decompose_graph_x(graph.x)
+        new_graph.position = torch.cat([new_graph.position, position], dim=0)
+        new_graph.quat = torch.cat([new_graph.quat, quat], dim=0)
+        new_graph.count_fasteners_held = torch.cat(
+            [new_graph.count_fasteners_held, count_fasteners_held], dim=0
+        )
+        # note: fasteners are not reconstructed because hopefully, they should not be necessary after offline reconstruction.
+        new_state = PhysicalState(
+            graph=new_graph, indices=indices, reverse_indices=reverse_indices
+        )
+        return new_state
 
-                # case ElectricalComponentsEnum.MOTOR:
-                #     component = Motor(component_name)
-                # case ElectricalComponentsEnum.BUTTON:
-                #     component = Button(component_name)
-                # case ElectricalComponentsEnum.LED:
-                #     component = LED(component_name)
-                # case ElectricalComponentsEnum.RESISTOR:
-                #     component = Resistor(component_name)
-                # case ElectricalComponentsEnum.VOLTAGE_SOURCE:
-                #     component = VoltageSource(component_name)
-                case _:
-                    raise NotImplementedError(
-                        f"Unknown component type: {component_type}"
-                    )
-
-    def decompose_graph_x(self, x: torch.Tensor):
+    def _decompose_graph_x(self, x: torch.Tensor):
         "Decompose graph x into meaningful values"
-        max_voltage = x[:, 0]
-        max_current = x[:, 1]
-        component_type = x[:, 2]
-        component_id = x[:, 3]
-        return max_voltage, max_current, component_type, component_id
-
+        position = x[:, :3]
+        quat = x[:, 3:7]
+        count_fasteners_held = x[:, 7]
+        return position, quat, count_fasteners_held
 
 
 def _quaternion_angle_diff(q1, q2):
@@ -455,9 +479,6 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
     removed = list(a_set - b_set)
 
     return {"added": added, "removed": removed}, len(added) + len(removed)
-
-    
-
 
 
 # def batch_graph_diff(batch_a: Batch, batch_b: Batch):

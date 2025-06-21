@@ -280,7 +280,7 @@ def move_entities_to_pos(
     # set positions for each entity in batch
     for gs_entity_name, entity_idx in starting_sim_state.physical_state[
         env_idx[0]
-    ].indices.items():
+    ].body_indices.items():
         entity = gs_entities[gs_entity_name]
         entity_pos = all_positions[env_idx, entity_idx]
         # No need to move because already centered

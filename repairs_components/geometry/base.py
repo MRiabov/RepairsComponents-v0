@@ -6,14 +6,7 @@ for model definition.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, TYPE_CHECKING
-
-import numpy as np
-import genesis
 from build123d import Part, Compound
-
-if TYPE_CHECKING:
-    from genesis.sim import Model, Data
 
 
 class Component(ABC):

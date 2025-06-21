@@ -111,8 +111,9 @@ class RepairsSimState(SimState):
         state_dict.pop("electronics_state")
 
         electronics_indices = self.electronics_state[0].indices
-        physical_indices = self.physical_state[0].indices
+        physical_indices = self.physical_state[0].body_indices
         return electronics_indices, physical_indices
+
 
 
 def merge_global_states(state_list: list[RepairsSimState]):
@@ -163,14 +164,31 @@ def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
 
 
 def reconstruct_sim_state(
-    electronics_graphs:list[Data], mechanical_graphs:list[Data], electronics_indices:list[dict[str, int]], mechanical_indices:list[dict[str, int]]
+    electronics_graphs: list[Data],
+    mechanical_graphs: list[Data],
+    electronics_indices: list[dict[str, int]],
+    mechanical_indices: list[dict[str, int]],
+    tool_data: list[dict[str, int]],
+    fluid_data_placeholder: list[dict[str, int]]|None=None,
+    
 ) -> RepairsSimState:
     """Load a single simulation state from graphs and indices."""
     from repairs_components.training_utils.sim_state_global import RepairsSimState
+    assert fluid_data_placeholder is None, NotImplementedError("Fluid data reconstruction is not implemented.")
+
     batch_dim = len(electronics_graphs)
     repairs_sim_state = RepairsSimState(batch_dim)
-    repairs_sim_state.electronics_state = [ElectronicsState.rebuild_from_graph(graph, indices) for graph, indices in zip(electronics_graph, electronics_indices)]
-    repairs_sim_state.physical_state = [PhysicalState.rebuild_from_graph(graph, indices) for graph, indices in zip(mechanical_graph, mechanical_indices)]
-    
+    repairs_sim_state.electronics_state = [
+        ElectronicsState.rebuild_from_graph(graph, indices)
+        for graph, indices in zip(electronics_graphs, electronics_indices)
+    ]
+    repairs_sim_state.physical_state = [
+        PhysicalState.rebuild_from_graph(graph, indices)
+        for graph, indices in zip(mechanical_graphs, mechanical_indices)
+    ]
+    repairs_sim_state.tool_state = [
+        ToolState.rebuild_from_graph(graph, indices)
+        for graph, indices in zip(tool_graphs, tool_indices)
+    ]
 
-    return RepairsSimState()
+    return repairs_sim_state

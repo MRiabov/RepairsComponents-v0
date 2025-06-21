@@ -17,12 +17,12 @@ from genesis.engine.entities import RigidEntity
 class Fastener(Component):
     def __init__(
         self,
-        name: str,  # just name them by int ids. except special cases.
         constraint_a_active: bool,
         constraint_b_active: bool,
         initial_body_a: str
         | None = None,  # how will it be constrained in case of hole?
         initial_body_b: str | None = None,
+        name: str = "",  # just name them by int ids. except special cases.
         thread_pitch: float = 0.5,
         length: float = 10.0,
         diameter: float = 3.0,
@@ -213,6 +213,28 @@ def deactivate_part_connection(
     rigid_solver.delete_weld_constraint(
         fastener_head_joint, other_body_hole_link
     )  # works is genesis's examples.
+
+
+class FastenerHolder(Component):
+    fastener_sizes_held: torch.Tensor  # float 1D tensor of fastener sizes held
+
+    # so, should each body hold fasteners? heterogenous graph?
+    # no, simply create a "count_loose_fasteners_inside" as an integer and node feature and fasteners
+    # will be constrained.
+
+    # and the fastener holder is a specialty component for holding loose fasteners.
+
+    # so if fasteners are loose, how do we reconstruct them? Probably SAVE the fasteners metadata to bodies graph.
+    # however it is not used in `x`.
+
+    def __init__(self, name: str, fastener_sizes_held: torch.Tensor):
+        super().__init__(name)
+        self.fastener_sizes_held = fastener_sizes_held
+        self.count_fasteners_held = torch.nonzero(fastener_sizes_held).shape[0]
+
+    def bd_geometry():
+        # TODO: copy bd_geometry from tooling stand... tooling stand kind of is the fastener holder.
+        raise NotImplementedError
 
 
 # NOTE: see https://github.com/Genesis-Embodied-AI/Genesis/blob/main/examples/rigid/suction_cup.py for rigid constraint added in time

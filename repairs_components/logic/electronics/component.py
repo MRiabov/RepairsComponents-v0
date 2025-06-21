@@ -45,7 +45,12 @@ class ElectricalGate(ElectricalComponent):
 
 class ElectricalComponentsEnum(IntEnum):
     CONNECTOR = 0
+    # Note: After some thinking, I believe each wire with two connector ends should be its own component.
+    # So connector connects to wire, and wire connects to other connector. And the connectors connect.
+    # This is because encoding wire as a single component would create difficulties in modelling loose edges.
+
     WIRE = 1
+    # And the wire has a tensor of points along which it is constrained.
     MOTOR = 2
     BUTTON = 3
     LED = 4

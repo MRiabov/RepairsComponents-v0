@@ -10,9 +10,7 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     merge_concurrent_scene_configs,
 )
-from repairs_components.training_utils.sim_state_global import (
-    RepairsSimState,
-)
+from repairs_components.training_utils.sim_state_global import reconstruct_sim_state
 
 # During the loading of the data we load:
 # 1. Graphs
@@ -104,6 +102,8 @@ class OfflineDataset:
     def load_scene_config(self, scene_metadata: dict) -> Dict[str, Any]:
         """Load a single scene configuration from disk."""
         scene_id = scene_metadata["scene_id"]
+
+        # voxels
         vox_init_path = self.data_dir / "voxels" / f"vox_init_{scene_id}.npz"
         vox_des_path = self.data_dir / "voxels" / f"vox_des_{scene_id}.npz"
         # Load sparse tensors # note: small enough to fit into memory, yet. (36mb estimated)
@@ -111,17 +111,40 @@ class OfflineDataset:
         self.vox_init_dict[scene_id] = self._load_sparse_tensor(vox_init_path)
         self.vox_des_dict[scene_id] = self._load_sparse_tensor(vox_des_path)
         # ^ memory calculation: 100k samples*max 15 items * 10 datapoints * float16 =36mil = 36mbytes
-        scene_data_path = self.data_dir / ("scene_data_" + str(scene_id))
+        # graphs
+        elec_graphs, mech_graphs = self._load_graphs(scene_id)
+
+        # tool idx
+        tool_idx_path = self.data_dir / "tool_idx_" + str(scene_id) + ".pt"
+        tool_data = torch.load(tool_idx_path)
 
         # load RepairsEnvState
-        RepairsEnvState()
-
-        assert scene_data["batch_dim"] == self.vox_init_dict[scene_id].shape[0], (
-            f"Batch dim of vox_init and scene_data do not match. "
-            f"Expected {self.vox_init_dict[scene_id].shape[0]}, got {scene_data['batch_dim']}"
+        sim_state = reconstruct_sim_state(
+            elec_graphs,
+            mech_graphs,
+            scene_metadata["electronics_indices"],
+            scene_metadata["mechanical_indices"],
+            tool_data,
         )
 
-        return scene_data
+        assert scene_metadata["batch_dim"] == self.vox_init_dict[scene_id].shape[0], (
+            f"Batch dim of vox_init and scene_data do not match. "
+            f"Expected {self.vox_init_dict[scene_id].shape[0]}, got {scene_metadata['batch_dim']}"
+        )
+        assert scene_metadata["batch_dim"] == elec_graphs.num_graphs, (
+            f"Batch dim of elec_graphs and scene_data do not match. "
+            f"Expected {elec_graphs.num_graphs}, got {scene_metadata['batch_dim']}"
+        )
+        assert scene_metadata["batch_dim"] == mech_graphs.num_graphs, (
+            f"Batch dim of mech_graphs and scene_data do not match. "
+            f"Expected {mech_graphs.num_graphs}, got {scene_metadata['batch_dim']}"
+        )
+        assert scene_metadata["batch_dim"] == tool_data.shape[0], (
+            f"Batch dim of tool_data and scene_data do not match. "
+            f"Expected {tool_data.shape[0]}, got {scene_metadata['batch_dim']}"
+        )
+
+        return sim_state
 
     def _load_sparse_tensor(
         self, npz_path: Path, expected_batch_dim: int | None = None, dtype=torch.float16

@@ -21,9 +21,8 @@ def fastener_hole(radius: float, depth: float, joint_name: str = "fastener_hole1
     fastener_loc = Locations((0, 0, -radius))
     # tuple_pos=[loc.position.to_tuple() for loc in fastener_loc.locations]
     joint_axis = Axis.Z
-    
 
-    return fastener_hole1, fastener_loc, axis=joint_axis
+    return fastener_hole1, fastener_loc  # TODO - add joint axis?
 
 
 ###debug:

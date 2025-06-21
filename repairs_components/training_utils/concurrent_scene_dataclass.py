@@ -211,7 +211,8 @@ def merge_scene_configs_at_idx(
 
     return merged_scene_config
 
-def split_scene_config(scene_config:ConcurrentSceneData):
+
+def split_scene_config(scene_config: ConcurrentSceneData):
     batch = scene_config.batch_dim
     cfg_list: list[ConcurrentSceneData] = []
     for i in range(batch):
