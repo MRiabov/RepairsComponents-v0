@@ -1,6 +1,6 @@
-from repairs_components.processing.translation import PART_TYPE_COLORS
 from genesis import surfaces
 import random
+from repairs_components.processing.voxel_export import PART_TYPE_COLORS
 
 
 def get_random_texture(part_type: str):

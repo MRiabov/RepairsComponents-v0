@@ -6,15 +6,16 @@ Order:
 """
 
 import pathlib
+from pathlib import Path
 from genesis.engine.entities import RigidEntity
 from repairs_components.geometry.base_env import tooling_stand_plate
 from repairs_components.processing.voxel_export import export_voxel_grid
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
-from build123d import Compound, Pos
+from build123d import Compound, Pos, export_gltf, export_stl, Unit, CenterOf
 from repairs_components.processing.translation import (
     translate_compound_to_sim_state,
-    translate_to_genesis_scene,
+    translate_state_to_genesis_scene,
 )
 
 import torch
@@ -39,7 +40,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     num_configs_to_generate_per_scene: torch.Tensor,  # int [len]
     save: bool = False,
     save_path: pathlib.Path | None = None,
-) -> list[ConcurrentSceneData]:
+) -> tuple[list[ConcurrentSceneData], dict[str, str]] | list[ConcurrentSceneData]:
     """`create_env_configs` is a general, high_level function responsible for creating of randomized configurations
     (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis.
 
@@ -117,6 +118,16 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             init_diffs.append(diff)
             init_diff_counts.append(initial_diff_count)
 
+        # using the last geom, persist part meshes
+        if save:
+            assert save_path is not None, "Save path must be provided if save is True"
+            mesh_file_names = persist_meshes(
+                desired_state_geom_,
+                save_dir=save_path,
+                scene_id=scene_idx,
+                export_format="gltf",
+            )
+
         voxel_grids_initial = torch.stack(voxel_grids_initial, dim=0)
         voxel_grids_desired = torch.stack(voxel_grids_desired, dim=0)
         starting_sim_state = merge_global_states(starting_sim_states)
@@ -142,7 +153,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         scene_config_batches.append(this_scene_configs)
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
-    return scene_config_batches
+    return (scene_config_batches, mesh_file_names) if save else scene_config_batches
 
 
 def starting_state_geom(
@@ -171,14 +182,15 @@ def desired_state_geom(
 
 def initialize_and_build_scene(
     scene: gs.Scene,
-    desired_state_geom: Compound,
     desired_sim_state: RepairsSimState,
+    mesh_file_names: dict[str, str],
     batch_dim: int,
+    random_textures: bool = False,
 ):
     # for starting scene, move it to an appropriate position #no, not here...
     # create a FIRST genesis scene for starting state from desired state; it is to be discarded, however.
-    first_desired_scene, initial_gs_entities = translate_to_genesis_scene(
-        scene, desired_state_geom, desired_sim_state
+    first_desired_scene, initial_gs_entities = translate_state_to_genesis_scene(
+        scene, desired_sim_state, mesh_file_names, random_textures
     )
 
     # initiate cameras and others in genesis scene:
@@ -295,7 +307,38 @@ def normalize_to_center(compound: Compound) -> Compound:
     return compound.move(Pos(-center.x, -center.y, -center.z / 2))
 
 
+# mesh save utils
 def generate_scene_meshes():
     "A function to generate all  meshes for all the scenes."
     if not pathlib.Path("/geom_exports/tooling_stands/tool_stand_plate.gltf").exists():
         tooling_stand_plate.plate_env_bd_geometry()
+
+
+def persist_meshes(
+    b123d_compound: Compound, save_dir: Path, scene_id: int, export_format="gltf"
+):
+    assert export_format in ("gltf", "stl")
+
+    mesh_file_names = {}
+
+    # flatten the array
+    children = b123d_compound.descendants
+
+    # export mesh
+    for child in children:
+        assert child.label is not None, "Child must have a label"
+        center = child.center(CenterOf.BOUNDING_BOX)
+        if export_format == "gltf":
+            mesh_file_name = f"scene_{scene_id}_{child.name}.gltf"
+            export_gltf(
+                child.moved(Pos(-center)),
+                save_dir / mesh_file_name,
+                unit=Unit.CM,
+            )
+        elif export_format == "stl":
+            # fixme: stl does not resize? hmm.
+            mesh_file_name = f"scene_{scene_id}_{child.name}.stl"
+            export_stl(child, file_path=save_dir / mesh_file_name)
+
+        mesh_file_names[child.label] = mesh_file_name
+    return mesh_file_names

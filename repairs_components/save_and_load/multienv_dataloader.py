@@ -17,10 +17,6 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
     split_scene_config,
 )
 from repairs_components.training_utils.env_setup import EnvSetup
-from repairs_components.training_utils.offline_utils import (
-    load_env_configs_from_disk,
-    save_env_configs_to_disk,
-)
 
 
 class MultiEnvDataLoader:
@@ -278,7 +274,9 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             # TODO: here - load offline data. Also rename the module back to MultienvDataLoader
 
     def _generate_scene_batches(
-        self, num_configs_to_generate_per_scene: torch.Tensor
+        self,
+        num_configs_to_generate_per_scene: torch.Tensor,
+        save_to_disk: bool = False,
     ) -> List[List[ConcurrentSceneData]]:
         """Generate batches of individual configs for a specific scene.
 
@@ -296,10 +294,12 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         )
         # Generate one "chunk" of data for this scene # even though I don't need to generate a chunk.
 
-        scene_configs_per_scene, _ = create_env_configs(
+        scene_configs_per_scene = create_env_configs(
             env_setups=self.env_setups,
             tasks=self.tasks,
             num_configs_to_generate_per_scene=num_configs_to_generate_per_scene,
+            save=save_to_disk,
+            save_path=self.offline_dataloader.data_dir,
         )
 
         batches = []
@@ -323,7 +323,9 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         batches = []
         # Split each batched scene config into individual items (batch dim =1)
         for scene_idx, scene_cfg in enumerate(scene_configs_per_scene):
-            assert scene_cfg.batch_dim == num_envs_per_scene[scene_idx]
+            assert (
+                scene_cfg.batch_dim == num_envs_per_scene[scene_idx]
+            )  # dunno about this.
             cfg_list = split_scene_config(scene_cfg)
             batches.append(cfg_list)
 

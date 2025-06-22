@@ -31,3 +31,4 @@ git config --global user.email "maksymriabov2004@gmail.com"
 
 # to run:
 # uv run /workspace/Repairs-v0/neural_nets/sac_repairs.py
+# note: if pyright or windsurf timeout, check whether default paths were added to pyright ignore.

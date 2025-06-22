@@ -29,6 +29,11 @@ from repairs_components.training_utils.motion_planning import (
 from repairs_components.save_and_load.multienv_dataloader import (
     RepairsEnvDataLoader,
 )
+from repairs_components.save_and_load.offline_data_creation import create_data
+from repairs_components.save_and_load.offline_dataloading import (
+    check_if_data_exists,
+    get_scene_mesh_file_names,
+)
 
 from repairs_components.training_utils.progressive_reward_calc import (
     RewardHistory,
@@ -36,6 +41,7 @@ from repairs_components.training_utils.progressive_reward_calc import (
 )
 from repairs_components.save_and_load.save import optional_save
 from repairs_sim_step import step_repairs
+from pathlib import Path
 
 
 def gs_rand_float(lower, upper, shape, device):
@@ -52,6 +58,7 @@ class RepairsEnv(gym.Env):
         # and the num_scenes per task is the feed-in repetitions of training pipeline.
         env_cfg: dict,
         obs_cfg: dict,
+        io_cfg: dict,
         reward_cfg: dict,
         command_cfg: dict,
         show_viewer: bool = False,
@@ -86,21 +93,23 @@ class RepairsEnv(gym.Env):
         # Store configuration dictionaries
         self.env_cfg = env_cfg
         self.obs_cfg = obs_cfg
+        self.io_cfg = io_cfg
         self.reward_cfg = reward_cfg
         self.ml_batch_dim = ml_batch_dim  # ML batch dim. I want to make it explicit. (incl because I've failed on this).
         self.per_scene_batch_dim = ml_batch_dim // concurrent_scenes
         self.concurrent_scenes = concurrent_scenes  # todo implement concurrent scenes.
         # genesis batch dim = batch_dim // concurrent_scenes
 
+        base_dir = Path(env_cfg["offline_dataloader_settings"]["data_dir"])
+        use_random_textures = obs_cfg["use_random_textures"]
+
         # save config
-        if self.env_cfg["save_obs"]:
-            os.makedirs(self.env_cfg["save_obs"]["path"], exist_ok=True)
-            self.save_video: bool = self.env_cfg["save_obs"]["video"]
-            self.save_voxel: bool = self.env_cfg["save_obs"]["voxel"]
-            self.save_electronic_graph: bool = self.env_cfg["save_obs"][
-                "electronic_graph"
-            ]
-            self.save_path: str = self.env_cfg["save_obs"]["path"]
+        if io_cfg["save_obs"]:
+            os.makedirs(io_cfg["save_obs"]["path"], exist_ok=True)
+            self.save_video: bool = io_cfg["save_obs"]["video"]
+            self.save_voxel: bool = io_cfg["save_obs"]["voxel"]
+            self.save_electronic_graph: bool = io_cfg["save_obs"]["electronic_graph"]
+            self.save_path: str = io_cfg["save_obs"]["path"]
             self.save_any: bool = (
                 self.save_video or self.save_voxel or self.save_electronic_graph
             )
@@ -119,21 +128,56 @@ class RepairsEnv(gym.Env):
         self.scenes = []
         task = tasks[0]  # any task will suffice for init.
 
+        # -- data pregeneration --
         # if scene meshes don't exist yet, create them now.
         generate_scene_meshes()
 
-        prefetch_memory_size = env_cfg["dataloader_settings"]["prefetch_memory_size"]
-        init_generate_per_scene = torch.full((concurrent_scenes,), prefetch_memory_size)
+        scene_ids = torch.arange(concurrent_scenes)
 
-        partial_env_configs = create_env_configs(
-            env_setups,
-            tasks,
-            torch.tensor(
-                [self.per_scene_batch_dim] * concurrent_scenes, dtype=torch.int16
-            ),
-        )[0]  # note: all of them are discarded, but just for the sake of init.
+        # minimum amount of configs to generate
+        generate_number_of_configs_per_scene = io_cfg[
+            "generate_number_of_configs_per_scene"
+        ]
+        generate_number_of_configs_per_scene = torch.full(
+            (concurrent_scenes,), generate_number_of_configs_per_scene
+        )
+
+        if not check_if_data_exists(
+            scene_ids.tolist(),
+            base_dir,
+            generate_number_of_configs_per_scene,
+        ):
+            create_data(
+                scene_setups=env_setups,
+                tasks=tasks,
+                scene_idx=scene_ids,
+                num_configs_to_generate_per_scene=generate_number_of_configs_per_scene,
+                base_dir=base_dir,
+            )
+
+        # -- dataloader (offline) --
+        # init dataloader
+        assert "offline_dataloader_settings" in env_cfg, (
+            "Offline dataloader settings not found in env_cfg."
+        )
+        # note: will take some time to load.
+        self.env_dataloader = RepairsEnvDataLoader(
+            online=False,
+            offline_data_dir=env_cfg["offline_dataloader_settings"]["data_dir"],
+            scene_ids=env_cfg["offline_dataloader_settings"]["scene_ids"],
+        )
+        in_memory = torch.full(
+            (concurrent_scenes,),
+            io_cfg["dataloader_settings"]["prefetch_memory_size"],
+            dtype=torch.int16,
+        )
+        self.env_dataloader.populate_async(in_memory)
+        partial_env_configs = self.env_dataloader.get_processed_data(
+            torch.ones(concurrent_scenes, dtype=torch.bool)
+        )  # get a batch of configs(1 per scene)
 
         # scene init setup # note: technically this should be the Dataloader worker init fn.
+        mesh_file_names = get_scene_mesh_file_names(scene_ids.tolist(), base_dir)
         for scene_idx in range(concurrent_scenes):
             scene = gs.Scene(  # empty scene
                 sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
@@ -144,9 +188,10 @@ class RepairsEnv(gym.Env):
 
             scene, cameras, gs_entities, franka = initialize_and_build_scene(
                 scene,  # build scene.
-                env_setups[scene_idx].desired_state_geom(),
-                partial_env_configs.desired_state,
+                partial_env_configs[scene_idx].desired_state,
+                mesh_file_names[scene_idx],
                 self.per_scene_batch_dim,
+                use_random_textures,
             )
 
             # Using dataclass to store concurrent scene data for better organization and clarity
@@ -155,47 +200,21 @@ class RepairsEnv(gym.Env):
                     scene=scene,
                     gs_entities=gs_entities,
                     cameras=tuple(cameras),
-                    current_state=partial_env_configs.current_state,
-                    desired_state=partial_env_configs.desired_state,
-                    vox_init=partial_env_configs.vox_init,
-                    vox_des=partial_env_configs.vox_des,
-                    initial_diffs=partial_env_configs.initial_diffs,
-                    initial_diff_counts=partial_env_configs.initial_diff_counts,
+                    current_state=partial_env_configs[scene_idx].current_state,
+                    desired_state=partial_env_configs[scene_idx].desired_state,
+                    vox_init=partial_env_configs[scene_idx].vox_init,
+                    vox_des=partial_env_configs[scene_idx].vox_des,
+                    initial_diffs=partial_env_configs[scene_idx].initial_diffs,
+                    initial_diff_counts=partial_env_configs[
+                        scene_idx
+                    ].initial_diff_counts,
                     scene_id=scene_idx,
                     reward_history=RewardHistory(self.per_scene_batch_dim),
                     batch_dim=self.per_scene_batch_dim,
                     step_count=torch.zeros(self.per_scene_batch_dim, dtype=torch.int),
-                    task_ids=partial_env_configs.task_ids,
+                    task_ids=partial_env_configs[scene_idx].task_ids,
                 )
             )
-        # create the dataloader to update scenes.
-        if use_offline_dataset:
-            assert "offline_dataloader_settings" in env_cfg, (
-                "Offline dataloader settings not found in env_cfg."
-            )
-            self.env_dataloader = RepairsEnvDataLoader(
-                online=False,
-                offline_data_dir=env_cfg["offline_dataloader_settings"]["data_dir"],
-                scene_ids=env_cfg["offline_dataloader_settings"]["scene_ids"],
-            )
-        # Set default joint positions from config
-        else:
-            self.env_dataloader = RepairsEnvDataLoader(
-                online=True,
-                env_setups=env_setups,
-                tasks_to_generate=tasks,
-                prefetch_memory_size=prefetch_memory_size,
-            )
-            print("before populate_async")
-            # populate the dataloader with initial configs
-            start_time = time.time()
-            self.env_dataloader.populate_async(
-                init_generate_per_scene.to(dtype=torch.int16)
-            )
-            print(
-                f"after populate_async. Generation of {init_generate_per_scene.sum()} configs took {time.time() - start_time} seconds."
-            )
-            
 
         self.default_dof_pos = torch.tensor(
             [env_cfg["default_joint_angles"][name] for name in env_cfg["joint_names"]],

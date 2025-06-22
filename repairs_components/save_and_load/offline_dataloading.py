@@ -30,11 +30,7 @@ class OfflineDataloader:
     # This is more practical because it's easy to reset the environment this way (in RL batch sizes vary greatly).
     # Plus it is consistent with the online dataloader.
 
-    def __init__(
-        self,
-        data_dir: Union[str, Path],
-        scene_ids: List[int],
-    ) -> None:
+    def __init__(self, data_dir: str | Path, scene_ids: List[int]) -> None:
         """Initialize the OfflineDataset.
 
         Args:
@@ -267,3 +263,51 @@ class OfflineDataloader:
             loaded_graphs_mech_des,
             loaded_graphs_elec_des,
         )
+
+
+def check_if_data_exists(
+    scene_ids: list[int], data_dir: Path, count_envs_per_scene: torch.Tensor
+) -> bool:
+    """
+    Check if all required data files exist for each scene_id in data_dir.
+    Returns True if all exist, else False.
+    """
+    data_dir = Path(data_dir)
+    # Check metadata file
+    metadata_path = data_dir / "scenes_metadata.json"
+    if not metadata_path.exists():
+        return False
+    # Check per-scene files
+    for scene_id in scene_ids:
+        # Graphs
+        graphs_dir = data_dir / "graphs"
+        graph_files = [
+            graphs_dir / f"mechanical_graphs_{scene_id}.pt",
+            graphs_dir / f"electronics_graphs_{scene_id}.pt",
+            graphs_dir / f"mechanical_graphs_des_{scene_id}.pt",
+            graphs_dir / f"electronics_graphs_des_{scene_id}.pt",
+        ]
+        # Voxels
+        voxels_dir = data_dir / "voxels"
+        voxel_files = [
+            voxels_dir / f"vox_init_{scene_id}.npz",
+            voxels_dir / f"vox_des_{scene_id}.npz",
+        ]
+        # Check all
+        if not all(file_path.exists() for file_path in graph_files + voxel_files):
+            return False
+    return True
+
+
+def get_scene_mesh_file_names(
+    scene_ids: list[int], data_dir: Path
+) -> list[dict[str, str]]:
+    """Get the file names of the meshes to their scene names for the given scene ids."""
+    data_dir = Path(data_dir)
+    metadata_path = data_dir / "scenes_metadata.json"
+    with open(metadata_path, "r") as f:
+        metadata = json.load(f)
+    mesh_file_names = []
+    for scene_id in scene_ids:
+        mesh_file_names.append(metadata["scene_" + str(scene_id)]["mesh_file_names"])
+    return mesh_file_names

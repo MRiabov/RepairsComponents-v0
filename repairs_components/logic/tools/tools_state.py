@@ -1,10 +1,9 @@
 from repairs_components.training_utils.sim_state import SimState
 import numpy as np
-from repairs_components.logic.tools.tool import Tool
+from repairs_components.logic.tools.tool import Tool, ToolsEnum
 from dataclasses import dataclass
 from repairs_components.logic.tools.gripper import Gripper
 from repairs_components.logic.tools.screwdriver import Screwdriver
-from repairs_components.logic.tools.tools_state import ToolsEnum
 
 
 @dataclass

@@ -14,22 +14,35 @@ from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.geometry.fasteners import Fastener
 
 
-# TODO translation from offline to genesis scene.
-
-
-def translate_to_genesis_scene(
+def translate_state_to_genesis_scene(
     scene: gs.Scene,
-    b123d_assembly: Compound,
+    # b123d_assembly: Compound,
     sim_state: RepairsSimState,
+    mesh_names: dict[str, str],
     random_textures: bool = False,
 ):
-    assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
+    "Translate the first state to genesis scene (unbatched - this is only to populate scene.)"
+    "Essentially, populate the scene with meshes."
+    # assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
+    assert len(sim_state.physical_state[0].body_indices) > 0, (
+        "Translated assembly is empty."
+    )
+    assert len(mesh_names) > 0, "No meshes provided."
+    assert len(mesh_names) == len(sim_state.physical_state[0].body_indices), (
+        "Number of meshes does not match number of bodies."
+    )
+    assert set(mesh_names.keys()) == set(
+        sim_state.physical_state[0].body_indices.keys()
+    ), "Mesh names do not match body indices."
 
     gs_entities: dict[str, RigidEntity] = {}
 
+    physical_state = sim_state.physical_state[0]
+    electronics_state = sim_state.physical_state[0]
+
     # translate each child into genesis entities
-    for child in b123d_assembly.children:
-        label = child.label
+    for body_name, body_idx in physical_state.body_indices.items():
+        label = body_name
         assert label is not None and "@" in label, "Label must contain '@'"
         _, part_type = label.split("@", 1)
         part_type = part_type.lower()
@@ -39,6 +52,11 @@ def translate_to_genesis_scene(
         else:
             # get color by type
             surface = gs.surfaces.Plastic(color=get_color_by_type(part_type))
+
+        pos = physical_state.graph.pos[body_idx]
+        quat = physical_state.graph.quat[body_idx]
+        count_fasteners_held = physical_state.graph.count_fasteners_held[body_idx]
+
         if part_type in (
             "connector",
             "solid",
@@ -47,23 +65,18 @@ def translate_to_genesis_scene(
             gltf_path = tmp.name
             tmp.close()
             if part_type == "solid":
-                # move gltf to 0,0,0 on center... later will be replaced back to it's original position.
-                # this is done to have a 0,0,0 origin for the mesh, which will be useful for physical state translation
-                center = child.center(CenterOf.BOUNDING_BOX)
-                export_gltf(
-                    child.moved(Pos(-center)),
-                    gltf_path,
-                    unit=Unit.CM,
-                )  # note: maybe glb is better.
-                mesh = gs.morphs.Mesh(file=gltf_path)  # pos=center.to_tuple()
-                # technically, the `pos` should not do nothing, because it will be overriden by set_pos later.
-                # however it does? I don't see my object later.
+                # assume the solid is already center with AABB center of (0,0,0)
+                gltf_path = mesh_names[label]
+                mesh = gs.morphs.Mesh(file=gltf_path)
             elif part_type == "connector":
                 connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
+
                 mjcf = connector.get_mjcf()
-                with tempfile.NamedTemporaryFile(
-                    suffix=label + ".xml", mode="w", encoding="utf-8", delete=False
-                ) as tmp2:
+                with (
+                    tempfile.NamedTemporaryFile(
+                        suffix=label + ".xml", mode="w", encoding="utf-8", delete=False
+                    ) as tmp2
+                ):  # note: XMLs are not necessary here, as I've later found out.
                     tmp2.write(mjcf)
                     tmp2_path = tmp2.name
                 mesh = gs.morphs.MJCF(file=tmp2_path, name=label, links_to_keep=True)

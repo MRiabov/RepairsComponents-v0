@@ -10,17 +10,10 @@ Provides diff methods:
 diff(): combines both into {'fasteners', 'bodies'} with total change count
 """
 
-from _typeshed import NoneType
-from dataclasses import dataclass, field
-
 import torch
 from repairs_components.geometry.fasteners import Fastener
-import math
-
-
+from torch_geometric.data import Data
 from dataclasses import dataclass, field
-import torch
-from torch_geometric.data import Data, Batch
 
 
 @dataclass
@@ -44,9 +37,15 @@ class PhysicalState:
     fastener: dict[str, Fastener] = field(default_factory=dict)
 
     # Free fasteners - not attached to two parts, but to one or none
-    free_fasteners_loc = torch.zeros((0, 3), dtype=torch.float32, device=device)
-    free_fasteners_quat = torch.zeros((0, 4), dtype=torch.float32, device=device)
-    free_fasteners_attached_to = torch.zeros((0,), dtype=torch.int8, device=device)
+    free_fasteners_loc: torch.Tensor = field(
+        default_factory=lambda: torch.zeros((0, 3), dtype=torch.float32)
+    )
+    free_fasteners_quat: torch.Tensor = field(
+        default_factory=lambda: torch.zeros((0, 4), dtype=torch.float32)
+    )
+    free_fasteners_attached_to: torch.Tensor = field(
+        default_factory=lambda: torch.zeros((0,), dtype=torch.int8)
+    )
     "When the fastener is inserted only into one body, it is stored here. Otherwise, it is -1."
 
     def __init__(

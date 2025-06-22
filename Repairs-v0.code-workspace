@@ -10,7 +10,8 @@
 	"settings": {
 		"python.languageServer": "None",
 		"editor.defaultFormatter": "charliermarsh.ruff",
-		"makefile.configureOnOpen": false
+		"makefile.configureOnOpen": false,
+		"windsurfPyright.analysis.typeCheckingMode": "basic"
 	},
 	"launch": {
 		"version": "0.2.0",
