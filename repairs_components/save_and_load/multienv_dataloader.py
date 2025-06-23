@@ -78,7 +78,8 @@ class MultiEnvDataLoader:
             f"mismatches count of registered envs ({self.num_environments})."
         )
         assert num_configs_to_generate_per_scene.dtype == torch.int16, (
-            "Expected num_configs_to_generate_per_scene to be a int16 tensor."
+            "Expected num_configs_to_generate_per_scene to be a int16 tensor, got "
+            + str(num_configs_to_generate_per_scene.dtype)
         )  # non-negative integer in general.
 
         count_insufficient_configs_per_scene = torch.zeros_like(
@@ -300,7 +301,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         )
         # Generate one "chunk" of data for this scene # even though I don't need to generate a chunk.
 
-        scene_configs_per_scene = create_env_configs(
+        scene_configs_per_scene, mesh_file_names = create_env_configs(
             env_setups=self.env_setups,
             tasks=self.tasks,
             num_configs_to_generate_per_scene=num_configs_to_generate_per_scene,

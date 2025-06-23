@@ -25,22 +25,28 @@ def create_data(
     )
     if isinstance(num_configs_to_generate_per_scene, int):
         num_configs_to_generate_per_scene = torch.full(
-            (len(scene_setups),), num_configs_to_generate_per_scene
+            (len(scene_setups),), num_configs_to_generate_per_scene, dtype=torch.int16
         )
 
     # use online multienv dataloader to create data.
     # note: meshes will be saved to disk automatically if save_to_disk=True
-    data_batches = RepairsEnvDataLoader(
+    data_batches, mesh_file_names = RepairsEnvDataLoader(
         online=True,
         env_setups=scene_setups,
         tasks_to_generate=tasks,
         save_to_disk=True,
         offline_data_dir=base_dir,
     ).get_processed_data(num_configs_to_generate_per_scene)
+
     # create the (scene) data.
-    for scene_data in data_batches:
-        save_concurrent_scene_metadata(scene_data, base_dir, scene_idx.item(), mesh_file_name_mapping=)
-  
+    for scene_data, mesh_file_names in data_batches:
+        save_concurrent_scene_metadata(
+            scene_data,
+            base_dir,
+            scene_idx.item(),
+            mesh_file_name_mapping=mesh_file_names,
+        )
+
 
 def save_sparse_tensor(tensor: Tensor, file_path: Path):
     """Utility method to save sparse tensors to disk."""  # deprecated?
@@ -51,13 +57,22 @@ def save_concurrent_scene_metadata(
     data: ConcurrentSceneData,
     base_dir: Path,
     scene_idx: int,
-    mesh_file_name_mapping:dict,
+    mesh_file_name_mapping: dict[str, str],
     env_idx: list[int] | None = None,
 ):
     """Save a ConcurrentSceneData instance to disk.
 
     scene_idx and env_idx are names to which save graph and voxel under."""
-
+    assert len(data.gs_entities) == len(mesh_file_name_mapping), (
+        f"Attempted to export meshes with gs_entities and mesh_file_name_mapping which do not match.\n"
+        f"gs_entities: {data.gs_entities.keys()}\n"
+        f"mesh_file_name_mapping: {mesh_file_name_mapping.keys()}"
+    )
+    assert set(data.gs_entities.keys()) == set(mesh_file_name_mapping.keys()), (
+        f"Attempted to export meshes with gs_entities and mesh_file_name_mapping which do not match.\n"
+        f"gs_entities: {data.gs_entities.keys()}\n"
+        f"mesh_file_name_mapping: {mesh_file_name_mapping.keys()}"
+    )
     if env_idx is None:
         env_idx = list(range(data.batch_dim))
     scene_dir = base_dir / f"scene_{scene_idx}"
@@ -65,12 +80,11 @@ def save_concurrent_scene_metadata(
 
     # states and voxel grids are already saved.
 
-
     # save metadata
     metadata = {
         "scene_id": scene_idx,
         "task_ids": data.task_ids.tolist(),
-        #note: graphs paths can now be recovered by get_graph_save_paths.
+        # note: graphs paths can now be recovered by get_graph_save_paths.
         "mesh_file_names": mesh_file_name_mapping,
     }
     with open(scene_dir / "metadata.json", "w") as f:

@@ -17,7 +17,6 @@ from genesis.engine.entities import RigidEntity
 class Fastener(Component):
     def __init__(
         self,
-        constraint_a_active: bool,
         constraint_b_active: bool,
         initial_body_a: str
         | None = None,  # how will it be constrained in case of hole?
@@ -30,6 +29,7 @@ class Fastener(Component):
         head_height: float = 2.0,
         screwdriver_name: str = "screwdriver",
     ):
+        assert initial_body_a is not None, "initial_body_a must be provided"
         self.initial_body_a = initial_body_a
         self.initial_body_b = initial_body_b
         self.thread_pitch = thread_pitch
@@ -39,7 +39,7 @@ class Fastener(Component):
         self.head_height = head_height
         self.name = name
         self.screwdriver_name = screwdriver_name
-        self.a_constraint_active = constraint_a_active
+        # self.a_constraint_active = True # note: a_constraint_active is always True now.
         self.b_constraint_active = constraint_b_active
 
     def get_mjcf(self):
@@ -69,7 +69,7 @@ class Fastener(Component):
             <!-- NOTE: possibly unnecessary! there is rigid_solver.add_weld_constraint.-->
 
             <!-- Weld constraints to A and B (both active at spawn)-->
-            <equality name="{self.name}_to_A" active="{self.a_constraint_active}">
+            <equality name="{self.name}_to_A" active="True">
                 <weld body1="{self.name}" body2="{self.initial_body_a}" relpose="true"/>
             </equality>
 

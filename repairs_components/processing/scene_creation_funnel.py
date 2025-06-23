@@ -40,18 +40,20 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     num_configs_to_generate_per_scene: torch.Tensor,  # int [len]
     save: bool = False,
     save_path: pathlib.Path | None = None,
-) -> tuple[list[ConcurrentSceneData], dict[str, str]] | list[ConcurrentSceneData]:
+) -> tuple[list[ConcurrentSceneData], dict[str, str] | None]:
     """`create_env_configs` is a general, high_level function responsible for creating of randomized configurations
     (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis.
 
     `create_env_configs` should only be called from `multienv_dataloader`.
 
-    Returns: ConcurrentSceneData for each environment #TODO finish
+    Returns: ConcurrentSceneData for each environment and mesh_file_names if save is True.
     """
     assert len(tasks) > 0, "Tasks can not be empty."
     assert any(num_configs_to_generate_per_scene) > 0, (
         "At least one scene must be generated."
     )
+    if save:
+        assert save_path is not None, "Save path must be provided if save is True"
     # assert len(num_configs_to_generate_per_scene) == len(tasks), (
     #     "Number of tasks and number of configs to generate must match."
     # ) # not true. it must be split amongst tasks
@@ -111,10 +113,9 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             desired_sim_state = translate_compound_to_sim_state([desired_state_geom_])
 
             if save:
-                mechanical_file_name_mapping, electronics_file_name_mapping = (
-                    starting_sim_state.save(save_path, scene_idx)
-                )
-                _, _ = desired_sim_state.save(save_path, scene_idx)
+                # get them later by get_graph_save_paths
+                starting_sim_state.save(save_path, scene_idx)
+                desired_sim_state.save(save_path, scene_idx)
 
             # store states
             starting_sim_states.append(starting_sim_state)
@@ -127,7 +128,6 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
 
         # using the last geom, persist part meshes
         if save:
-            assert save_path is not None, "Save path must be provided if save is True"
             mesh_file_names = persist_meshes_and_mjcf(
                 desired_state_geom_,
                 save_dir=save_path,
@@ -159,17 +159,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         )  # type: ignore # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
 
-    graph_file_name_mapping = (
-        mechanical_file_name_mapping,
-        electronics_file_name_mapping,
-    )
-
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
-    return (
-        (scene_config_batches, mesh_file_names, graph_file_name_mapping)
-        if save
-        else scene_config_batches
-    )
+    return (scene_config_batches, mesh_file_names) if save else scene_config_batches
 
 
 def starting_state_geom(
@@ -344,7 +335,7 @@ def persist_meshes_and_mjcf(
     for child in children:
         assert child.label is not None, "Child must have a label"
         assert "@" in child.label, "Part label must have a type delimiter."
-        part_name, part_type = child.label.split(2)
+        _part_name, part_type = child.label.split(2)
         center = child.center(CenterOf.BOUNDING_BOX)
         if export_format == "gltf":
             mesh_file_name = f"scene_{scene_id}_{child.name}.gltf"

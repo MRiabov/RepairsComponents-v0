@@ -54,34 +54,30 @@ class PhysicalState:
         indices: dict[str, int] | None = None,
         fasteners: dict[str, Fastener] | None = None,
         fastener_id_to_name: dict[int, str] | None = None,
-        # free_fasteners_loc: torch.Tensor | None = None,
-        # free_fasteners_quat: torch.Tensor | None = None,
+        device: torch.device = torch.device("cpu"), # should be always on CPU to my understanding. it's not buffer.
     ):
         # for empty creation (which is the case in online loading), do not require a graph
         if graph is None:
-            graph = Data()
+            self.graph = Data()
             # Initialize graph attributes
 
-            self.graph.edge_index = torch.empty(
-                (2, 0), dtype=torch.long, device=self.device
-            )
+            self.graph.edge_index = torch.empty((2, 0), dtype=torch.long)
             self.graph.edge_attr = torch.empty(
-                (0, 12), dtype=torch.float32, device=self.device
+                (0, 12), dtype=torch.float32
             )  # placeholder size
 
             # Node attributes
             self.graph.position = torch.empty(
-                (0, 3), dtype=torch.float32, device=self.device
+                (0, 3), dtype=torch.float32
             )  # note: torch_geomeric conventionally uses `pos` for 2d or 3d positions. You could too.
-            self.graph.quat = torch.empty(
-                (0, 4), dtype=torch.float32, device=self.device
-            )
-            self.graph.count_fasteners_held = torch.empty(
-                (0,), dtype=torch.int8, device=self.device
-            )
+            self.graph.quat = torch.empty((0, 4), dtype=torch.float32)
+            self.graph.count_fasteners_held = torch.empty((0,), dtype=torch.int8)
             if indices is None:
-                indices = {}
-
+                self.body_indices = {}
+                self.reverse_indices = {}
+            else:
+                self.body_indices = indices
+                self.reverse_indices = {v: k for k, v in indices.items()}
         else:
             assert indices is not None, "Indices must be provided if graph is not None"
             assert fastener_id_to_name is not None, (
@@ -97,7 +93,13 @@ class PhysicalState:
                 fastener_name = fastener_id_to_name[fastener_id]
                 connected_to_1 = self.reverse_indices[edge_index[0].item()]
                 connected_to_2 = self.reverse_indices[edge_index[1].item()]
-                fastener = Fastener(constraint_a_active, fastener_name, fastener_size)
+                fastener = Fastener(  # FIXME: constraint_b_active always True. It is not selected
+                    constraint_b_active=True,
+                    initial_body_a=connected_to_1,
+                    initial_body_b=connected_to_2,
+                    name=fastener_name,
+                    # fastener_size=fastener_size, # FIXME: size to actual params mapping
+                )
                 self.fastener[fastener_name] = fastener
 
                 # next: there is something that needs to be figured out with data storage and reconstruction.

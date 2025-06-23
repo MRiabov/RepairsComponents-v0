@@ -100,7 +100,7 @@ class RepairsEnv(gym.Env):
         self.concurrent_scenes = concurrent_scenes  # todo implement concurrent scenes.
         # genesis batch dim = batch_dim // concurrent_scenes
 
-        base_dir = Path(env_cfg["offline_dataloader_settings"]["data_dir"])
+        base_dir = Path(io_cfg["data_dir"])
         use_random_textures = obs_cfg["use_random_textures"]
 
         # save config
@@ -139,7 +139,7 @@ class RepairsEnv(gym.Env):
             "generate_number_of_configs_per_scene"
         ]
         generate_number_of_configs_per_scene = torch.full(
-            (concurrent_scenes,), generate_number_of_configs_per_scene
+            (concurrent_scenes,), generate_number_of_configs_per_scene, dtype=torch.int16
         )
 
         if not check_if_data_exists(
@@ -163,7 +163,7 @@ class RepairsEnv(gym.Env):
         # note: will take some time to load.
         self.env_dataloader = RepairsEnvDataLoader(
             online=False,
-            offline_data_dir=env_cfg["offline_dataloader_settings"]["data_dir"],
+            offline_data_dir=base_dir,
             scene_ids=env_cfg["offline_dataloader_settings"]["scene_ids"],
         )
         in_memory = torch.full(
