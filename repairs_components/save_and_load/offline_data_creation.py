@@ -29,23 +29,29 @@ def create_data(
         )
 
     # use online multienv dataloader to create data.
+    # note: meshes will be saved to disk automatically if save_to_disk=True
     data_batches = RepairsEnvDataLoader(
-        online=True, env_setups=scene_setups, tasks_to_generate=tasks
+        online=True,
+        env_setups=scene_setups,
+        tasks_to_generate=tasks,
+        save_to_disk=True,
+        offline_data_dir=base_dir,
     ).get_processed_data(num_configs_to_generate_per_scene)
     # create the (scene) data.
     for scene_data in data_batches:
-        save_concurrent_scene_data(scene_data, base_dir, scene_idx.item())
-
+        save_concurrent_scene_metadata(scene_data, base_dir, scene_idx.item(), mesh_file_name_mapping=)
+  
 
 def save_sparse_tensor(tensor: Tensor, file_path: Path):
     """Utility method to save sparse tensors to disk."""  # deprecated?
     torch.save(tensor, file_path)
 
 
-def save_concurrent_scene_data(
+def save_concurrent_scene_metadata(
     data: ConcurrentSceneData,
     base_dir: Path,
     scene_idx: int,
+    mesh_file_name_mapping:dict,
     env_idx: list[int] | None = None,
 ):
     """Save a ConcurrentSceneData instance to disk.
@@ -57,23 +63,15 @@ def save_concurrent_scene_data(
     scene_dir = base_dir / f"scene_{scene_idx}"
     os.makedirs(scene_dir, exist_ok=True)
 
-    # Save states
-    mechanical_name_mapping, electronics_name_mapping = data.current_state.save(
-        base_dir, scene_idx, torch.tensor(env_idx)
-    )
-    _, _ = data.desired_state.save(base_dir, scene_idx, torch.tensor(env_idx))
+    # states and voxel grids are already saved.
 
-    # Save voxel grids
-    save_sparse_tensor(data.vox_init, scene_dir / "vox_init.npz")
-    save_sparse_tensor(data.vox_des, scene_dir / "vox_des.npz")
 
     # save metadata
     metadata = {
         "scene_id": scene_idx,
-        "electronics_graph_id_to_name": electronics_name_mapping,
-        "mechanical_graph_id_to_name_mapping": mechanical_name_mapping,
         "task_ids": data.task_ids.tolist(),
-        "mesh_file_names": data.mesh_file_names,
+        #note: graphs paths can now be recovered by get_graph_save_paths.
+        "mesh_file_names": mesh_file_name_mapping,
     }
     with open(scene_dir / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)

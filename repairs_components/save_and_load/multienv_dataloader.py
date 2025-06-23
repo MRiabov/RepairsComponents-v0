@@ -205,6 +205,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         tasks_to_generate: List[Task] | None = None,
         env_setups: List[EnvSetup] | None = None,
         prefetch_memory_size=256,
+        save_to_disk: bool | None = False,
         # offline
         env_setup_ids: List[int] | None = None,
         scene_ids: List[int] | None = None,
@@ -225,6 +226,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         self.env_setup_ids = env_setup_ids
         self.tasks_to_generate = tasks_to_generate
         self.offline_dataloader = None
+        self.offline_data_dir = offline_data_dir
 
         # Create preprocessing function that generates or loads batches for scenes
         def online_preprocessing_fn(
@@ -261,6 +263,9 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             assert offline_data_dir is not None, (
                 "data_dir must be provided for offline dataloader"
             )
+            assert save_to_disk is None or not save_to_disk, (
+                "Expected save to disk to not be used for offline data loading."
+            )
             # create a cache storage buffer/dataclass
             self.offline_dataloader = OfflineDataloader(
                 offline_data_dir,
@@ -277,6 +282,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         self,
         num_configs_to_generate_per_scene: torch.Tensor,
         save_to_disk: bool = False,
+        # Todo: overwrite param.
     ) -> List[List[ConcurrentSceneData]]:
         """Generate batches of individual configs for a specific scene.
 
@@ -299,11 +305,11 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             tasks=self.tasks,
             num_configs_to_generate_per_scene=num_configs_to_generate_per_scene,
             save=save_to_disk,
-            save_path=self.offline_dataloader.data_dir,
+            save_path=Path(self.offline_data_dir),
         )
 
         batches = []
-        # Split each batched scene config into individual items (batch dim =1)
+        # Split each batched scene config into individual items (batch dim = 1)
         for scene_idx, scene_cfg in enumerate(scene_configs_per_scene):
             assert scene_cfg.batch_dim == num_configs_to_generate_per_scene[scene_idx]
             cfg_list = split_scene_config(scene_cfg)

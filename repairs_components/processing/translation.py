@@ -18,7 +18,7 @@ def translate_state_to_genesis_scene(
     scene: gs.Scene,
     # b123d_assembly: Compound,
     sim_state: RepairsSimState,
-    mesh_names: dict[str, str],
+    mesh_file_names: dict[str, str],
     random_textures: bool = False,
 ):
     "Translate the first state to genesis scene (unbatched - this is only to populate scene.)"
@@ -27,11 +27,11 @@ def translate_state_to_genesis_scene(
     assert len(sim_state.physical_state[0].body_indices) > 0, (
         "Translated assembly is empty."
     )
-    assert len(mesh_names) > 0, "No meshes provided."
-    assert len(mesh_names) == len(sim_state.physical_state[0].body_indices), (
+    assert len(mesh_file_names) > 0, "No meshes provided."
+    assert len(mesh_file_names) == len(sim_state.physical_state[0].body_indices), (
         "Number of meshes does not match number of bodies."
     )
-    assert set(mesh_names.keys()) == set(
+    assert set(mesh_file_names.keys()) == set(
         sim_state.physical_state[0].body_indices.keys()
     ), "Mesh names do not match body indices."
 
@@ -42,9 +42,9 @@ def translate_state_to_genesis_scene(
 
     # translate each child into genesis entities
     for body_name, body_idx in physical_state.body_indices.items():
-        label = body_name
-        assert label is not None and "@" in label, "Label must contain '@'"
-        _, part_type = label.split("@", 1)
+        assert body_name is not None and "@" in body_name, "Label must contain '@'"
+        # note: body name is equal to build123d label here.
+        _, part_type = body_name.split("@", 1)
         part_type = part_type.lower()
 
         if random_textures:
@@ -57,49 +57,22 @@ def translate_state_to_genesis_scene(
         quat = physical_state.graph.quat[body_idx]
         count_fasteners_held = physical_state.graph.count_fasteners_held[body_idx]
 
-        if part_type in (
-            "connector",
-            "solid",
-        ):  # ideally, have them already precompiled... But...
-            tmp = tempfile.NamedTemporaryFile(suffix=label + ".gltf", delete=False)
-            gltf_path = tmp.name
-            tmp.close()
-            if part_type == "solid":
-                # assume the solid is already center with AABB center of (0,0,0)
-                gltf_path = mesh_names[label]
-                mesh = gs.morphs.Mesh(file=gltf_path)
-            elif part_type == "connector":
-                connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
-
-                mjcf = connector.get_mjcf()
-                with (
-                    tempfile.NamedTemporaryFile(
-                        suffix=label + ".xml", mode="w", encoding="utf-8", delete=False
-                    ) as tmp2
-                ):  # note: XMLs are not necessary here, as I've later found out.
-                    tmp2.write(mjcf)
-                    tmp2_path = tmp2.name
-                mesh = gs.morphs.MJCF(file=tmp2_path, name=label, links_to_keep=True)
-
+        if part_type == "solid":
+            mesh_path = mesh_file_names[body_name]
+            mesh = gs.morphs.Mesh(file=mesh_path)
             new_entity = scene.add_entity(mesh, surface=surface)
-        elif part_type in ("button", "led", "switch"):
-            connector: ElectricalComponent = sim_state.electronics_state[0].components[
-                label
-            ]  # note: [0] because can use any env - they are equal.
-            mjcf = connector.get_mjcf()
-            with tempfile.NamedTemporaryFile(
-                suffix=label + ".xml", mode="w", encoding="utf-8", delete=False
-            ) as tmp2:
-                tmp2.write(mjcf)
-                tmp2_path = tmp2.name
-            mjcf_ent = gs.morphs.MJCF(file=tmp2_path, name=label)
-            new_entity = scene.add_entity(mjcf_ent, surface=surface)
+
+        elif part_type in ("connector", "button", "led", "switch"):
+            mjcf_path = mesh_file_names[body_name]
+            # FIXME: deprecate MJCF from here and use native genesis configs.
+            mesh = gs.morphs.MJCF(file=mjcf_path, name=body_name, links_to_keep=True)
+            new_entity = scene.add_entity(mesh, surface=surface)
         else:
             raise NotImplementedError(
                 f"Not implemented for translation part type: {part_type}"
             )
 
-        gs_entities[label] = new_entity
+        gs_entities[body_name] = new_entity
 
     return scene, gs_entities
 

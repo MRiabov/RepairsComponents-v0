@@ -82,10 +82,18 @@ class RepairsSimState(SimState):
             # "fluid_diff_count": fluid_diff_counts,
         }, total_diff_counts
 
-    def save(self, path: Path, scene_id, env_idx: torch.Tensor):
-        """Save the current state to a JSON file with a unique identifier."""
+    def save(self, path: Path, scene_id, env_idx: torch.Tensor | None = None):
+        """Save the state to a JSON file with a unique identifier.
+
+        Returns:
+            - Names of bodies located under indices
+            - Names of electronics bodies located under indices.
+        """
         # Create output directory if it doesn't exist
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        if env_idx is None:  # save all envs
+            env_idx = torch.arange(self.scene_batch_dim)
 
         # # Generate a unique filename
         # uid = str(uuid.uuid4())
@@ -98,11 +106,8 @@ class RepairsSimState(SimState):
         # save graphs, everything else can be reconstructed from the build123d scene.
 
         for env_id in env_idx:
-            mech_graph_path = (
-                path.parent / "graphs" / f"mechanical_graphs_{scene_id}_{env_id}.pt"
-            )
-            elec_graph_path = (
-                path.parent / "graphs" / f"electronic_graphs_{scene_id}_{env_id}.pt"
+            mech_graph_path, elec_graph_path = get_graph_save_paths(
+                path, scene_id, int(env_id)
             )
             torch.save(self.physical_state[env_id].graph, mech_graph_path)
             torch.save(self.electronics_state[env_id].graph, elec_graph_path)
@@ -113,6 +118,16 @@ class RepairsSimState(SimState):
         electronics_indices = self.electronics_state[0].indices
         physical_indices = self.physical_state[0].body_indices
         return electronics_indices, physical_indices
+
+
+def get_graph_save_paths(base_dir: Path, scene_id: int, env_id: int):
+    mech_graph_path = (
+        base_dir / "graphs" / f"mechanical_graphs_{int(scene_id)}_{int(env_id)}.pt"
+    )
+    elec_graph_path = (
+        base_dir / "graphs" / f"electronic_graphs_{int(scene_id)}_{int(env_id)}.pt"
+    )
+    return mech_graph_path, elec_graph_path
 
 
 def merge_global_states(state_list: list[RepairsSimState]):

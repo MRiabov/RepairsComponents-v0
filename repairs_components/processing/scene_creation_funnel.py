@@ -46,7 +46,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
 
     `create_env_configs` should only be called from `multienv_dataloader`.
 
-    Returns: a ConcurrentSceneData for each environment"""
+    Returns: ConcurrentSceneData for each environment #TODO finish
+    """
     assert len(tasks) > 0, "Tasks can not be empty."
     assert any(num_configs_to_generate_per_scene) > 0, (
         "At least one scene must be generated."
@@ -109,6 +110,12 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             starting_sim_state = translate_compound_to_sim_state([starting_scene_geom_])
             desired_sim_state = translate_compound_to_sim_state([desired_state_geom_])
 
+            if save:
+                mechanical_file_name_mapping, electronics_file_name_mapping = (
+                    starting_sim_state.save(save_path, scene_idx)
+                )
+                _, _ = desired_sim_state.save(save_path, scene_idx)
+
             # store states
             starting_sim_states.append(starting_sim_state)
             desired_sim_states.append(desired_sim_state)
@@ -121,7 +128,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         # using the last geom, persist part meshes
         if save:
             assert save_path is not None, "Save path must be provided if save is True"
-            mesh_file_names = persist_meshes(
+            mesh_file_names = persist_meshes_and_mjcf(
                 desired_state_geom_,
                 save_dir=save_path,
                 scene_id=scene_idx,
@@ -152,8 +159,17 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         )  # type: ignore # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
 
+    graph_file_name_mapping = (
+        mechanical_file_name_mapping,
+        electronics_file_name_mapping,
+    )
+
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
-    return (scene_config_batches, mesh_file_names) if save else scene_config_batches
+    return (
+        (scene_config_batches, mesh_file_names, graph_file_name_mapping)
+        if save
+        else scene_config_batches
+    )
 
 
 def starting_state_geom(
@@ -314,7 +330,7 @@ def generate_scene_meshes():
         tooling_stand_plate.plate_env_bd_geometry()
 
 
-def persist_meshes(
+def persist_meshes_and_mjcf(
     b123d_compound: Compound, save_dir: Path, scene_id: int, export_format="gltf"
 ):
     assert export_format in ("gltf", "stl")
@@ -327,6 +343,8 @@ def persist_meshes(
     # export mesh
     for child in children:
         assert child.label is not None, "Child must have a label"
+        assert "@" in child.label, "Part label must have a type delimiter."
+        part_name, part_type = child.label.split(2)
         center = child.center(CenterOf.BOUNDING_BOX)
         if export_format == "gltf":
             mesh_file_name = f"scene_{scene_id}_{child.name}.gltf"
@@ -339,6 +357,13 @@ def persist_meshes(
             # fixme: stl does not resize? hmm.
             mesh_file_name = f"scene_{scene_id}_{child.name}.stl"
             export_stl(child, file_path=save_dir / mesh_file_name)
+
+        # FIXME: deprecate mjcf!
+        if part_type in ("connector", "button", "led", "switch"):
+            connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
+            mjcf = connector.get_mjcf()
+        with open(save_dir / f"scene_{scene_id}_{child.name}.xml", "w") as f:
+            f.write(mjcf)
 
         mesh_file_names[child.label] = mesh_file_name
     return mesh_file_names

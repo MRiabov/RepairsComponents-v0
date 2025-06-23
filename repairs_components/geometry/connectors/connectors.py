@@ -28,6 +28,9 @@ class Connector(ElectricalComponent):
         "This defines a generic mjcf for a connector with a connector position."
         if connector_position is None:
             connector_position = self.connector_pos_relative_to_center
+        print(
+            "warning: exporting electronics as mjcf is deprecated; replace with native genesis controls."
+        )
         return f"""<mujoco>
         <asset>
             <mesh name="{self.name}" file="geom_exports/electronics/connectors/{self.name}.gltf"/>
