@@ -54,24 +54,33 @@ class PhysicalState:
         indices: dict[str, int] | None = None,
         fasteners: dict[str, Fastener] | None = None,
         fastener_id_to_name: dict[int, str] | None = None,
-        device: torch.device = torch.device("cpu"), # should be always on CPU to my understanding. it's not buffer.
+        device: torch.device = torch.device(
+            "cpu"
+        ),  # should be always on CPU to my understanding. it's not buffer.
     ):
         # for empty creation (which is the case in online loading), do not require a graph
         if graph is None:
             self.graph = Data()
             # Initialize graph attributes
 
-            self.graph.edge_index = torch.empty((2, 0), dtype=torch.long)
+            self.device = device  # Set device before initializing tensors
+            self.graph.edge_index = torch.empty(
+                (2, 0), dtype=torch.long, device=self.device
+            )
             self.graph.edge_attr = torch.empty(
-                (0, 12), dtype=torch.float32
+                (0, 12), dtype=torch.float32, device=self.device
             )  # placeholder size
 
             # Node attributes
             self.graph.position = torch.empty(
-                (0, 3), dtype=torch.float32
+                (0, 3), dtype=torch.float32, device=self.device
             )  # note: torch_geomeric conventionally uses `pos` for 2d or 3d positions. You could too.
-            self.graph.quat = torch.empty((0, 4), dtype=torch.float32)
-            self.graph.count_fasteners_held = torch.empty((0,), dtype=torch.int8)
+            self.graph.quat = torch.empty(
+                (0, 4), dtype=torch.float32, device=self.device
+            )
+            self.graph.count_fasteners_held = torch.empty(
+                (0,), dtype=torch.int8, device=self.device
+            )
             if indices is None:
                 self.body_indices = {}
                 self.reverse_indices = {}
@@ -86,6 +95,8 @@ class PhysicalState:
             self.graph = graph
             self.body_indices = indices
             self.reverse_indices = {v: k for k, v in indices.items()}
+            self.device = device
+
             # TODO logic for fastener rebuild...
             for edge_index, edge_attr in zip(graph.edge_index.t(), graph.edge_attr):
                 fastener_id = edge_attr[0]  # assume it is the first element
@@ -143,6 +154,9 @@ class PhysicalState:
         idx = len(self.body_indices)
         self.body_indices[name] = idx
         self.reverse_indices[idx] = name
+
+        # Ensure all graph tensors are on the correct device before concatenation
+        self.graph = self.graph.to(self.device)
 
         self.graph.position = torch.cat(
             [

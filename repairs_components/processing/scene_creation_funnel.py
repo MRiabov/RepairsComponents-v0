@@ -160,7 +160,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         scene_config_batches.append(this_scene_configs)
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
-    return (scene_config_batches, mesh_file_names) if save else scene_config_batches
+    return scene_config_batches, (mesh_file_names if save else None)
 
 
 def starting_state_geom(
