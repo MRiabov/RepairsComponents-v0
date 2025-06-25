@@ -31,7 +31,7 @@ class PhysicalState:
 
     body_indices: dict[str, int] = field(default_factory=dict)
     reverse_indices: dict[int, str] = field(default_factory=dict)
-    fastener_ids: dict[int, str] = field(default_factory=dict)
+    # fastener_ids: dict[int, str] = field(default_factory=dict) # fixme: I don't remember how, but this is unused.
 
     # Fastener metadata (shared across batch)
     fastener: dict[str, Fastener] = field(default_factory=dict)
@@ -50,6 +50,9 @@ class PhysicalState:
 
     def __init__(
         self,
+        free_fasteners_loc: torch.Tensor,
+        free_fasteners_quat: torch.Tensor,
+        free_fasteners_attached_to: torch.Tensor,
         graph: Data | None = None,
         indices: dict[str, int] | None = None,
         fasteners: dict[str, Fastener] | None = None,
@@ -58,6 +61,15 @@ class PhysicalState:
             "cpu"
         ),  # should be always on CPU to my understanding. it's not buffer.
     ):
+        assert (
+            free_fasteners_loc.shape[0]
+            == free_fasteners_quat.shape[0]
+            == free_fasteners_attached_to.shape[0]
+        ), "Free fasteners must have the same shape"
+        self.free_fasteners_loc = free_fasteners_loc
+        self.free_fasteners_quat = free_fasteners_quat
+        self.free_fasteners_attached_to = free_fasteners_attached_to
+        ### unsure end.
         # for empty creation (which is the case in online loading), do not require a graph
         if graph is None:
             self.graph = Data()

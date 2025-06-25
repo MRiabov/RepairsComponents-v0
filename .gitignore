@@ -25,3 +25,9 @@ db.sqlite3-journal
 instance
 .mypy_cache
 .pytest_cache
+
+# custom
+# filter out meshes (they will go in a separate dataset)
+*.bin
+*.gltf
+*.glb

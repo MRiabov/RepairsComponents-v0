@@ -100,6 +100,9 @@ class RepairsSimState(SimState):
         # filename = f"step_state_{uid}.json"
         # filepath = path / filename
 
+        #explicitly patch some fields as expected to be missing:
+        self.physical_state[0].fastener = None
+
         # Create a dictionary with all states
         state_dict = asdict(self)
 
