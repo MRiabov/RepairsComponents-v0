@@ -180,7 +180,7 @@ class OfflineDataloader:
 
     def _load_graphs(
         self, scene_id: int, env_idx: torch.Tensor | None
-    ) -> tuple[Batch, Batch]:
+    ) -> tuple[Batch, Batch, Batch, Batch]:
         """Load the graphs for a scene."""
         if (
             scene_id not in self.loaded_pyg_batch_dict_mech_init

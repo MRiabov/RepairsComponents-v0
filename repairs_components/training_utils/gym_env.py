@@ -139,7 +139,9 @@ class RepairsEnv(gym.Env):
             "generate_number_of_configs_per_scene"
         ]
         generate_number_of_configs_per_scene = torch.full(
-            (concurrent_scenes,), generate_number_of_configs_per_scene, dtype=torch.int16
+            (concurrent_scenes,),
+            generate_number_of_configs_per_scene,
+            dtype=torch.int16,
         )
 
         if not check_if_data_exists(

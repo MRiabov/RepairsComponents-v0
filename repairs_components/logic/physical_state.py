@@ -27,7 +27,15 @@ class PhysicalState:
     # Graph storing part nodes and fastener edges
     graph: Data = field(default_factory=Data)
     """The graph storing part nodes and fastener edges.
-    *Note*: don't use this graph for ML purposes. Use `export_graph` instead."""
+    *Note*: don't use this graph for ML purposes. Use `export_graph` instead.
+    
+    Graph features:
+    - position
+    - quat
+    - free_fasteners_loc
+    - free_fasteners_quat
+    - free_fasteners_attached_to
+    """
 
     body_indices: dict[str, int] = field(default_factory=dict)
     reverse_indices: dict[int, str] = field(default_factory=dict)
@@ -35,24 +43,21 @@ class PhysicalState:
 
     # Fastener metadata (shared across batch)
     fastener: dict[str, Fastener] = field(default_factory=dict)
-
-    # Free fasteners - not attached to two parts, but to one or none
-    free_fasteners_loc: torch.Tensor = field(
-        default_factory=lambda: torch.zeros((0, 3), dtype=torch.float32)
-    )
-    free_fasteners_quat: torch.Tensor = field(
-        default_factory=lambda: torch.zeros((0, 4), dtype=torch.float32)
-    )
-    free_fasteners_attached_to: torch.Tensor = field(
-        default_factory=lambda: torch.zeros((0,), dtype=torch.int8)
-    )
     "When the fastener is inserted only into one body, it is stored here. Otherwise, it is -1."
+
+    # # Free fasteners - not attached to two parts, but to one or none
+    # free_fasteners_loc: torch.Tensor = field(
+    #     default_factory=lambda: torch.zeros((0, 3), dtype=torch.float32)
+    # )
+    # free_fasteners_quat: torch.Tensor = field(
+    #     default_factory=lambda: torch.zeros((0, 4), dtype=torch.float32)
+    # )
+    # free_fasteners_attached_to: torch.Tensor = field(
+    #     default_factory=lambda: torch.zeros((0,), dtype=torch.int8)
+    # )
 
     def __init__(
         self,
-        free_fasteners_loc: torch.Tensor,
-        free_fasteners_quat: torch.Tensor,
-        free_fasteners_attached_to: torch.Tensor,
         graph: Data | None = None,
         indices: dict[str, int] | None = None,
         fasteners: dict[str, Fastener] | None = None,
@@ -61,14 +66,11 @@ class PhysicalState:
             "cpu"
         ),  # should be always on CPU to my understanding. it's not buffer.
     ):
-        assert (
-            free_fasteners_loc.shape[0]
-            == free_fasteners_quat.shape[0]
-            == free_fasteners_attached_to.shape[0]
+        assert graph is None or (
+            graph.free_fasteners_loc.shape[0]
+            == graph.free_fasteners_quat.shape[0]
+            == graph.free_fasteners_attached_to.shape[0]
         ), "Free fasteners must have the same shape"
-        self.free_fasteners_loc = free_fasteners_loc
-        self.free_fasteners_quat = free_fasteners_quat
-        self.free_fasteners_attached_to = free_fasteners_attached_to
         ### unsure end.
         # for empty creation (which is the case in online loading), do not require a graph
         if graph is None:
@@ -93,6 +95,12 @@ class PhysicalState:
             self.graph.count_fasteners_held = torch.empty(
                 (0,), dtype=torch.int8, device=self.device
             )
+
+            self.graph.free_fasteners_loc = torch.empty((0, 3), dtype=torch.float32)
+            self.graph.free_fasteners_quat = torch.empty((0, 7), dtype=torch.float32)
+            self.graph.free_fasteners_attached_to = torch.empty(
+                (0, 2), dtype=torch.float32
+            )  # why 2 if 1? or was it?
             if indices is None:
                 self.body_indices = {}
                 self.reverse_indices = {}
@@ -108,6 +116,12 @@ class PhysicalState:
             self.body_indices = indices
             self.reverse_indices = {v: k for k, v in indices.items()}
             self.device = device
+
+            assert (
+                graph.free_fasteners_loc is not None
+                and graph.free_fasteners_quat is not None
+                and graph.free_fasteners_attached_to
+            ), "Passed graph can't have None fasteners."
 
             # TODO logic for fastener rebuild...
             for edge_index, edge_attr in zip(graph.edge_index.t(), graph.edge_attr):
@@ -150,6 +164,15 @@ class PhysicalState:
             edge_index=self.graph.edge_index,
             edge_attr=self.graph.edge_attr,  # e.g. fastener size.
             num_nodes=len(self.body_indices),
+            free_fastener_feat=torch.cat(
+                [
+                    self.graph.free_fasteners_loc,
+                    self.graph.free_fasteners_quat,
+                    self.graph.free_fasteners_attached_to,
+                ],
+                dim=-1,
+            ),
+            # ^export global fastener features as a part of graph.
         )
 
     def register_body(self, name: str, position: tuple, rotation: tuple):
@@ -440,17 +463,17 @@ class PhysicalState:
         "Rebuild an ElectronicsState from a graph"
         assert graph.num_nodes == len(indices), "Graph and indices do not match"
         new_graph = Data()
-        reverse_indices = {v: k for k, v in indices.items()}
         position, quat, count_fasteners_held = self._decompose_graph_x(graph.x)
         new_graph.position = torch.cat([new_graph.position, position], dim=0)
         new_graph.quat = torch.cat([new_graph.quat, quat], dim=0)
         new_graph.count_fasteners_held = torch.cat(
             [new_graph.count_fasteners_held, count_fasteners_held], dim=0
         )
+        new_graph.free_fasteners_loc = graph.free_fasteners_loc
+        new_graph.free_fasteners_quat = graph.free_fasteners_quat
+        new_graph.free_fasteners_attached_to = graph.free_fasteners_attached_to
         # note: fasteners are not reconstructed because hopefully, they should not be necessary after offline reconstruction.
-        new_state = PhysicalState(
-            graph=new_graph, indices=indices, reverse_indices=reverse_indices
-        )
+        new_state = PhysicalState(graph=new_graph, indices=indices)
         return new_state
 
     def _decompose_graph_x(self, x: torch.Tensor):

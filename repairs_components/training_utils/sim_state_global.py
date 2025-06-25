@@ -100,7 +100,7 @@ class RepairsSimState(SimState):
         # filename = f"step_state_{uid}.json"
         # filepath = path / filename
 
-        #explicitly patch some fields as expected to be missing:
+        # explicitly patch some fields as expected to be missing:
         self.physical_state[0].fastener = None
 
         # Create a dictionary with all states
@@ -112,8 +112,9 @@ class RepairsSimState(SimState):
             mech_graph_path, elec_graph_path = get_graph_save_paths(
                 path, scene_id, int(env_id)
             )
-            torch.save(self.physical_state[env_id].graph, mech_graph_path)
-            torch.save(self.electronics_state[env_id].graph, elec_graph_path)
+
+            torch.save(self.physical_state[env_id].export_graph(), mech_graph_path)
+            torch.save(self.electronics_state[env_id].export_graph(), elec_graph_path)
 
         state_dict.pop("physical_state")
         state_dict.pop("electronics_state")
