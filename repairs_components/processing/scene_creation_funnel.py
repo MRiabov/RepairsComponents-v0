@@ -40,7 +40,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     num_configs_to_generate_per_scene: torch.Tensor,  # int [len]
     save: bool = False,
     save_path: pathlib.Path | None = None,
-) -> tuple[list[ConcurrentSceneData], dict[str, str] | None]:
+) -> tuple[list[ConcurrentSceneData], dict[str, str]]:
     """`create_env_configs` is a general, high_level function responsible for creating of randomized configurations
     (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis.
 
@@ -160,7 +160,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         scene_config_batches.append(this_scene_configs)
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
-    return scene_config_batches, (mesh_file_names if save else None)
+    return scene_config_batches, (mesh_file_names if save else {})
 
 
 def starting_state_geom(

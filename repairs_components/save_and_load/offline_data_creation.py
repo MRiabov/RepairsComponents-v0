@@ -36,7 +36,7 @@ def create_data(
         tasks_to_generate=tasks,
         save_to_disk=True,
         offline_data_dir=base_dir,
-    ).get_processed_data(num_configs_to_generate_per_scene)
+    ).generate_sequential(num_configs_to_generate_per_scene)
     assert mesh_file_names is not None, "Mesh file names must be provided"
     # create the (scene) data.
     for scene_data in data_batches:

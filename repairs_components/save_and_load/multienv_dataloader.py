@@ -107,14 +107,15 @@ class MultiEnvDataLoader:
 
         # generator - count however much is not enough and gen it.
         if torch.any(count_insufficient_configs_per_scene > 0):
-            starved_result = self.preprocessing_fn(count_insufficient_configs_per_scene)
-            if isinstance(starved_result, tuple) and len(starved_result) == 2:
-                starved_configs, aux = starved_result
-            else:
-                starved_configs = starved_result
-                aux = None
+            # debug: self.preprocessing_fn returns `([[...]], None)` and should return `([[...]], dict)`
+            starved_configs = self.preprocessing_fn(
+                count_insufficient_configs_per_scene
+            )
+            # if returns a list of tuples, convert it to tuple of lists
+            if isinstance(starved_configs[0], tuple):
+                starved_configs = tuple(zip(*starved_configs))
         else:
-            starved_configs, aux = [], None
+            starved_configs = [], {}
 
         # log issues is starvation is over 30%.
         total_insufficient_count = torch.sum(count_insufficient_configs_per_scene)
@@ -129,8 +130,8 @@ class MultiEnvDataLoader:
 
         # put newly generated configs to queue (to alleviate starvation)
         # enqueue each starved config individually per scene
-        for scene_id, cfg_list in enumerate(starved_configs):
-            for cfg in cfg_list:
+        for scene_id, cfg_list in enumerate(starved_configs[0]):
+            for cfg in cfg_list:  # ^remove aux
                 try:
                     self.prefetch_queues[scene_id].put_nowait(cfg)
                 except queue.Full:
@@ -144,7 +145,24 @@ class MultiEnvDataLoader:
         # automatically refill the configs that were taken.
         self.populate_async(num_configs_to_generate_per_scene.to(dtype=torch.int16))
 
-        return results_from_queue, aux
+        return results_from_queue
+
+    def generate_sequential(
+        self, num_configs_to_generate_per_scene: torch.Tensor, save_to_disk: bool = True
+    ) -> tuple[list[Any], Any]:
+        """
+        Generate configs non-async (sequentially) for all environments. Use when async is not necessary, e.g. generating the dataset.
+        Args:
+            num_configs_to_generate_per_scene: Tensor with number of configs per environment.
+            save_to_disk: Whether to save the configs to disk.
+        Returns:
+            List of preprocessed data items.
+        """
+        generated_configs, aux = self.preprocessing_fn(
+            num_configs_to_generate_per_scene, save_to_disk=save_to_disk
+        )
+
+        return generated_configs, aux
 
     def populate_async(self, num_configs_to_generate_per_scene: torch.Tensor) -> Any:
         """
@@ -221,12 +239,20 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         # Create preprocessing function that generates or loads batches for scenes
         def online_preprocessing_fn(
             num_configs_to_generate_per_scene: torch.Tensor,
+            save_to_disk: bool = True,
         ) -> tuple[List[List[ConcurrentSceneData]], Optional[Dict[str, str]]]:
-            return self._generate_scene_batches(num_configs_to_generate_per_scene)
+            return self._generate_scene_batches(
+                num_configs_to_generate_per_scene, save_to_disk=save_to_disk
+            )
 
         def get_offline_data_fn(
             num_configs_to_generate_per_scene: torch.Tensor,
+            save_to_disk: bool = False,
         ) -> List[List[ConcurrentSceneData]]:
+            assert save_to_disk == False, (
+                "save_to_disk must be False for offline data loading."
+            )  # FIXME: bad abstraction again here. I should not split it by online/offline, rather use different functions for both.
+
             return self._load_offline_data(num_configs_to_generate_per_scene)
 
         if online:
@@ -270,7 +296,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
 
     def get_processed_data(
         self, num_configs_to_generate_per_scene: torch.Tensor, timeout: float = 1.0
-    ) -> tuple[list[ConcurrentSceneData], dict[str, str] | None]:
+    ) -> tuple[list[ConcurrentSceneData], dict[str, str]]:
         """
         Repairs-specific: merges configs, handles mesh file names, etc.
         Returns (merged_batches, mesh_file_names) for online mode, else just batches.
@@ -278,6 +304,24 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         # Call the base implementation to get lists of lists
         batches_per_env, aux_mesh_file_names = super().get_processed_data(
             num_configs_to_generate_per_scene, timeout
+        )
+
+        # merge all configs (preference downstream).
+        merged_batches = [
+            merge_concurrent_scene_configs(batch) for batch in batches_per_env
+        ]
+        return merged_batches, aux_mesh_file_names
+
+    def generate_sequential(
+        self, num_configs_to_generate_per_scene: torch.Tensor
+    ) -> tuple[list[ConcurrentSceneData], dict[str, str]]:
+        """
+        Repairs-specific: merges configs, handles mesh file names, etc.
+        Returns (merged_batches, mesh_file_names) for online mode, else just batches.
+        """
+        # Call the base implementation to get lists of lists
+        batches_per_env, aux_mesh_file_names = super().generate_sequential(
+            num_configs_to_generate_per_scene
         )
 
         # merge all configs (preference downstream).
