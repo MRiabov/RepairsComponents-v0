@@ -9,7 +9,7 @@ from repairs_components.logic.physical_state import PhysicalState
 from repairs_components.logic.fluid_state import FluidState
 from repairs_components.logic.tools.tools_state import ToolState
 from repairs_components.training_utils.sim_state import SimState
-from torch_geometric.data import Data
+from torch_geometric.data import Batch, Data
 
 
 @dataclass
@@ -82,13 +82,24 @@ class RepairsSimState(SimState):
             # "fluid_diff_count": fluid_diff_counts,
         }, total_diff_counts
 
-    def save(self, path: Path, scene_id, env_idx: torch.Tensor | None = None):
+    def save(
+        self, path: Path, scene_id, init: bool, env_idx: torch.Tensor | None = None
+    ):
         """Save the state to a JSON file with a unique identifier.
+
+        Args:
+            path: Path to save the state to.
+            scene_id: ID of the scene.
+            init: A flag necessary to save graphs for initial or desired state.
+            env_idx: Indices of the environments to save. If None, all environments are saved.
 
         Returns:
             - Names of bodies located under indices
             - Names of electronics bodies located under indices.
         """
+        assert self.scene_batch_dim > 1, "Expected that batch dim is greater than 1."
+        # ^ note, not a hard constraint, but it should be valid in all cases.
+
         # Create output directory if it doesn't exist
         path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -103,34 +114,39 @@ class RepairsSimState(SimState):
         # explicitly patch some fields as expected to be missing:
         self.physical_state[0].fastener = None
 
-        # Create a dictionary with all states
-        state_dict = asdict(self)
-
         # save graphs, everything else can be reconstructed from the build123d scene.
 
-        for env_id in env_idx:
-            mech_graph_path, elec_graph_path = get_graph_save_paths(
-                path, scene_id, int(env_id)
-            )
+        mech_graph_path, elec_graph_path = get_graph_save_paths(
+            path, scene_id, init=init
+        )
+        physical_graphs = [self.physical_state[env_id].graph for env_id in env_idx]
+        electronics_graphs = [
+            self.electronics_state[env_id].graph for env_id in env_idx
+        ]
 
-            torch.save(self.physical_state[env_id].export_graph(), mech_graph_path)
-            torch.save(self.electronics_state[env_id].export_graph(), elec_graph_path)
+        torch.save(Batch.from_data_list(physical_graphs), mech_graph_path)
+        torch.save(Batch.from_data_list(electronics_graphs), elec_graph_path)
 
-        state_dict.pop("physical_state")
-        state_dict.pop("electronics_state")
+        torch.save(
+            [self.tool_state[env_id].current_tool_id for env_id in env_idx],
+            path / f"tool_idx_{scene_id}.pt",
+        )
 
         electronics_indices = self.electronics_state[0].indices
         physical_indices = self.physical_state[0].body_indices
         return electronics_indices, physical_indices
 
 
-def get_graph_save_paths(base_dir: Path, scene_id: int, env_id: int):
+def get_graph_save_paths(base_dir: Path, scene_id: int, init: bool):
+    # note: env_id is not used because graphs are batched per scene.
+    postfix = "init" if init else "des"
     mech_graph_path = (
-        base_dir / "graphs" / f"mechanical_graphs_{int(scene_id)}_{int(env_id)}.pt"
+        base_dir / "graphs" / f"mechanical_graphs_{int(scene_id)}_{postfix}.pt"
     )
     elec_graph_path = (
-        base_dir / "graphs" / f"electronic_graphs_{int(scene_id)}_{int(env_id)}.pt"
+        base_dir / "graphs" / f"electronic_graphs_{int(scene_id)}_{postfix}.pt"
     )
+
     return mech_graph_path, elec_graph_path
 
 
@@ -184,8 +200,8 @@ def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
 def reconstruct_sim_state(
     electronics_graphs: list[Data],
     mechanical_graphs: list[Data],
-    electronics_indices: list[dict[str, int]],
-    mechanical_indices: list[dict[str, int]],
+    electronics_indices: dict[str, int],
+    mechanical_indices: dict[str, int],
     tool_data: torch.Tensor,  # int tensor of tool ids
     fluid_data_placeholder: list[dict[str, int]] | None = None,
 ) -> RepairsSimState:
@@ -202,12 +218,12 @@ def reconstruct_sim_state(
     batch_dim = len(electronics_graphs)
     repairs_sim_state = RepairsSimState(batch_dim)
     repairs_sim_state.electronics_state = [
-        ElectronicsState.rebuild_from_graph(graph, indices)
-        for graph, indices in zip(electronics_graphs, electronics_indices)
+        ElectronicsState.rebuild_from_graph(graph, electronics_indices)
+        for graph in electronics_graphs
     ]
     repairs_sim_state.physical_state = [
-        PhysicalState.rebuild_from_graph(graph, indices)
-        for graph, indices in zip(mechanical_graphs, mechanical_indices)
+        PhysicalState.rebuild_from_graph(graph, mechanical_indices)
+        for graph in mechanical_graphs
     ]
     repairs_sim_state.tool_state = [
         ToolState.rebuild_from_saved(indices) for indices in tool_data

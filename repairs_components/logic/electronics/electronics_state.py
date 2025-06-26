@@ -116,6 +116,14 @@ class ElectronicsState(SimState):
         self._graph_built = True
 
     def export_graph(self):
+        # sanity check:
+        assert len(self.components) == len(self.indices), (
+            "Graph indices do not match number of components."
+        )
+        assert len(self.components) == self.graph.num_nodes, (
+            "Graph num_nodes does not match number of components."
+        )
+        print(f"Exporting graph with {len(self.components)} components.")
         new_graph = Data(
             x=torch.cat(
                 [
@@ -126,7 +134,7 @@ class ElectronicsState(SimState):
                 ],
                 dim=-1,
             ),
-            num_nodes=len(self.indices),
+            num_nodes=len(self.components),
             edge_index=self.graph.edge_index,
             edge_attr=self.graph.edge_attr,  # e.g. fastener size.
         )
@@ -470,7 +478,9 @@ class ElectronicsState(SimState):
     ) -> "ElectronicsState":
         "Rebuild an ElectronicsState from a graph"
         assert graph.num_nodes is not None
-        assert graph.num_nodes == len(indices), "Graph and indices do not match"
+        assert graph.num_nodes == len(indices), (
+            f"Graph and indices do not match: {graph.num_nodes} != {len(indices)}"
+        )
 
         # Create a new ElectronicsState instance
         state = cls()

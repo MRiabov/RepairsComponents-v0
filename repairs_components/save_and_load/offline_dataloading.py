@@ -1,16 +1,21 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import List
 
 import numpy as np
 import torch
-from torch_geometric.data import Batch
+from torch_geometric.data import Batch, Data
 
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     merge_concurrent_scene_configs,
+    split_scene_config,
 )
-from repairs_components.training_utils.sim_state_global import reconstruct_sim_state
+from repairs_components.training_utils.progressive_reward_calc import RewardHistory
+from repairs_components.training_utils.sim_state_global import (
+    get_graph_save_paths,
+    reconstruct_sim_state,
+)
 
 # During the loading of the data we load:
 # 1. Graphs
@@ -40,10 +45,6 @@ class OfflineDataloader:
         self.data_dir = Path(data_dir)
         self.scene_ids = scene_ids
 
-        # Load metadata
-        metadata_path = self.data_dir / "scenes_metadata.json"
-        assert metadata_path.exists(), f"Metadata file not found at {metadata_path}"
-
         self.loaded_pyg_batch_dict_mech_init = {}
         self.loaded_pyg_batch_dict_elec_init = {}
         self.loaded_pyg_batch_dict_mech_des = {}
@@ -52,8 +53,15 @@ class OfflineDataloader:
         self.vox_init_dict = {}
         self.vox_des_dict = {}
 
-        with open(metadata_path, "r") as f:
-            self.metadata = json.load(f)
+        self.metadata = {}
+
+        # Load metadata
+        for scene_id in scene_ids:
+            metadata_path = self.data_dir / f"scene_{scene_id}" / "metadata.json"
+            assert metadata_path.exists(), f"Metadata file not found at {metadata_path}"
+
+            with open(metadata_path, "r") as f:
+                self.metadata["scene_" + str(scene_id)] = json.load(f)
 
         # Load all scene configs
         self.scene_configs = []
@@ -61,7 +69,7 @@ class OfflineDataloader:
             # get this scene metadata
             scene_metadata = self.metadata["scene_" + str(scene_id)]
             init_scene_config = self.load_scene_config(scene_metadata)
-            self.scene_configs.append(scene_config)
+            self.scene_configs.append(init_scene_config)
 
     def get_processed_offline_data(
         self, num_envs_per_scene: torch.Tensor
@@ -87,14 +95,15 @@ class OfflineDataloader:
             if num_envs_to_get == 0:
                 all_cfgs.append(None)
                 continue
-            all_cfgs_this_scene = self.scene_configs[scene_id]
+            config = self.scene_configs[scene_id]
+            all_cfgs_this_scene = split_scene_config(config)
             env_ids = np.random.randint(
-                low=0, high=len(all_cfgs_this_scene), size=num_envs_to_get
+                low=0, high=config.batch_dim, size=(num_envs_to_get.item(),)
             )
             cfgs_this_scene = []
             for env_id in env_ids:
                 cfgs_this_scene.append(all_cfgs_this_scene[env_id])
-            all_cfgs.append(merge_concurrent_scene_configs(cfgs_this_scene))
+            all_cfgs.append(cfgs_this_scene)
         return all_cfgs
 
     def load_scene_config(self, scene_metadata: dict) -> ConcurrentSceneData:
@@ -102,21 +111,23 @@ class OfflineDataloader:
         scene_id = scene_metadata["scene_id"]
 
         # voxels
-        vox_init_path = self.data_dir / "voxels" / f"vox_init_{scene_id}.npz"
-        vox_des_path = self.data_dir / "voxels" / f"vox_des_{scene_id}.npz"
+        vox_init_path = self.data_dir / "voxels" / f"vox_init_{scene_id}.pt"
+        vox_des_path = self.data_dir / "voxels" / f"vox_des_{scene_id}.pt"
+
         # Load sparse tensors # note: small enough to fit into memory, yet. (36mb estimated)
 
-        self.vox_init_dict[scene_id] = self._load_sparse_tensor(vox_init_path)
-        self.vox_des_dict[scene_id] = self._load_sparse_tensor(vox_des_path)
+        self.vox_init_dict[scene_id] = torch.load(vox_init_path)
+        self.vox_des_dict[scene_id] = torch.load(vox_des_path)
+        print(self.vox_init_dict[scene_id].shape)
         # ^ memory calculation: 100k samples*max 15 items * 10 datapoints * float16 =36mil = 36mbytes
         # graphs
-        elec_graphs_init, mech_graphs_init, elec_graphs_des, mech_graphs_des = (
+        mech_graphs_init, elec_graphs_init, mech_graphs_des, elec_graphs_des = (
             self._load_graphs(scene_id)
         )
 
         # tool idx
-        tool_idx_path_init = self.data_dir / "tool_idx_" + str(scene_id) + ".pt"
-        tool_idx_path_des = self.data_dir / "tool_idx_" + str(scene_id) + ".pt"
+        tool_idx_path_init = self.data_dir / f"tool_idx_{scene_id}.pt"
+        tool_idx_path_des = self.data_dir / f"tool_idx_{scene_id}.pt"
         tool_data_init = torch.load(tool_idx_path_init)
         tool_data_des = torch.load(tool_idx_path_des)
 
@@ -135,6 +146,9 @@ class OfflineDataloader:
             scene_metadata["mechanical_indices"],
             tool_data_des,
         )
+
+        batch_dim = init_sim_state.scene_batch_dim
+
         sim_state = ConcurrentSceneData(
             scene=None,
             gs_entities=None,
@@ -146,41 +160,31 @@ class OfflineDataloader:
             initial_diffs=None,
             initial_diff_counts=None,
             scene_id=scene_id,
-            reward_history=None,
-            batch_dim=scene_metadata["batch_dim"],
-            step_count=torch.zeros(scene_metadata["batch_dim"], dtype=torch.int32),
+            reward_history=RewardHistory(batch_dim=batch_dim),
+            batch_dim=batch_dim,
+            task_ids=torch.zeros(batch_dim, dtype=torch.int32),
+            step_count=torch.zeros(batch_dim, dtype=torch.int32),
         )
 
         return sim_state
 
     def _load_sparse_tensor(
-        self, npz_path: Path, expected_batch_dim: int | None = None, dtype=torch.float16
+        self,
+        path: Path,
+        expected_batch_dim: int | None = None,
     ) -> torch.Tensor:
         """Load a sparse tensor from disk."""
-        import numpy
-
-        arrays_npz = numpy.load(npz_path)
-        indices = arrays_npz["indices"]
-        values = arrays_npz["values"]
-        tensor_size = (indices.shape[0], *arrays_npz["tensor_size"])
-        if expected_batch_dim is not None:
-            assert indices.shape[0] == expected_batch_dim, (
-                f"Expected batch dim {expected_batch_dim}, got {indices.shape[0]}"
-            )
-            assert numpy.unique(indices[:, 0]).shape[0] == expected_batch_dim, (
-                f"Expected batch dim {expected_batch_dim}, got {numpy.unique(indices[:, 0]).shape[0]}"
-            )
-
-        indices = torch.from_numpy(indices)
-        values = torch.from_numpy(values)
-
-        return torch.sparse_coo_tensor(
-            indices, values, size=tensor_size, dtype=dtype
-        ).coalesce()
+        tensor = torch.load(path)
+        assert isinstance(tensor, torch.Tensor), "Tensor must be a torch tensor"
+        assert expected_batch_dim is None or tensor.shape[0] == expected_batch_dim, (
+            "Tensor must have the expected batch dim"
+        )
+        return tensor
 
     def _load_graphs(
-        self, scene_id: int, env_idx: torch.Tensor | None
-    ) -> tuple[Batch, Batch, Batch, Batch]:
+        self, scene_id: int, env_idx: torch.Tensor | None = None
+    ) -> tuple[list[Data], list[Data], list[Data], list[Data]]:
+        # ^ no point in converting lists of data to batches.
         """Load the graphs for a scene."""
         if (
             scene_id not in self.loaded_pyg_batch_dict_mech_init
@@ -188,81 +192,51 @@ class OfflineDataloader:
         ):
             # load initial and desired graphs: mech init, mech des, elec init, elec des
             # note: not in a for loop, but it's OK.
-            mech_graph_init_path = (
-                self.data_dir / "graphs" / f"mechanical_graphs_{scene_id}.pt"
+            mech_graph_init_path, elec_graph_init_path = get_graph_save_paths(
+                self.data_dir, scene_id, init=True
             )
-            mech_graph_des_path = (
-                self.data_dir / "graphs" / f"mechanical_graphs_{scene_id}.pt"
-            )
-            elec_graph_init_path = (
-                self.data_dir / "graphs" / f"electronic_graphs_{scene_id}.pt"
-            )
-            elec_graph_des_path = (
-                self.data_dir / "graphs" / f"electronic_graphs_{scene_id}.pt"
-            )
-            assert mech_graph_init_path.exists(), (
-                f"Mechanical graph file not found at {mech_graph_init_path}"
-            )
-            assert elec_graph_init_path.exists(), (
-                f"Electronic graph file not found at {elec_graph_init_path}"
-            )
-            assert mech_graph_des_path.exists(), (
-                f"Mechanical graph file not found at {mech_graph_des_path}"
-            )
-            assert elec_graph_des_path.exists(), (
-                f"Electronic graph file not found at {elec_graph_des_path}"
+            mech_graph_des_path, elec_graph_des_path = get_graph_save_paths(
+                self.data_dir, scene_id, init=False
             )
 
-            loaded_graphs_mech_init = Batch.from_data_list(
-                torch.load(mech_graph_init_path)
-            )
-            loaded_graphs_elec_init = Batch.from_data_list(
-                torch.load(elec_graph_init_path)
-            )
-            loaded_graphs_mech_des = Batch.from_data_list(
-                torch.load(mech_graph_des_path)
-            )
-            loaded_graphs_elec_des = Batch.from_data_list(
-                torch.load(elec_graph_des_path)
-            )
+            graphs = []
+            for path in [
+                mech_graph_init_path,
+                elec_graph_init_path,
+                mech_graph_des_path,
+                elec_graph_des_path,
+            ]:
+                assert path.exists(), f"Graph file not found at {path}"
+                batch = torch.load(path)
+                assert isinstance(batch, Batch), (
+                    f"Graph under path {path} is not a Batch, it is {type(batch)}"
+                )
+                graphs.append(batch)
 
-            assert (
-                loaded_graphs_mech_init.num_graphs == loaded_graphs_elec_init.num_graphs
-            ), "Num graphs in mechanical and electronic batches do not match."
-            assert loaded_graphs_mech_init[0].scene_id == scene_id, (
-                f"The loaded (mechanical) dataset graph does not seem to belong to this scene. "
-                f"Expected {scene_id}, got {loaded_graphs_mech_init[0].scene_id}"
+                assert batch.num_graphs == graphs[0].num_graphs, (
+                    "Num graphs is expected to be equal for all graph batches."
+                )
+            (
+                self.loaded_pyg_batch_dict_mech_init[scene_id],
+                self.loaded_pyg_batch_dict_elec_init[scene_id],
+                self.loaded_pyg_batch_dict_mech_des[scene_id],
+                self.loaded_pyg_batch_dict_elec_des[scene_id],
+            ) = graphs
+
+        if env_idx is None:
+            return (
+                self.loaded_pyg_batch_dict_mech_init[scene_id].to_data_list(),
+                self.loaded_pyg_batch_dict_elec_init[scene_id].to_data_list(),
+                self.loaded_pyg_batch_dict_mech_des[scene_id].to_data_list(),
+                self.loaded_pyg_batch_dict_elec_des[scene_id].to_data_list(),
             )
-            assert loaded_graphs_elec_init[0].scene_id == scene_id, (
-                f"The loaded (electronic) dataset graph does not seem to belong to this scene. "
-                f"Expected {scene_id}, got {loaded_graphs_elec_init[0].scene_id}"
+        else:
+            return (
+                self.loaded_pyg_batch_dict_mech_init[scene_id][env_idx],
+                self.loaded_pyg_batch_dict_elec_init[scene_id][env_idx],
+                self.loaded_pyg_batch_dict_mech_des[scene_id][env_idx],
+                self.loaded_pyg_batch_dict_elec_des[scene_id][env_idx],
             )
-
-            self.loaded_pyg_batch_dict_mech_init[scene_id] = loaded_graphs_mech_init
-            self.loaded_pyg_batch_dict_mech_des[scene_id] = loaded_graphs_mech_des
-            self.loaded_pyg_batch_dict_elec_init[scene_id] = loaded_graphs_elec_init
-            self.loaded_pyg_batch_dict_elec_des[scene_id] = loaded_graphs_elec_des
-
-        if env_idx is not None:
-            loaded_graphs_mech_init = self.loaded_pyg_batch_dict_mech_init[scene_id][
-                env_idx
-            ]
-            loaded_graphs_elec_init = self.loaded_pyg_batch_dict_elec_init[scene_id][
-                env_idx
-            ]
-            loaded_graphs_mech_des = self.loaded_pyg_batch_dict_mech_des[scene_id][
-                env_idx
-            ]
-            loaded_graphs_elec_des = self.loaded_pyg_batch_dict_elec_des[scene_id][
-                env_idx
-            ]
-
-        return (
-            loaded_graphs_mech_init,
-            loaded_graphs_elec_init,
-            loaded_graphs_mech_des,
-            loaded_graphs_elec_des,
-        )
 
 
 def check_if_data_exists(
@@ -290,8 +264,8 @@ def check_if_data_exists(
         # Voxels
         voxels_dir = data_dir / "voxels"
         voxel_files = [
-            voxels_dir / f"vox_init_{scene_id}.npz",
-            voxels_dir / f"vox_des_{scene_id}.npz",
+            voxels_dir / f"vox_init_{scene_id}.pt",
+            voxels_dir / f"vox_des_{scene_id}.pt",
         ]
         # Check all
         if not all(file_path.exists() for file_path in graph_files + voxel_files):

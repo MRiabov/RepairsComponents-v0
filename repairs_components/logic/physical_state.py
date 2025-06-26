@@ -109,9 +109,9 @@ class PhysicalState:
                 self.reverse_indices = {v: k for k, v in indices.items()}
         else:
             assert indices is not None, "Indices must be provided if graph is not None"
-            assert fastener_id_to_name is not None, (
-                "Fastener names must be provided if graph is not None"
-            )
+            # assert fastener_id_to_name is not None, (
+            #     "Fastener names must be provided if graph is not None"
+            # )
             self.graph = graph
             self.body_indices = indices
             self.reverse_indices = {v: k for k, v in indices.items()}
@@ -120,7 +120,7 @@ class PhysicalState:
             assert (
                 graph.free_fasteners_loc is not None
                 and graph.free_fasteners_quat is not None
-                and graph.free_fasteners_attached_to
+                and graph.free_fasteners_attached_to is not None
             ), "Passed graph can't have None fasteners."
 
             # TODO logic for fastener rebuild...
@@ -152,12 +152,12 @@ class PhysicalState:
 
     def export_graph(self):
         """Export the graph to a torch_geometric Data object usable by ML."""
-        Data(  # expected len of x - 8.
+        return Data(  # expected len of x - 8.
             x=torch.cat(
                 [
                     self.graph.position,
                     self.graph.quat,
-                    self.graph.count_fasteners_held.float(),
+                    self.graph.count_fasteners_held.float().unsqueeze(-1),
                 ],
                 dim=1,
             ).bfloat16(),
@@ -461,27 +461,19 @@ class PhysicalState:
     @staticmethod
     def rebuild_from_graph(graph: Data, indices: dict[str, int]) -> "PhysicalState":
         "Rebuild an ElectronicsState from a graph"
-        assert graph.num_nodes == len(indices), "Graph and indices do not match"
-        new_graph = Data()
-        position, quat, count_fasteners_held = self._decompose_graph_x(graph.x)
-        new_graph.position = torch.cat([new_graph.position, position], dim=0)
-        new_graph.quat = torch.cat([new_graph.quat, quat], dim=0)
-        new_graph.count_fasteners_held = torch.cat(
-            [new_graph.count_fasteners_held, count_fasteners_held], dim=0
+        assert graph.num_nodes == len(indices), (
+            f"Graph and indices do not match: {graph.num_nodes} != {len(indices)}"
         )
-        new_graph.free_fasteners_loc = graph.free_fasteners_loc
-        new_graph.free_fasteners_quat = graph.free_fasteners_quat
-        new_graph.free_fasteners_attached_to = graph.free_fasteners_attached_to
+        # kind of pointless method tbh
+        # new_graph.position = graph.position
+        # new_graph.quat = graph.quat
+        # new_graph.count_fasteners_held = graph.count_fasteners_held
+        # new_graph.free_fasteners_loc = graph.free_fasteners_loc
+        # new_graph.free_fasteners_quat = graph.free_fasteners_quat
+        # new_graph.free_fasteners_attached_to = graph.free_fasteners_attached_to
         # note: fasteners are not reconstructed because hopefully, they should not be necessary after offline reconstruction.
-        new_state = PhysicalState(graph=new_graph, indices=indices)
+        new_state = PhysicalState(graph=graph, indices=indices)
         return new_state
-
-    def _decompose_graph_x(self, x: torch.Tensor):
-        "Decompose graph x into meaningful values"
-        position = x[:, :3]
-        quat = x[:, 3:7]
-        count_fasteners_held = x[:, 7]
-        return position, quat, count_fasteners_held
 
 
 def _quaternion_angle_diff(q1, q2):

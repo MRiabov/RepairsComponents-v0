@@ -39,7 +39,7 @@ from repairs_components.training_utils.progressive_reward_calc import (
     RewardHistory,
     calculate_done,
 )
-from repairs_components.save_and_load.save import optional_save
+from repairs_components.save_and_load.online_save import optional_save
 from repairs_sim_step import step_repairs
 from pathlib import Path
 
@@ -101,6 +101,10 @@ class RepairsEnv(gym.Env):
         # genesis batch dim = batch_dim // concurrent_scenes
 
         base_dir = Path(io_cfg["data_dir"])
+        base_dir.mkdir(exist_ok=True, parents=True)
+        (base_dir / "graphs").mkdir(exist_ok=True, parents=True)
+        (base_dir / "voxels").mkdir(exist_ok=True)
+        (base_dir / "meshes").mkdir(exist_ok=True)
         use_random_textures = obs_cfg["use_random_textures"]
 
         # save config
@@ -144,10 +148,11 @@ class RepairsEnv(gym.Env):
             dtype=torch.int16,
         )
 
-        if not check_if_data_exists(
-            scene_ids.tolist(),
-            base_dir,
-            generate_number_of_configs_per_scene,
+        if (
+            not check_if_data_exists(
+                scene_ids.tolist(), base_dir, generate_number_of_configs_per_scene
+            )
+            or io_cfg["force_recreate_data"]
         ):
             create_data(
                 scene_setups=env_setups,
@@ -159,14 +164,11 @@ class RepairsEnv(gym.Env):
 
         # -- dataloader (offline) --
         # init dataloader
-        assert "offline_dataloader_settings" in env_cfg, (
-            "Offline dataloader settings not found in env_cfg."
-        )
         # note: will take some time to load.
         self.env_dataloader = RepairsEnvDataLoader(
+            env_setup_ids=io_cfg["env_setup_ids"],
             online=False,
             offline_data_dir=base_dir,
-            scene_ids=env_cfg["offline_dataloader_settings"]["scene_ids"],
         )
         in_memory = torch.full(
             (concurrent_scenes,),
@@ -175,7 +177,7 @@ class RepairsEnv(gym.Env):
         )
         self.env_dataloader.populate_async(in_memory)
         partial_env_configs = self.env_dataloader.get_processed_data(
-            torch.ones(concurrent_scenes, dtype=torch.bool)
+            torch.ones(concurrent_scenes, dtype=torch.int16)
         )  # get a batch of configs(1 per scene)
 
         # scene init setup # note: technically this should be the Dataloader worker init fn.

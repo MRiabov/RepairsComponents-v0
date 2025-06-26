@@ -94,6 +94,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 cache=voxelization_cache,
                 save=save,
                 save_path=save_path,
+                scene_file_name=f"vox_init_{scene_idx}.pt",
             )
             desired_voxel_grid, voxelization_cache = export_voxel_grid(
                 desired_state_geom_,
@@ -102,6 +103,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 cache=voxelization_cache,
                 save=save,
                 save_path=save_path,
+                scene_file_name=f"vox_des_{scene_idx}.pt",
             )
 
             # Store sparse tensors directly
@@ -111,11 +113,6 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             # create RepairsSimState for both
             starting_sim_state = translate_compound_to_sim_state([starting_scene_geom_])
             desired_sim_state = translate_compound_to_sim_state([desired_state_geom_])
-
-            if save:
-                # get them later by get_graph_save_paths
-                starting_sim_state.save(save_path, scene_idx)
-                desired_sim_state.save(save_path, scene_idx)
 
             # store states
             starting_sim_states.append(starting_sim_state)
@@ -135,10 +132,20 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 export_format="gltf",
             )
 
+            torch.save(  # only save after all are done
+                torch.stack(voxel_grids_initial, dim=0),
+                save_path / "voxels" / f"vox_init_{scene_idx}.pt",
+            )
+            torch.save(
+                torch.stack(voxel_grids_desired, dim=0),
+                save_path / "voxels" / f"vox_des_{scene_idx}.pt",
+            )
+
         voxel_grids_initial = torch.stack(voxel_grids_initial, dim=0)
         voxel_grids_desired = torch.stack(voxel_grids_desired, dim=0)
         starting_sim_state = merge_global_states(starting_sim_states)
         desired_sim_state = merge_global_states(desired_sim_states)
+
         this_scene_configs = ConcurrentSceneData(
             scene=None,
             gs_entities=None,
@@ -158,6 +165,11 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             task_ids=task_ids,
         )  # type: ignore # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
+
+        if save:
+            # get them later by get_graph_save_paths
+            starting_sim_state.save(save_path, scene_idx, init=True)
+            desired_sim_state.save(save_path, scene_idx, init=False)
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
     return scene_config_batches, (mesh_file_names if save else {})
@@ -335,26 +347,26 @@ def persist_meshes_and_mjcf(
     for child in children:
         assert child.label is not None, "Child must have a label"
         assert "@" in child.label, "Part label must have a type delimiter."
-        _part_name, part_type = child.label.split(2)
+        _part_name, part_type = child.label.split("@")
         center = child.center(CenterOf.BOUNDING_BOX)
         if export_format == "gltf":
-            mesh_file_name = f"scene_{scene_id}_{child.name}.gltf"
+            mesh_file_name = f"scene_{scene_id}_{child.label}.gltf"
             export_gltf(
                 child.moved(Pos(-center)),
                 save_dir / mesh_file_name,
                 unit=Unit.CM,
             )
         elif export_format == "stl":
-            # fixme: stl does not resize? hmm.
-            mesh_file_name = f"scene_{scene_id}_{child.name}.stl"
+            # fixme: stl does not resize? hmm. (resize units)
+            mesh_file_name = f"scene_{scene_id}_{child.label}.stl"
             export_stl(child, file_path=save_dir / mesh_file_name)
 
         # FIXME: deprecate mjcf!
         if part_type in ("connector", "button", "led", "switch"):
             connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
             mjcf = connector.get_mjcf()
-        with open(save_dir / f"scene_{scene_id}_{child.name}.xml", "w") as f:
-            f.write(mjcf)
+            with open(save_dir / f"scene_{scene_id}_{child.label}.xml", "w") as f:
+                f.write(mjcf)
 
         mesh_file_names[child.label] = mesh_file_name
     return mesh_file_names

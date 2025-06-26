@@ -27,7 +27,7 @@ def optional_save(
 
     if save_any:
         if save_state:
-            sim_state.save(save_path)  # saves graphs too
+            sim_state.save(save_path, scene_id, init=True)  # saves graphs too
         if save_image:
             assert obs_image is not None, "obs_image must be provided to save_image"
             img_path = os.path.join(save_path, "obs_image.pt")

@@ -57,6 +57,7 @@ def export_voxel_grid(
     cache: dict[str, dict[str, Any]] | None = None,
     save: bool = False,
     save_path: Path | None = None,
+    scene_file_name: str | None = None,
     device: str = "cpu",
 ):
     """
@@ -75,6 +76,8 @@ def export_voxel_grid(
     """
     if cached:
         assert cache is not None, "Cache must be provided if cached=True."
+    if save:
+        assert save_path is not None, "Save path must be provided if save=True."
     parts_list = compound.children
 
     # flatten all compounds.
@@ -111,14 +114,14 @@ def export_voxel_grid(
         else:
             # Export STL and load via trimesh
             if save:
-                save_path = Path(save_path, f"{key}.stl")
-                bd.export_stl(part, save_path)
-                mesh = trimesh.load(save_path)
+                mesh_save_path = save_path / f"{key}.stl"
+                bd.export_stl(part, mesh_save_path)
+                mesh = trimesh.load_mesh(mesh_save_path)
             else:
                 tmp_file = tempfile.NamedTemporaryFile(delete=True, suffix=".stl")
                 tmp_path = tmp_file.name
                 bd.export_stl(part, tmp_path)
-                mesh = trimesh.load(tmp_path)
+                mesh = trimesh.load_mesh(tmp_path)
                 tmp_file.close()
             # os.remove(tmp_path)
             if cached and cache is not None:
@@ -149,8 +152,16 @@ def export_voxel_grid(
             assert vox is not None, "Voxelization has failed."
             # note: coords_np are a tensor of (points, 3). In one case it is 60002*3
 
-            # Get coordinates in grid space # of this shape to scene voxel grid.
-            coords_np = np.floor((vox.points - mins) / voxel_size).astype(np.int8)
+            # Get coordinates in grid space # of this shape to scene voxel grid. #1e-6 for eps - to avoid floating point error cast lower than 0.
+            coords_np = np.round((vox.points - mins + 1e-5) / voxel_size).astype(
+                np.uint8
+            )
+            assert coords_np.min() >= 0, (
+                f"Some vox points are out of bounds. Abs min is {vox.points - mins} "
+            )
+            assert coords_np.max() < 256, (
+                f"Some vox points are out of bounds. Abs max is {vox.points - mins} "
+            )
 
             # Implementation note: below can be technically made outside of the loop.
             # Convert to tensor and get features
@@ -175,6 +186,7 @@ def export_voxel_grid(
     # holdup. Does this not stack all shapes to start from 0,0?
     sparse_scene = torch.cat(all_sparse, dim=0)
     sparse_scene = sparse_scene.coalesce()
+
 
     return (sparse_scene, cache) if cached else sparse_scene
 

@@ -114,10 +114,14 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         initial_diffs={
             k: [data.initial_diffs[k] for data in scene_configs]
             for k in scene_configs[0].initial_diffs.keys()
-        },
+        }
+        if scene_configs[0].initial_diffs is not None
+        else None,
         initial_diff_counts=torch.cat(
             [data.initial_diff_counts for data in scene_configs], dim=0
-        ),
+        )
+        if scene_configs[0].initial_diff_counts is not None
+        else None,
         current_state=merge_global_states(
             [scene_cfg.current_state for scene_cfg in scene_configs]
         ),
@@ -255,10 +259,16 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         # slice voxel and diffs
         vox_init_i = scene_config.vox_init[i].unsqueeze(0)
         vox_des_i = scene_config.vox_des[i].unsqueeze(0)
-        diffs_i = {
-            k: scene_config.initial_diffs[k][i] for k in scene_config.initial_diffs
-        }
-        diff_counts_i = scene_config.initial_diff_counts[i : i + 1]
+        diffs_i = (
+            {k: scene_config.initial_diffs[k][i] for k in scene_config.initial_diffs}
+            if scene_config.initial_diffs is not None
+            else None
+        )
+        diff_counts_i = (
+            scene_config.initial_diff_counts[i : i + 1]
+            if scene_config.initial_diff_counts is not None
+            else None
+        )
 
         cfg_list.append(
             ConcurrentSceneData(

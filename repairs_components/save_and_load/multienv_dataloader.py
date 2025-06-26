@@ -216,7 +216,6 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         save_to_disk: bool | None = False,
         # offline
         env_setup_ids: List[int] | None = None,
-        scene_ids: List[int] | None = None,
         offline_data_dir: str | Path | None = "/workspace/data",
     ):
         """
@@ -226,7 +225,6 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             online - whether to load online or offline data.
             env_setup_ids: ONLINE and OFFLINE: List of environment setup ids
             env_setups: ONLINE: List of environment setups to generate from
-            scene_ids: OFFLINE: List of scene ids
             tasks_to_generate: ONLINE: List of tasks to generate
             prefetch_memory_size: ONLINE: How many batches to keep in memory (during offline they are all held in memory)
         """
@@ -273,9 +271,6 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             assert env_setup_ids is not None, (
                 "env_setup_ids must be provided for offline dataloader"
             )
-            assert scene_ids is not None, (
-                "scene_ids must be provided for offline dataloader"
-            )
             assert offline_data_dir is not None, (
                 "data_dir must be provided for offline dataloader"
             )
@@ -283,10 +278,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
                 "Expected save to disk to not be used for offline data loading."
             )
             # create a cache storage buffer/dataclass
-            self.offline_dataloader = OfflineDataloader(
-                offline_data_dir,
-                env_setup_ids,
-            )
+            self.offline_dataloader = OfflineDataloader(offline_data_dir, env_setup_ids)
             super().__init__(
                 num_environments=len(env_setup_ids),
                 preprocessing_fn=get_offline_data_fn,
@@ -386,11 +378,8 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
 
         batches = []
         # Split each batched scene config into individual items (batch dim =1)
-        for scene_idx, scene_cfg in enumerate(scene_configs_per_scene):
-            assert (
-                scene_cfg.batch_dim == num_envs_per_scene[scene_idx]
-            )  # dunno about this.
-            cfg_list = split_scene_config(scene_cfg)
-            batches.append(cfg_list)
+        for scene_idx, scene_cfgs in enumerate(scene_configs_per_scene):
+            assert len(scene_cfgs) == num_envs_per_scene[scene_idx]  # dunno about this.
+            batches.append(scene_cfgs)
 
         return batches
