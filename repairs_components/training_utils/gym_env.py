@@ -42,6 +42,7 @@ from repairs_components.training_utils.progressive_reward_calc import (
 from repairs_components.save_and_load.online_save import optional_save
 from repairs_sim_step import step_repairs
 from pathlib import Path
+import shutil
 
 
 def gs_rand_float(lower, upper, shape, device):
@@ -101,10 +102,20 @@ class RepairsEnv(gym.Env):
         # genesis batch dim = batch_dim // concurrent_scenes
 
         base_dir = Path(io_cfg["data_dir"])
+        if io_cfg["force_recreate_data"]:
+            print(
+                "Warning: removing and recreating all data for force_recreate_data=True."
+            )
+            if base_dir.exists():
+                # can't remove dir if it's not empty, so rmtree.
+                shutil.rmtree(base_dir)
+
         base_dir.mkdir(exist_ok=True, parents=True)
         (base_dir / "graphs").mkdir(exist_ok=True, parents=True)
         (base_dir / "voxels").mkdir(exist_ok=True)
         (base_dir / "meshes").mkdir(exist_ok=True)
+        for scene_id in io_cfg["env_setup_ids"]:
+            (base_dir / f"scene_{scene_id}").mkdir(exist_ok=True)
         use_random_textures = obs_cfg["use_random_textures"]
 
         # save config
@@ -179,7 +190,7 @@ class RepairsEnv(gym.Env):
         partial_env_configs = self.env_dataloader.get_processed_data(
             torch.full(
                 (concurrent_scenes,),
-                io_cfg["dataloader_settings"]["prefetch_memory_size"],
+                self.per_scene_batch_dim,
                 dtype=torch.int16,
             )
         )  # get a batch of configs size prefetch_memory_size
@@ -272,6 +283,7 @@ class RepairsEnv(gym.Env):
             ]  # two gripper forces (grip push in/out)
 
             # Execute the motion planning trajectory using our dedicated module
+            motion_planning_time = time.perf_counter()
             execute_straight_line_trajectory(
                 franka=scene_data.gs_entities["franka@control"],
                 scene=scene_data.scene,
@@ -281,6 +293,10 @@ class RepairsEnv(gym.Env):
                 render=False,
                 keypoint_distance=0.1,  # 10cm as suggested
                 num_steps_between_keypoints=10,
+            )
+            print(
+                "Motion planning and exec time:",
+                time.perf_counter() - motion_planning_time,
             )
 
             # Update the current simulation state based on the scene
