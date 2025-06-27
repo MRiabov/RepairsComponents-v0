@@ -5,7 +5,7 @@ import tempfile
 from genesis.engine.entities.rigid_entity.rigid_link import RigidLink
 from genesis.engine.entities import RigidEntity
 import torch
-
+from pathlib import Path
 from repairs_components.geometry.connectors.connectors import Connector
 from repairs_components.logic.electronics.component import ElectricalComponent
 from repairs_components.processing.textures import get_color_by_type, get_random_texture
@@ -53,17 +53,17 @@ def translate_state_to_genesis_scene(
             # get color by type
             surface = gs.surfaces.Plastic(color=get_color_by_type(part_type))
 
-        pos = physical_state.graph.pos[body_idx]
+        pos = physical_state.graph.position[body_idx]
         quat = physical_state.graph.quat[body_idx]
         count_fasteners_held = physical_state.graph.count_fasteners_held[body_idx]
 
         if part_type == "solid":
-            mesh_path = mesh_file_names[body_name]
+            mesh_path = str(mesh_file_names[body_name])
             mesh = gs.morphs.Mesh(file=mesh_path)
             new_entity = scene.add_entity(mesh, surface=surface)
 
         elif part_type in ("connector", "button", "led", "switch"):
-            mjcf_path = mesh_file_names[body_name]
+            mjcf_path = str(mesh_file_names[body_name])
             # FIXME: deprecate MJCF from here and use native genesis configs.
             mesh = gs.morphs.MJCF(file=mjcf_path, name=body_name, links_to_keep=True)
             new_entity = scene.add_entity(mesh, surface=surface)

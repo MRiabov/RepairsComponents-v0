@@ -53,6 +53,9 @@ class OfflineDataloader:
         self.vox_init_dict = {}
         self.vox_des_dict = {}
 
+        self.initial_diff_dict = {}  # dict[str(scene_id), dict[str(diff_type), Data]]
+        self.initial_diff_count_dict = {}  # dict[str(scene_id), torch.Tensor]
+
         self.metadata = {}
 
         # Load metadata
@@ -62,6 +65,15 @@ class OfflineDataloader:
 
             with open(metadata_path, "r") as f:
                 self.metadata["scene_" + str(scene_id)] = json.load(f)
+        # Load diffs
+
+        for scene_id in scene_ids:
+            self.initial_diff_dict[scene_id] = torch.load(
+                self.data_dir / f"scene_{scene_id}" / "initial_diffs.pt"
+            )
+            self.initial_diff_count_dict[scene_id] = torch.load(
+                self.data_dir / f"scene_{scene_id}" / "initial_diff_counts.pt"
+            )
 
         # Load all scene configs
         self.scene_configs = []
@@ -118,7 +130,7 @@ class OfflineDataloader:
 
         self.vox_init_dict[scene_id] = torch.load(vox_init_path)
         self.vox_des_dict[scene_id] = torch.load(vox_des_path)
-        print(self.vox_init_dict[scene_id].shape)
+        print("shape of vox_init_dict[scene_id]:", self.vox_init_dict[scene_id].shape)
         # ^ memory calculation: 100k samples*max 15 items * 10 datapoints * float16 =36mil = 36mbytes
         # graphs
         mech_graphs_init, elec_graphs_init, mech_graphs_des, elec_graphs_des = (
@@ -157,8 +169,8 @@ class OfflineDataloader:
             desired_state=des_sim_state,
             vox_init=self.vox_init_dict[scene_id],
             vox_des=self.vox_des_dict[scene_id],
-            initial_diffs=None,
-            initial_diff_counts=None,
+            initial_diffs=self.initial_diff_dict[scene_id],
+            initial_diff_counts=self.initial_diff_count_dict[scene_id],
             scene_id=scene_id,
             reward_history=RewardHistory(batch_dim=batch_dim),
             batch_dim=batch_dim,
@@ -274,14 +286,27 @@ def check_if_data_exists(
 
 
 def get_scene_mesh_file_names(
-    scene_ids: list[int], data_dir: Path
+    scene_ids: list[int], data_dir: Path, append_path: bool = True
 ) -> list[dict[str, str]]:
     """Get the file names of the meshes to their scene names for the given scene ids."""
     data_dir = Path(data_dir)
-    metadata_path = data_dir / "scenes_metadata.json"
-    with open(metadata_path, "r") as f:
-        metadata = json.load(f)
     mesh_file_names = []
+
+    # note: all these jsons are probably (?) better be done as a single file.
     for scene_id in scene_ids:
-        mesh_file_names.append(metadata["scene_" + str(scene_id)]["mesh_file_names"])
+        metadata_path = data_dir / f"scene_{scene_id}" / "metadata.json"
+        with open(metadata_path, "r") as f:
+            metadata = json.load(f)
+
+        # append full path if append_path is True
+        if append_path:
+            mesh_file_names.append(
+                {
+                    k: data_dir / f"scene_{scene_id}" / v
+                    for k, v in metadata["mesh_file_names"].items()
+                }
+            )  # return path
+        else:
+            mesh_file_names.append(metadata["mesh_file_names"])
+
     return mesh_file_names

@@ -130,7 +130,9 @@ class MultiEnvDataLoader:
 
         # put newly generated configs to queue (to alleviate starvation)
         # enqueue each starved config individually per scene
-        for scene_id, cfg_list in enumerate(starved_configs[0]):
+        for scene_id, cfg_list in enumerate(
+            starved_configs
+        ):  # [0] # was [0] before, IDK why
             for cfg in cfg_list:  # ^remove aux
                 try:
                     self.prefetch_queues[scene_id].put_nowait(cfg)
@@ -294,15 +296,15 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         Returns (merged_batches, mesh_file_names) for online mode, else just batches.
         """
         # Call the base implementation to get lists of lists
-        batches_per_env, aux_mesh_file_names = super().get_processed_data(
+        batches_per_env = super().get_processed_data(
             num_configs_to_generate_per_scene, timeout
-        )
+        )  # , aux_mesh_file_names
 
         # merge all configs (preference downstream).
         merged_batches = [
             merge_concurrent_scene_configs(batch) for batch in batches_per_env
         ]
-        return merged_batches, aux_mesh_file_names
+        return merged_batches  # , aux_mesh_file_names
 
     def generate_sequential(
         self, num_configs_to_generate_per_scene: torch.Tensor

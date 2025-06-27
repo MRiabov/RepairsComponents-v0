@@ -1,16 +1,18 @@
-import copy
 from dataclasses import dataclass
-from genesis.vis.camera import Camera
-from repairs_components.training_utils.progressive_reward_calc import RewardHistory
-import torch
+
 import genesis as gs
+import torch
 from genesis.engine.entities import RigidEntity
+from genesis.vis.camera import Camera
+from torch_geometric.data import Data
+
+from repairs_components.processing.voxel_export import sparse_arr_put
+from repairs_components.training_utils.progressive_reward_calc import RewardHistory
 from repairs_components.training_utils.sim_state_global import (
     RepairsSimState,
     merge_global_states,
     merge_global_states_at_idx,
 )
-from repairs_components.processing.voxel_export import sparse_arr_put
 
 
 @dataclass
@@ -27,7 +29,7 @@ class ConcurrentSceneData:
     desired_state: RepairsSimState
     vox_init: torch.Tensor  # sparse tensor!
     vox_des: torch.Tensor  # sparse tensor!
-    initial_diffs: dict[str, torch.Tensor]  # feature diffs and node diffs.
+    initial_diffs: dict[str, list[Data]]
     initial_diff_counts: torch.Tensor  # shape: (batch_dim // concurrent_scenes,)
     scene_id: int
     "A safety int to ensure we don't access the wrong scene."
@@ -71,6 +73,26 @@ class ConcurrentSceneData:
             assert self.step_count.shape[0] == self.batch_dim, (
                 f"step_count must have the same batch dimension as batch_dim, but got {self.step_count.shape[0]} and {self.batch_dim}"
             )
+        # diffs
+        assert isinstance(self.initial_diffs, dict), "initial_diffs must be a dict"
+        assert isinstance(self.initial_diffs["physical_diff"], list), (
+            "initial_diffs must be a list"
+        )
+        assert isinstance(self.initial_diffs["electronics_diff"], list), (
+            "initial_diffs must be a list"
+        )
+        assert len(self.initial_diffs["physical_diff"]) == self.batch_dim, (
+            f"initial_diffs must have the same length as batch_dim={self.batch_dim}, but got {len(self.initial_diffs)}"
+        )
+        assert len(self.initial_diffs["electronics_diff"]) == self.batch_dim, (
+            f"initial_diffs must have the same length as batch_dim={self.batch_dim}, but got {len(self.initial_diffs)}"
+        )
+        assert isinstance(self.initial_diff_counts, torch.Tensor), (
+            "initial_diff_counts must be a torch tensor"
+        )
+        assert self.initial_diff_counts.shape[0] == self.batch_dim, (
+            f"initial_diff_counts must have the same batch dimension as batch_dim, but got {self.initial_diff_counts.shape[0]} and {self.batch_dim}"
+        )
 
 
 def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
@@ -102,26 +124,29 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
     vox_des = torch.cat([data.vox_des for data in scene_configs], dim=0)
 
     new_batch_dim = sum([data.batch_dim for data in scene_configs])
-
-    # TODO: gs entities should not be there... or at least I don't know how to merge them.
-    # same for scene and desired state. they should be None.
+    # Cat diffs
+    physical_diffs = []
+    electronics_diffs = []
+    fluid_diffs = []
+    for data in scene_configs:
+        physical_diffs.extend(data.initial_diffs["physical_diff"])
+        electronics_diffs.extend(data.initial_diffs["electronics_diff"])
+        fluid_diffs.extend(data.initial_diffs["fluid_diff"])
+    initial_diffs = {
+        "physical_diff": physical_diffs,
+        "electronics_diff": electronics_diffs,
+        "fluid_diff": fluid_diffs,
+    }
 
     # Extend tensors and RepairsSimState with items from other scene_configs
 
     new_scene_config = ConcurrentSceneData(
         vox_init=vox_init,
         vox_des=vox_des,
-        initial_diffs={
-            k: [data.initial_diffs[k] for data in scene_configs]
-            for k in scene_configs[0].initial_diffs.keys()
-        }
-        if scene_configs[0].initial_diffs is not None
-        else None,
+        initial_diffs=initial_diffs,
         initial_diff_counts=torch.cat(
             [data.initial_diff_counts for data in scene_configs], dim=0
-        )
-        if scene_configs[0].initial_diff_counts is not None
-        else None,
+        ),
         current_state=merge_global_states(
             [scene_cfg.current_state for scene_cfg in scene_configs]
         ),
@@ -172,7 +197,7 @@ def merge_scene_configs_at_idx(
         merged_scene_config = ConcurrentSceneData(
             vox_init=old_scene_config.vox_init.clone(),
             vox_des=old_scene_config.vox_des.clone(),
-            initial_diffs=copy.deepcopy(old_scene_config.initial_diffs),
+            initial_diffs=old_scene_config.initial_diffs,
             initial_diff_counts=old_scene_config.initial_diff_counts.clone(),
             current_state=merge_global_states_at_idx(
                 old_scene_config.current_state,
@@ -205,7 +230,7 @@ def merge_scene_configs_at_idx(
 
         # Update initial_diffs
         for new_id, old_id in enumerate(old_idx):
-            for k in new_scene_config.initial_diffs.keys():
+            for k in new_scene_config.initial_diffs:
                 merged_scene_config.initial_diffs[k][old_id] = (
                     new_scene_config.initial_diffs[k][new_id]
                 )
@@ -260,10 +285,10 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         vox_init_i = scene_config.vox_init[i].unsqueeze(0)
         vox_des_i = scene_config.vox_des[i].unsqueeze(0)
         diffs_i = (
-            {k: scene_config.initial_diffs[k][i] for k in scene_config.initial_diffs}
+            {k: [scene_config.initial_diffs[k][i]] for k in scene_config.initial_diffs}
             if scene_config.initial_diffs is not None
             else None
-        )
+        )  # ^note: put to list.
         diff_counts_i = (
             scene_config.initial_diff_counts[i : i + 1]
             if scene_config.initial_diff_counts is not None

@@ -49,7 +49,7 @@ class RepairsSimState(SimState):
         fluid_diffs = []
         fluid_diff_counts = []
         total_diff_counts = []
-        for i in range(len(self.electronics_state)):
+        for i in range(self.scene_batch_dim):
             electronics_diff, electronics_diff_count = self.electronics_state[i].diff(
                 other.electronics_state[i]
             )
@@ -128,7 +128,7 @@ class RepairsSimState(SimState):
         torch.save(Batch.from_data_list(electronics_graphs), elec_graph_path)
 
         torch.save(
-            [self.tool_state[env_id].current_tool_id for env_id in env_idx],
+            torch.tensor([self.tool_state[env_id].current_tool_id for env_id in env_idx]),
             path / f"tool_idx_{scene_id}.pt",
         )
 

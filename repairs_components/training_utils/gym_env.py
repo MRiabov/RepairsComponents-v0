@@ -175,13 +175,19 @@ class RepairsEnv(gym.Env):
             io_cfg["dataloader_settings"]["prefetch_memory_size"],
             dtype=torch.int16,
         )
-        self.env_dataloader.populate_async(in_memory)
+        self.env_dataloader.populate_async(in_memory)  # is it still necessary?
         partial_env_configs = self.env_dataloader.get_processed_data(
-            torch.ones(concurrent_scenes, dtype=torch.int16)
-        )  # get a batch of configs(1 per scene)
+            torch.full(
+                (concurrent_scenes,),
+                io_cfg["dataloader_settings"]["prefetch_memory_size"],
+                dtype=torch.int16,
+            )
+        )  # get a batch of configs size prefetch_memory_size
 
         # scene init setup # note: technically this should be the Dataloader worker init fn.
-        mesh_file_names = get_scene_mesh_file_names(scene_ids.tolist(), base_dir)
+        mesh_file_names = get_scene_mesh_file_names(
+            scene_ids.tolist(), base_dir, append_path=True
+        )
         for scene_idx in range(concurrent_scenes):
             scene = gs.Scene(  # empty scene
                 sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),

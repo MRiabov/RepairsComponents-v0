@@ -5,6 +5,7 @@ Order:
 2. starting_state_geom
 """
 
+import json
 import pathlib
 from pathlib import Path
 from genesis.engine.entities import RigidEntity
@@ -40,6 +41,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     num_configs_to_generate_per_scene: torch.Tensor,  # int [len]
     save: bool = False,
     save_path: pathlib.Path | None = None,
+    vox_res: int = 256,  # should be equal
 ) -> tuple[list[ConcurrentSceneData], dict[str, str]]:
     """`create_env_configs` is a general, high_level function responsible for creating of randomized configurations
     (problems) for the ML to solve, to later be translated to Genesis. It does not have to do anything to do with Genesis.
@@ -146,6 +148,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         starting_sim_state = merge_global_states(starting_sim_states)
         desired_sim_state = merge_global_states(desired_sim_states)
 
+        initial_diffs = {k: [d[k][0] for d in init_diffs] for k in init_diffs[0].keys()}
+
         this_scene_configs = ConcurrentSceneData(
             scene=None,
             gs_entities=None,
@@ -154,9 +158,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             desired_state=desired_sim_state,
             vox_init=voxel_grids_initial,
             vox_des=voxel_grids_desired,
-            initial_diffs={
-                k: [d[k][0] for d in init_diffs] for k in init_diffs[0].keys()
-            },
+            initial_diffs=initial_diffs,
             initial_diff_counts=torch.tensor(init_diff_counts),
             scene_id=scene_idx,
             batch_dim=scene_gen_count.item(),
@@ -170,6 +172,14 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             # get them later by get_graph_save_paths
             starting_sim_state.save(save_path, scene_idx, init=True)
             desired_sim_state.save(save_path, scene_idx, init=False)
+            torch.save(
+                torch.tensor(init_diff_counts),
+                save_path / ("scene_" + str(scene_idx)) / "initial_diff_counts.pt",
+            )
+            torch.save(
+                initial_diffs, # may want
+                save_path / ("scene_" + str(scene_idx)) / "initial_diffs.pt",
+            )
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
     return scene_config_batches, (mesh_file_names if save else {})
@@ -350,22 +360,22 @@ def persist_meshes_and_mjcf(
         _part_name, part_type = child.label.split("@")
         center = child.center(CenterOf.BOUNDING_BOX)
         if export_format == "gltf":
-            mesh_file_name = f"scene_{scene_id}_{child.label}.gltf"
+            mesh_file_name = f"{child.label}.gltf"
             export_gltf(
                 child.moved(Pos(-center)),
-                save_dir / mesh_file_name,
+                save_dir / f"scene_{scene_id}" / mesh_file_name,
                 unit=Unit.CM,
             )
         elif export_format == "stl":
             # fixme: stl does not resize? hmm. (resize units)
-            mesh_file_name = f"scene_{scene_id}_{child.label}.stl"
-            export_stl(child, file_path=save_dir / mesh_file_name)
+            mesh_file_name = f"{child.label}.stl"
+            export_stl(child, file_path=save_dir / f"scene_{scene_id}" / mesh_file_name)
 
         # FIXME: deprecate mjcf!
         if part_type in ("connector", "button", "led", "switch"):
             connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
             mjcf = connector.get_mjcf()
-            with open(save_dir / f"scene_{scene_id}_{child.label}.xml", "w") as f:
+            with open(save_dir / f"scene_{scene_id}" / f"{child.label}.xml", "w") as f:
                 f.write(mjcf)
 
         mesh_file_names[child.label] = mesh_file_name
