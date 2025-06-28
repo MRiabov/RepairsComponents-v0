@@ -97,9 +97,9 @@ class PhysicalState:
             )
 
             self.graph.free_fasteners_loc = torch.empty((0, 3), dtype=torch.float32)
-            self.graph.free_fasteners_quat = torch.empty((0, 7), dtype=torch.float32)
+            self.graph.free_fasteners_quat = torch.empty((0, 4), dtype=torch.float32)
             self.graph.free_fasteners_attached_to = torch.empty(
-                (0, 2), dtype=torch.float32
+                (0, 1), dtype=torch.float32
             )  # why 2 if 1? or was it?
             if indices is None:
                 self.body_indices = {}
@@ -152,7 +152,7 @@ class PhysicalState:
 
     def export_graph(self):
         """Export the graph to a torch_geometric Data object usable by ML."""
-        return Data(  # expected len of x - 8.
+        graph = Data(  # expected len of x - 8.
             x=torch.cat(
                 [
                     self.graph.position,
@@ -172,8 +172,12 @@ class PhysicalState:
                 ],
                 dim=-1,
             ),
+            # batch=self.graph.batch,
+            # global_feat_count=self.graph.free_fasteners_loc.shape[0],
             # ^export global fastener features as a part of graph.
         )
+        # print("debug: graph global feat shape", graph.global_feat.shape)
+        return graph
 
     def register_body(self, name: str, position: tuple, rotation: tuple):
         assert name not in self.body_indices, f"Body {name} already registered"

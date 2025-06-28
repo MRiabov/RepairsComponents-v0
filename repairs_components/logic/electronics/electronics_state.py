@@ -123,7 +123,7 @@ class ElectronicsState(SimState):
         assert len(self.components) == self.graph.num_nodes, (
             "Graph num_nodes does not match number of components."
         )
-        print(f"Exporting graph with {len(self.components)} components.")
+        # print(f"Exporting graph with {len(self.components)} components.")
         new_graph = Data(
             x=torch.cat(
                 [

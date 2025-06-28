@@ -553,10 +553,29 @@ class RepairsEnv(gym.Env):
 
         voxel_init = torch.concat(all_voxel_init, dim=0)
         voxel_des = torch.concat(all_voxel_des, dim=0)
-        mech_graph_init = Batch.from_data_list(all_mech_graph_init)
-        mech_graph_des = Batch.from_data_list(all_mech_graph_des)
+        mech_graph_init = Batch.from_data_list(
+            all_mech_graph_init, follow_batch=["global_feat"]
+        )
+        mech_graph_des = Batch.from_data_list(
+            all_mech_graph_des, follow_batch=["global_feat"]
+        )
         elec_graph_init = Batch.from_data_list(all_elec_graph_init)
         elec_graph_des = Batch.from_data_list(all_elec_graph_des)
+
+        # # add num_feat to batches (necessary for scatter_add.):
+        # mech_graph_init.global_feat_batch = num_feat_to_batch(
+        #     mech_graph_init.global_feat_count
+        # )
+        # elec_graph_init.global_feat_batch = num_feat_to_batch(
+        #     elec_graph_init.global_feat_count
+        # )
+        # mech_graph_des.global_feat_batch = num_feat_to_batch(
+        #     mech_graph_des.global_feat_count
+        # )
+        # elec_graph_des.global_feat_batch = num_feat_to_batch(
+        #     elec_graph_des.global_feat_count
+        # )
+
         video_obs = torch.cat(
             all_video_obs, dim=0
         )  # cat, not stack because it's already batched
@@ -601,3 +620,7 @@ def obs_to_int8(rgb: np.ndarray, depth: np.ndarray, normal: np.ndarray):
     return torch.from_numpy(
         np.concatenate([rgb_uint8, depth_uint8, normal_uint8], axis=-1)
     ).cuda()  # why would I convert it to torch here anyway? well, anyway.
+
+
+# def num_feat_to_batch(num_feat: torch.Tensor):
+#     return torch.repeat_interleave(torch.arange(num_feat.shape[0]), num_feat)
