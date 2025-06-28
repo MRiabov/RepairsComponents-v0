@@ -187,7 +187,6 @@ def export_voxel_grid(
     sparse_scene = torch.cat(all_sparse, dim=0)
     sparse_scene = sparse_scene.coalesce()
 
-
     return (sparse_scene, cache) if cached else sparse_scene
 
 

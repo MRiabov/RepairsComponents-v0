@@ -164,7 +164,7 @@ class PhysicalState:
             edge_index=self.graph.edge_index,
             edge_attr=self.graph.edge_attr,  # e.g. fastener size.
             num_nodes=len(self.body_indices),
-            free_fastener_feat=torch.cat(
+            global_feat=torch.cat(
                 [
                     self.graph.free_fasteners_loc,
                     self.graph.free_fasteners_quat,

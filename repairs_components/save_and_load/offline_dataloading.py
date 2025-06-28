@@ -1,3 +1,4 @@
+import copy
 import json
 from pathlib import Path
 from typing import List
@@ -165,7 +166,8 @@ class OfflineDataloader:
             scene=None,
             gs_entities=None,
             cameras=None,
-            current_state=init_sim_state,
+            init_state=init_sim_state,
+            current_state=copy.deepcopy(init_sim_state),
             desired_state=des_sim_state,
             vox_init=self.vox_init_dict[scene_id],
             vox_des=self.vox_des_dict[scene_id],

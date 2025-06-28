@@ -25,6 +25,7 @@ class ConcurrentSceneData:
     scene: gs.Scene
     gs_entities: dict[str, RigidEntity]
     cameras: tuple[Camera, Camera]
+    init_state: RepairsSimState
     current_state: RepairsSimState
     desired_state: RepairsSimState
     vox_init: torch.Tensor  # sparse tensor!
@@ -93,6 +94,10 @@ class ConcurrentSceneData:
         assert self.initial_diff_counts.shape[0] == self.batch_dim, (
             f"initial_diff_counts must have the same batch dimension as batch_dim, but got {self.initial_diff_counts.shape[0]} and {self.batch_dim}"
         )
+        # init state != current state
+        # assert self.init_state != self.current_state, (
+        #     "init_state must not be equal to current_state. If it is, use `copy.copy` to create a new object."
+        # ) # note: it fails because we copy the initial state, but use copy anyway. deepcopy maybe?
 
 
 def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
@@ -147,6 +152,9 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         initial_diff_counts=torch.cat(
             [data.initial_diff_counts for data in scene_configs], dim=0
         ),
+        init_state=merge_global_states(
+            [scene_cfg.init_state for scene_cfg in scene_configs]
+        ),
         current_state=merge_global_states(
             [scene_cfg.current_state for scene_cfg in scene_configs]
         ),
@@ -199,6 +207,11 @@ def merge_scene_configs_at_idx(
             vox_des=old_scene_config.vox_des.clone(),
             initial_diffs=old_scene_config.initial_diffs,
             initial_diff_counts=old_scene_config.initial_diff_counts.clone(),
+            init_state=merge_global_states_at_idx(
+                old_scene_config.init_state,
+                new_scene_config.init_state,
+                reset_mask,
+            ),
             current_state=merge_global_states_at_idx(
                 old_scene_config.current_state,
                 new_scene_config.current_state,
@@ -276,6 +289,15 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         des.tool_state = [orig_des.tool_state[i]]
         des.has_electronics = orig_des.has_electronics
         des.has_fluid = orig_des.has_fluid
+
+        orig_init = scene_config.init_state
+        init = RepairsSimState(batch_dim=1)
+        init.electronics_state = [orig_init.electronics_state[i]]
+        init.physical_state = [orig_init.physical_state[i]]
+        init.fluid_state = [orig_init.fluid_state[i]]
+        init.tool_state = [orig_init.tool_state[i]]
+        init.has_electronics = orig_init.has_electronics
+        init.has_fluid = orig_init.has_fluid
         # sanity check: ensure single-item state
         assert des.scene_batch_dim == 1, (
             f"Expected batch_dim=1, got {des.scene_batch_dim}"
@@ -300,6 +322,7 @@ def split_scene_config(scene_config: ConcurrentSceneData):
                 scene=scene_config.scene,
                 gs_entities=scene_config.gs_entities,
                 cameras=scene_config.cameras,
+                init_state=init,
                 current_state=curr,
                 desired_state=des,
                 vox_init=vox_init_i,

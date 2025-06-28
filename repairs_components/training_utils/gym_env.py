@@ -159,6 +159,8 @@ class RepairsEnv(gym.Env):
             dtype=torch.int16,
         )
 
+        data_gen_start_time = time.time()
+
         if (
             not check_if_data_exists(
                 scene_ids.tolist(), base_dir, generate_number_of_configs_per_scene
@@ -172,7 +174,6 @@ class RepairsEnv(gym.Env):
                 num_configs_to_generate_per_scene=generate_number_of_configs_per_scene,
                 base_dir=base_dir,
             )
-
         # -- dataloader (offline) --
         # init dataloader
         # note: will take some time to load.
@@ -221,7 +222,9 @@ class RepairsEnv(gym.Env):
                     scene=scene,
                     gs_entities=gs_entities,
                     cameras=tuple(cameras),
+                    init_state=partial_env_configs[scene_idx].init_state,
                     current_state=partial_env_configs[scene_idx].current_state,
+                    # ^ no need for copy because it is already copied.
                     desired_state=partial_env_configs[scene_idx].desired_state,
                     vox_init=partial_env_configs[scene_idx].vox_init,
                     vox_des=partial_env_configs[scene_idx].vox_des,
@@ -237,10 +240,14 @@ class RepairsEnv(gym.Env):
                 )
             )
 
+        data_gen_end_time = time.time()
+        print(f"Data generation took {data_gen_end_time - data_gen_start_time} seconds")
+
         self.default_dof_pos = torch.tensor(
             [env_cfg["default_joint_angles"][name] for name in env_cfg["joint_names"]],
             device=self.device,
         )
+
         self.last_step_time = time.perf_counter()
 
         # Initialize environment to starting state
@@ -351,9 +358,15 @@ class RepairsEnv(gym.Env):
                 "out_of_bounds": out_of_bounds_fail,
             }
 
-        voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
-            self._observe_all_scenes()
-        )
+        (
+            voxel_init,
+            voxel_des,
+            video_obs,
+            mech_graph_init,
+            mech_graph_des,
+            elec_graph_init,
+            elec_graph_des,
+        ) = self._observe_all_scenes()
         print(
             "step happened. Time elapsed:",
             str(time.perf_counter() - self.last_step_time) + "s",
@@ -368,8 +381,10 @@ class RepairsEnv(gym.Env):
             voxel_init,
             voxel_des,
             video_obs,
-            graph_obs,
-            graph_des,
+            mech_graph_init,
+            mech_graph_des,
+            elec_graph_init,
+            elec_graph_des,
             rewards,
             dones,
             info,
@@ -452,11 +467,25 @@ class RepairsEnv(gym.Env):
         self.reset_idx(idxs)
 
         # observe all environments (ideally done in paralel.)
-        voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
-            self._observe_all_scenes()
-        )
+        (
+            voxel_init,
+            voxel_des,
+            video_obs,
+            mech_graph_init,
+            mech_graph_des,
+            elec_graph_init,
+            elec_graph_des,
+        ) = self._observe_all_scenes()
 
-        return voxel_init, voxel_des, video_obs, graph_obs, graph_des
+        return (
+            voxel_init,
+            voxel_des,
+            video_obs,
+            mech_graph_init,
+            mech_graph_des,
+            elec_graph_init,
+            elec_graph_des,
+        )
 
     def _observe_scene(self, scene_data: ConcurrentSceneData):
         # Process a single environment
@@ -470,43 +499,78 @@ class RepairsEnv(gym.Env):
         sparse_voxel_init = scene_data.vox_init
         sparse_voxel_des = scene_data.vox_des
 
+        # TODO partial export of graphs (avoid export when unnecessary.)
         # get graph obs
-        graph_obs = [
-            state.graph for state in scene_data.current_state.electronics_state
+        elec_graph_init = [
+            state.export_graph() for state in scene_data.current_state.electronics_state
         ]
-        graph_des = [
-            state.graph for state in scene_data.desired_state.electronics_state
+        elec_graph_des = [
+            state.export_graph() for state in scene_data.desired_state.electronics_state
         ]  # return them as lists because they will be stacked to batch as global env.
+        mech_graph_init = [
+            state.export_graph() for state in scene_data.current_state.physical_state
+        ]
+        mech_graph_des = [
+            state.export_graph() for state in scene_data.desired_state.physical_state
+        ]
 
-        return sparse_voxel_init, sparse_voxel_des, video_obs, graph_obs, graph_des
+        return (
+            sparse_voxel_init,
+            sparse_voxel_des,
+            video_obs,
+            mech_graph_init,
+            mech_graph_des,
+            elec_graph_init,
+            elec_graph_des,
+        )
 
     def _observe_all_scenes(self):
         """A helper to merge all voxel and graph observations."""
         all_voxel_init = []
         all_voxel_des = []
         all_video_obs = []
-        all_graph_obs = []
-        all_graph_des = []
+        all_mech_graph_init = []
+        all_mech_graph_des = []
+        all_elec_graph_init = []
+        all_elec_graph_des = []
         for scene_data in self.concurrent_scenes_data:
-            voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
-                self._observe_scene(scene_data)
-            )
+            (
+                voxel_init,
+                voxel_des,
+                video_obs,
+                mech_graph_init,
+                mech_graph_des,
+                elec_graph_init,
+                elec_graph_des,
+            ) = self._observe_scene(scene_data)
             all_voxel_init.append(voxel_init)
             all_voxel_des.append(voxel_des)
             all_video_obs.append(video_obs)
-            all_graph_obs.extend(graph_obs)
-            all_graph_des.extend(graph_des)
+            all_mech_graph_init.extend(mech_graph_init)
+            all_mech_graph_des.extend(mech_graph_des)
+            all_elec_graph_init.extend(elec_graph_init)
+            all_elec_graph_des.extend(elec_graph_des)
 
         voxel_init = torch.concat(all_voxel_init, dim=0)
         voxel_des = torch.concat(all_voxel_des, dim=0)
-        graph_obs = Batch.from_data_list(all_graph_obs)
-        graph_des = Batch.from_data_list(all_graph_des)
+        mech_graph_init = Batch.from_data_list(all_mech_graph_init)
+        mech_graph_des = Batch.from_data_list(all_mech_graph_des)
+        elec_graph_init = Batch.from_data_list(all_elec_graph_init)
+        elec_graph_des = Batch.from_data_list(all_elec_graph_des)
         video_obs = torch.cat(
             all_video_obs, dim=0
         )  # cat, not stack because it's already batched
         video_obs = video_obs.permute(0, 1, 4, 2, 3)  # to torch format
 
-        return voxel_init, voxel_des, video_obs, graph_obs, graph_des
+        return (
+            voxel_init,
+            voxel_des,
+            video_obs,
+            mech_graph_init,
+            mech_graph_des,
+            elec_graph_init,
+            elec_graph_des,
+        )
 
 
 def _render_all_cameras(cameras: list[Camera]):

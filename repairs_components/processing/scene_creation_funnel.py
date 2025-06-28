@@ -5,6 +5,7 @@ Order:
 2. starting_state_geom
 """
 
+import copy
 import json
 import pathlib
 from pathlib import Path
@@ -154,7 +155,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             scene=None,
             gs_entities=None,
             cameras=None,
-            current_state=starting_sim_state,
+            init_state=starting_sim_state,
+            current_state=copy.deepcopy(starting_sim_state),
             desired_state=desired_sim_state,
             vox_init=voxel_grids_initial,
             vox_des=voxel_grids_desired,
@@ -177,7 +179,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 save_path / ("scene_" + str(scene_idx)) / "initial_diff_counts.pt",
             )
             torch.save(
-                initial_diffs, # may want
+                initial_diffs,  # may want
                 save_path / ("scene_" + str(scene_idx)) / "initial_diffs.pt",
             )
 

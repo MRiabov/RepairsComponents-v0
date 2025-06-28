@@ -128,7 +128,9 @@ class RepairsSimState(SimState):
         torch.save(Batch.from_data_list(electronics_graphs), elec_graph_path)
 
         torch.save(
-            torch.tensor([self.tool_state[env_id].current_tool_id for env_id in env_idx]),
+            torch.tensor(
+                [self.tool_state[env_id].current_tool_id for env_id in env_idx]
+            ),
             path / f"tool_idx_{scene_id}.pt",
         )
 
