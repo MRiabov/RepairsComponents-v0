@@ -42,11 +42,11 @@ def create_data(
     assert data_batches is not None, "Data batches must be provided"
     # /
     # create the (scene) data.
-    for scene_data in data_batches:
+    for scene_id, scene_data in enumerate(data_batches):
         save_concurrent_scene_metadata(
             scene_data,
             base_dir,
-            scene_idx.item(),
+            scene_id,
             mesh_file_name_mapping=mesh_file_names,
         )
 
@@ -54,7 +54,7 @@ def create_data(
 def save_concurrent_scene_metadata(
     data: ConcurrentSceneData,
     base_dir: Path,
-    scene_idx: int,
+    scene_id: int,
     mesh_file_name_mapping: dict[str, str],
     env_idx: list[int] | None = None,
 ):
@@ -74,14 +74,14 @@ def save_concurrent_scene_metadata(
         )
     if env_idx is None:
         env_idx = list(range(data.batch_dim))
-    scene_dir = base_dir / f"scene_{scene_idx}"
+    scene_dir = base_dir / f"scene_{scene_id}"
     os.makedirs(scene_dir, exist_ok=True)
 
     # states and voxel grids are already saved.
 
     # save metadata
     metadata = {
-        "scene_id": scene_idx,
+        "scene_id": scene_id,
         "task_ids": data.task_ids.tolist(),
         # note: graphs paths can now be recovered by get_graph_save_paths.
         "mesh_file_names": mesh_file_name_mapping,
