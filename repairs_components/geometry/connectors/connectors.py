@@ -22,6 +22,10 @@ class Connector(ElectricalComponent):
     def component_type(self) -> int:
         return ElectricalComponentsEnum.CONNECTOR.value
 
+    @property
+    def connected_at_angle(self) -> tuple[float, float, float]:
+        return (0, 0, 180)
+
     def get_mjcf(
         self, connector_position: np.ndarray | None = None, density: float = 1000
     ):
@@ -50,19 +54,35 @@ class Connector(ElectricalComponent):
     """
 
     def bd_geometry(
-        self, moved_to_male: VectorLike, moved_to_female: VectorLike
+        self,
+        moved_to_male: VectorLike,
+        moved_to_female: VectorLike | None = None,
+        connected=True,
     ) -> tuple[Part | Compound, Part, np.ndarray, Part | Compound, Part, np.ndarray]:
         """
         return build123d geometry of containers, colored as the connector color and with connector metadata.
         """
-        geom_male, male_connector_def, male_connector_collision_detection_position = (
-            self.bd_geometry_male(moved_to_male)
+        if not connected:
+            assert moved_to_female is not None, (
+                "When labelled as disconnected, expect that the moved_to_female is populated."
+            )
+        geom_male, male_connector_collision_detection_position = self.bd_geometry_male(
+            moved_to_male
         )
         (
             geom_female,
-            female_connector_def,
+            # female_connector_def,
             female_connector_collision_detection_position,
         ) = self.bd_geometry_female(moved_to_female)
+
+        if connected:
+            # TODO: move geom_female into the position where connector positions would be equal,
+            # with connected_at_angle difference between them.
+            (
+                male_connector_collision_detection_position
+                - female_connector_collision_detection_position
+            )
+            geom_female.move()
 
         geom_male.color = Color(0.5, 0.5, 0.5, 0.8)
         geom_female.color = Color(0.5, 0.5, 0.5, 0.8)

@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from build123d import Compound
-from genesis.vis.camera import Camera
-import genesis as gs
+
+
 from repairs_components.geometry.base_env.tooling_stand_plate import (
     genesis_setup,
     plate_env_bd_geometry,
@@ -36,5 +36,9 @@ class EnvSetup(ABC):
     def get_default_genesis_scene(self):
         return genesis_setup()
 
-    def _debug_render(self, scene: gs.Scene, camera_1: Camera, camera_2: Camera):
+    def _debug_render(self, scene, camera_1, camera_2):
+        # from genesis.vis.camera import Camera
+        # import genesis as gs
+        # note: I don't import because it fails running on non-GPU WSL node.
+
         render_and_save(scene, camera_1, camera_2)

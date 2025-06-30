@@ -72,6 +72,9 @@ class Europlug(Connector):
                     Circle(hole_diameter / 2)
             # Extrude the holes into the socket body
             holes = extrude(hole_sketch.sketch, -pin_len - 2, mode=Mode.SUBTRACT)
+            base_joint = RigidJoint(
+                "native"
+            )  # native "base" joint, so will hold despite perturbations.
 
         connector_def = Part()
         # The connector definition is the negative space where the pins would go
