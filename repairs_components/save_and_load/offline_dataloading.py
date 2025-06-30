@@ -262,18 +262,19 @@ def check_if_data_exists(
     """
     data_dir = Path(data_dir)
     # Check metadata file
-    metadata_path = data_dir / "scenes_metadata.json"
-    if not metadata_path.exists():
-        return False
+
     # Check per-scene files
     for scene_id in scene_ids:
+        metadata_path = data_dir / f"scene_{scene_id}" / "metadata.json"
+        if not metadata_path.exists():
+            return False
         # Graphs
         graphs_dir = data_dir / "graphs"
         graph_files = [
-            graphs_dir / f"mechanical_graphs_{scene_id}.pt",
-            graphs_dir / f"electronics_graphs_{scene_id}.pt",
-            graphs_dir / f"mechanical_graphs_des_{scene_id}.pt",
-            graphs_dir / f"electronics_graphs_des_{scene_id}.pt",
+            graphs_dir / f"mechanical_graphs_{scene_id}_init.pt",
+            graphs_dir / f"electronics_graphs_{scene_id}_init.pt",
+            graphs_dir / f"mechanical_graphs_{scene_id}_des.pt",
+            graphs_dir / f"electronics_graphs_{scene_id}_des.pt",
         ]
         # Voxels
         voxels_dir = data_dir / "voxels"

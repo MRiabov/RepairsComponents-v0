@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torchvision
 from PIL import Image
+from pathlib import Path
 
 # noqa: F405
 import os
@@ -98,13 +99,15 @@ def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
     # # on the top of the stand plate
     plate_env_export = scale(plate_env.part, 0.01)  # convert to mm.
 
-    export_gltf(
-        plate_env_export,
-        "/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
-        unit=Unit.M,
-    )
+    if export_geom_gltf:
+        export_gltf(
+            plate_env_export,
+            str(export_path()),
+            unit=Unit.M,
+        )
+        # print("exported gltf")
+
     # ocp_vscode.show(plate_env.part)
-    # print("exported gltf")
     return plate_env.part
 
 
@@ -118,7 +121,7 @@ def genesis_setup(scene: gs.Scene):
     # Add mesh with multiple lights and better camera position
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(
-            file="/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
+            file=str(export_path()),
             scale=1,  # Use 1.0 scale since we're working in cm
             pos=(0, 0, 0.1),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
@@ -222,6 +225,10 @@ def render_and_save(scene: gs.Scene, camera_1: Camera, camera_2: Camera):
     save_camera_renders(rgb_1, depth_1, normal_1, "camera1")
     save_camera_renders(rgb_2, depth_2, normal_2, "camera2")
     print("Saved camera outputs!")
+
+
+def export_path():
+    return Path.home() / "data/meshes/tooling_stands/tool_stand_plate.gltf"
 
 
 # plate_env_bd_geometry()

@@ -341,8 +341,9 @@ def normalize_to_center(compound: Compound) -> Compound:
 # mesh save utils
 def generate_scene_meshes():
     "A function to generate all  meshes for all the scenes."
-    if not pathlib.Path("/geom_exports/tooling_stands/tool_stand_plate.gltf").exists():
-        tooling_stand_plate.plate_env_bd_geometry()
+    if not tooling_stand_plate.export_path().exists():
+        print("Tooling stand mesh not found. Generating...")
+        tooling_stand_plate.plate_env_bd_geometry(export_geom_gltf=True)
 
 
 def persist_meshes_and_mjcf(

@@ -160,13 +160,15 @@ class RepairsEnv(gym.Env):
         )
 
         data_gen_start_time = time.time()
+        data_already_exists = check_if_data_exists(
+            scene_ids.tolist(), base_dir, generate_number_of_configs_per_scene
+        )
 
-        if (
-            not check_if_data_exists(
-                scene_ids.tolist(), base_dir, generate_number_of_configs_per_scene
-            )
-            or io_cfg["force_recreate_data"]
-        ):
+        if not data_already_exists or io_cfg["force_recreate_data"]:
+            if not data_already_exists and not io_cfg["force_recreate_data"]:
+                print(
+                    "Data was not found to exist but force_recreate_data was called. Recreating..."
+                )
             create_data(
                 scene_setups=env_setups,
                 tasks=tasks,
@@ -174,20 +176,26 @@ class RepairsEnv(gym.Env):
                 num_configs_to_generate_per_scene=generate_number_of_configs_per_scene,
                 base_dir=base_dir,
             )
+        else:
+            print("Existing data found. Skipping data generation.")
         # -- dataloader (offline) --
         # init dataloader
         # note: will take some time to load.
+        start_dataloader_load = time.time()
         self.env_dataloader = RepairsEnvDataLoader(
             env_setup_ids=io_cfg["env_setup_ids"],
             online=False,
             offline_data_dir=base_dir,
+        )
+        print(
+            f"Offline dataloader loaded in {time.time() - start_dataloader_load:.2f} seconds."
         )
         in_memory = torch.full(
             (concurrent_scenes,),
             io_cfg["dataloader_settings"]["prefetch_memory_size"],
             dtype=torch.int16,
         )
-        self.env_dataloader.populate_async(in_memory)  # is it still necessary?
+        # self.env_dataloader.populate_async(in_memory)  # is it still necessary?
         partial_env_configs = self.env_dataloader.get_processed_data(
             torch.full(
                 (concurrent_scenes,),
@@ -240,8 +248,7 @@ class RepairsEnv(gym.Env):
                 )
             )
 
-        data_gen_end_time = time.time()
-        print(f"Data generation took {data_gen_end_time - data_gen_start_time} seconds")
+        print(f"Data generation took {time.time() - data_gen_start_time} seconds")
 
         self.default_dof_pos = torch.tensor(
             [env_cfg["default_joint_angles"][name] for name in env_cfg["joint_names"]],

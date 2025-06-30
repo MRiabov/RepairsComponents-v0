@@ -146,7 +146,7 @@ def get_graph_save_paths(base_dir: Path, scene_id: int, init: bool):
         base_dir / "graphs" / f"mechanical_graphs_{int(scene_id)}_{postfix}.pt"
     )
     elec_graph_path = (
-        base_dir / "graphs" / f"electronic_graphs_{int(scene_id)}_{postfix}.pt"
+        base_dir / "graphs" / f"electronics_graphs_{int(scene_id)}_{postfix}.pt"
     )
 
     return mech_graph_path, elec_graph_path
