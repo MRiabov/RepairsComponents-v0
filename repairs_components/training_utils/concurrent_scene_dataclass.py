@@ -101,6 +101,9 @@ class ConcurrentSceneData:
 
 
 def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
+    assert scene_configs is not None and len(scene_configs) > 0, (
+        "Can't merge 0 scene configs"
+    )
     # assert the scenes in configs are equivalent.
     assert all(scene_configs[0].scene == scene_cfg.scene for scene_cfg in scene_configs)
     assert all(

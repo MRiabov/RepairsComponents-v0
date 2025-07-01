@@ -54,7 +54,9 @@ ALIGNMENT_PIN_HEIGHT = 0.8  # cm
 SCENE_CENTER = (0, 20 + STAND_PLATE_DEPTH / 2, STAND_PLATE_HEIGHT)
 
 
-def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
+def plate_env_bd_geometry(
+    export_geom_gltf: bool = False, base_dir: Path | None = None
+) -> Part:
     with BuildPart() as plate_env:
         # stand plate
         with Locations((0, 0, STAND_PLATE_HEIGHT / 2)):
@@ -100,9 +102,12 @@ def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
     plate_env_export = scale(plate_env.part, 0.01)  # convert to mm.
 
     if export_geom_gltf:
+        assert base_dir is not None, (
+            "base_dir must be provided if export_geom_gltf is True"
+        )
         export_gltf(
             plate_env_export,
-            str(export_path()),
+            str(export_path(base_dir)),
             unit=Unit.M,
         )
         # print("exported gltf")
@@ -111,7 +116,7 @@ def plate_env_bd_geometry(export_geom_gltf: bool = False) -> Part:
     return plate_env.part
 
 
-def genesis_setup(scene: gs.Scene):
+def genesis_setup(scene: gs.Scene, base_dir: Path):
     # NOTE: in genesis, the YZ is swapped compared to build123d, so define in XZY.
 
     # Add plane
@@ -121,7 +126,7 @@ def genesis_setup(scene: gs.Scene):
     # Add mesh with multiple lights and better camera position
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(
-            file=str(export_path()),
+            file=str(export_path(base_dir)),
             scale=1,  # Use 1.0 scale since we're working in cm
             pos=(0, 0, 0.1),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
@@ -227,8 +232,8 @@ def render_and_save(scene: gs.Scene, camera_1: Camera, camera_2: Camera):
     print("Saved camera outputs!")
 
 
-def export_path():
-    return Path.home() / "data/meshes/tooling_stands/tool_stand_plate.gltf"
+def export_path(base_dir: Path):
+    return base_dir / "meshes/tooling_stands/tool_stand_plate.gltf"
 
 
 # plate_env_bd_geometry()

@@ -9,6 +9,7 @@ import copy
 import json
 import pathlib
 from pathlib import Path
+import time
 from genesis.engine.entities import RigidEntity
 from repairs_components.geometry.base_env import tooling_stand_plate
 from repairs_components.processing.voxel_export import export_voxel_grid
@@ -216,6 +217,7 @@ def initialize_and_build_scene(
     desired_sim_state: RepairsSimState,
     mesh_file_names: dict[str, str],
     batch_dim: int,
+    scene_id: int = 0,  # logging only
     random_textures: bool = False,
 ):
     # for starting scene, move it to an appropriate position #no, not here...
@@ -229,7 +231,10 @@ def initialize_and_build_scene(
     initial_gs_entities["franka@control"] = franka
 
     # build a single scene... but batched
+    print(f"Building scene number {scene_id}...")
+    start_time = time.time()
     first_desired_scene.build(n_envs=batch_dim)
+    print(f"Built scene number {scene_id} in {time.time() - start_time} seconds.")
 
     # ===== Control Parameters =====
     # Set PD control gains (tuned for Franka Emika Panda)
@@ -339,11 +344,13 @@ def normalize_to_center(compound: Compound) -> Compound:
 
 
 # mesh save utils
-def generate_scene_meshes():
+def generate_scene_meshes(base_dir: Path):
     "A function to generate all  meshes for all the scenes."
-    if not tooling_stand_plate.export_path().exists():
+    if not tooling_stand_plate.export_path(base_dir).exists():
         print("Tooling stand mesh not found. Generating...")
-        tooling_stand_plate.plate_env_bd_geometry(export_geom_gltf=True)
+        tooling_stand_plate.plate_env_bd_geometry(
+            export_geom_gltf=True, base_dir=base_dir
+        )
 
 
 def persist_meshes_and_mjcf(

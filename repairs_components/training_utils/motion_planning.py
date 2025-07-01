@@ -88,7 +88,7 @@ def execute_straight_line_trajectory(
                 camera.render()
 
     # let dry-run for 80 steps.
-    for _ in range(100):
+    for _ in range(10):  # note was 100, but reduced to 10 for debug.
         scene.step(
             update_visualizer=render, refresh_visualizer=render
         )  # let it actually run.

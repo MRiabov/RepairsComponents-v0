@@ -261,7 +261,6 @@ def check_if_data_exists(
     Returns True if all exist, else False.
     """
     data_dir = Path(data_dir)
-    # Check metadata file
 
     # Check per-scene files
     for scene_id in scene_ids:
@@ -285,7 +284,22 @@ def check_if_data_exists(
         # Check all
         if not all(file_path.exists() for file_path in graph_files + voxel_files):
             return False
-    return True
+
+        # assert that there is enough data:
+        with open(metadata_path, "r") as f:
+            metadata = json.load(f)
+        if metadata["count_generated_envs"] < count_envs_per_scene[scene_id]:
+            print(
+                f"Found less data than expected for scene_id: {scene_id}. Found {metadata['count_generated_envs']}, expected {count_envs_per_scene[scene_id]}. Regenerating..."
+            )
+            return False
+        elif metadata["count_generated_envs"] > count_envs_per_scene[scene_id] * 3:
+            print(
+                "Note: found at least 3 times more data than requested. This may strain the memory. "
+                "Consider regenerating data with a requested size."
+            )
+
+    return True  # TODO it would be ideal to not regenerate data for all environments every time, but it's quick enough (for one-time op)
 
 
 def get_scene_mesh_file_names(

@@ -87,6 +87,7 @@ def save_concurrent_scene_metadata(
         "mesh_file_names": mesh_file_name_mapping,
         "electronics_indices": data.current_state.electronics_state[0].indices,
         "mechanical_indices": data.current_state.physical_state[0].body_indices,
+        "count_generated_envs": data.batch_dim,
     }
     with open(scene_dir / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)

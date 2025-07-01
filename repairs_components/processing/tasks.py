@@ -82,6 +82,12 @@ class Task(ABC):
         "Perturb initial state; return the compound and the new positions of bodies in the compound."
         raise NotImplementedError
 
+    def unchanged_initial_state(
+        self, compound: Compound, env_size: tuple[float, float, float]
+    ) -> Compound:
+        "Return the compound unchanged. This is useful to avoid recompilation times on genesis (so environments make a cache hit.)"
+        return compound
+
 
 class AssembleTask(Task):
     """A task class that pertubs the geometry of a compound to create more diverse tasks.

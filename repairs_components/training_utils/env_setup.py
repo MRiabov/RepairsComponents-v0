@@ -33,8 +33,8 @@ class EnvSetup(ABC):
     def get_default_b123d_env(self):
         return plate_env_bd_geometry()
 
-    def get_default_genesis_scene(self):
-        return genesis_setup()
+    # def get_default_genesis_scene(self):
+    #     return genesis_setup()
 
     def _debug_render(self, scene, camera_1, camera_2):
         # from genesis.vis.camera import Camera

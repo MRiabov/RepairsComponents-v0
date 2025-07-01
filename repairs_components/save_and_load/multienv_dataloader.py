@@ -290,7 +290,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
 
     def get_processed_data(
         self, num_configs_to_generate_per_scene: torch.Tensor, timeout: float = 1.0
-    ) -> tuple[list[ConcurrentSceneData], dict[str, str]]:
+    ) -> tuple[list[ConcurrentSceneData | None], dict[str, str]]:
         """
         Repairs-specific: merges configs, handles mesh file names, etc.
         Returns (merged_batches, mesh_file_names) for online mode, else just batches.
@@ -302,7 +302,12 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
 
         # merge all configs (preference downstream).
         merged_batches = [
-            merge_concurrent_scene_configs(batch) for batch in batches_per_env
+            (
+                merge_concurrent_scene_configs(batch)
+                if batch is not None and len(batch) > 0
+                else None
+            )
+            for batch in batches_per_env
         ]
         return merged_batches  # , aux_mesh_file_names
 

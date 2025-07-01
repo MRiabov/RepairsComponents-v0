@@ -148,8 +148,6 @@ class RepairsEnv(gym.Env):
         task = tasks[0]  # any task will suffice for init.
 
         # -- data pregeneration --
-        # if scene meshes don't exist yet, create them now.
-        generate_scene_meshes()
 
         self.env_setup_ids = torch.tensor(io_cfg["env_setup_ids"])
 
@@ -169,6 +167,8 @@ class RepairsEnv(gym.Env):
         )
 
         if not data_already_exists or io_cfg["force_recreate_data"]:
+            # if scene meshes don't exist yet, create them now.
+            generate_scene_meshes(base_dir=Path(self.save_path))
             if not data_already_exists and not io_cfg["force_recreate_data"]:
                 print(
                     "Data was not found to exist but force_recreate_data was not called. Still, recreating..."
@@ -203,9 +203,7 @@ class RepairsEnv(gym.Env):
         # self.env_dataloader.populate_async(in_memory)  # is it still necessary?
         partial_env_configs = self.env_dataloader.get_processed_data(
             torch.full(
-                (self.concurrent_scenes,),
-                self.per_scene_batch_dim,
-                dtype=torch.int16,
+                (self.concurrent_scenes,), self.per_scene_batch_dim, dtype=torch.int16
             )
         )  # get a batch of configs size prefetch_memory_size
 
@@ -213,47 +211,50 @@ class RepairsEnv(gym.Env):
         mesh_file_names = get_scene_mesh_file_names(
             self.env_setup_ids.tolist(), base_dir, append_path=True
         )
+        # Sequential scene construction (taichi is not thread-safe)
+
+        self.scenes = []
+        self.concurrent_scenes_data = []
+
         for scene_id in range(len(self.env_setup_ids)):
             # NOTE: scene_id is not the same as env_setup_id!
-            # scene_id is the index of the scene in the batch
-            scene = gs.Scene(  # empty scene
+            scene = gs.Scene(
                 sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
                 show_viewer=False,
                 vis_options=gs.options.VisOptions(env_separate_rigid=True),  # type: ignore
             )
-            self.scenes.append(scene)
 
-            scene, cameras, gs_entities, franka = initialize_and_build_scene(
-                scene,  # build scene.
+            scene, cameras, gs_entities, _ = initialize_and_build_scene(
+                scene,
                 partial_env_configs[scene_id].desired_state,
                 mesh_file_names[scene_id],
                 self.per_scene_batch_dim,
-                use_random_textures,
+                random_textures=use_random_textures,
+                scene_id=scene_id,
             )
 
-            # Using dataclass to store concurrent scene data for better organization and clarity
-            self.concurrent_scenes_data.append(
-                ConcurrentSceneData(
-                    scene=scene,
-                    gs_entities=gs_entities,
-                    cameras=tuple(cameras),
-                    init_state=partial_env_configs[scene_id].init_state,
-                    current_state=partial_env_configs[scene_id].current_state,
-                    # ^ no need for copy because it is already copied.
-                    desired_state=partial_env_configs[scene_id].desired_state,
-                    vox_init=partial_env_configs[scene_id].vox_init,
-                    vox_des=partial_env_configs[scene_id].vox_des,
-                    initial_diffs=partial_env_configs[scene_id].initial_diffs,
-                    initial_diff_counts=partial_env_configs[
-                        scene_id
-                    ].initial_diff_counts,
-                    scene_id=scene_id,
-                    reward_history=RewardHistory(self.per_scene_batch_dim),
-                    batch_dim=self.per_scene_batch_dim,
-                    step_count=torch.zeros(self.per_scene_batch_dim, dtype=torch.int),
-                    task_ids=partial_env_configs[scene_id].task_ids,
-                )
+            # Using dataclass to store concurrent scene data for better organization
+            scene_data = ConcurrentSceneData(
+                scene=scene,
+                gs_entities=gs_entities,
+                cameras=tuple(cameras),
+                init_state=partial_env_configs[scene_id].init_state,
+                current_state=partial_env_configs[scene_id].current_state,
+                desired_state=partial_env_configs[scene_id].desired_state,
+                vox_init=partial_env_configs[scene_id].vox_init,
+                vox_des=partial_env_configs[scene_id].vox_des,
+                initial_diffs=partial_env_configs[scene_id].initial_diffs,
+                initial_diff_counts=partial_env_configs[scene_id].initial_diff_counts,
+                scene_id=scene_id,
+                reward_history=RewardHistory(self.per_scene_batch_dim),
+                batch_dim=self.per_scene_batch_dim,
+                step_count=torch.zeros(self.per_scene_batch_dim, dtype=torch.int),
+                task_ids=partial_env_configs[scene_id].task_ids,
             )
+
+            # store built scene and data
+            self.scenes.append(scene)
+            self.concurrent_scenes_data.append(scene_data)
 
         print(f"Data generation took {time.time() - data_gen_start_time} seconds")
 
@@ -290,6 +291,21 @@ class RepairsEnv(gym.Env):
             self.concurrent_scenes,
             self.ml_batch_dim // self.concurrent_scenes,  # "genesis" batch dim
             self.num_actions,
+        )
+        reset_by_scenes = torch.zeros(
+            self.concurrent_scenes,
+            self.ml_batch_dim // self.concurrent_scenes,
+            dtype=torch.bool,
+        )
+        dones_by_scenes = torch.zeros(
+            self.concurrent_scenes,
+            self.ml_batch_dim // self.concurrent_scenes,
+            dtype=torch.bool,
+        )
+        rewards_by_scenes = torch.zeros(
+            self.concurrent_scenes,
+            self.ml_batch_dim // self.concurrent_scenes,
+            dtype=torch.float,
         )
         # step through different, concurrent scenes.
         for scene_id in range(self.concurrent_scenes):
@@ -359,18 +375,21 @@ class RepairsEnv(gym.Env):
             )
 
             reset_envs = dones | out_of_bounds_fail  # or any other failure mode.
+            reset_by_scenes[scene_id] = reset_envs
+            dones_by_scenes[scene_id] = dones
+            rewards_by_scenes[scene_id] = rewards
 
-            # reset at done
-            if reset_envs.any():
-                self.reset_idx(reset_envs.nonzero().squeeze(1))
+        # reset at done
+        if reset_by_scenes.any():
+            self.reset_idx(reset_by_scenes.flatten().nonzero().squeeze(1))
 
-            # Additional info for debugging
-            info = {
-                "diff": diff,
-                "total_diff_left": total_diff_left,
-                "success": success,
-                "out_of_bounds": out_of_bounds_fail,
-            }
+        # Additional info for debugging
+        info = {
+            "diff": diff,
+            "total_diff_left": total_diff_left,
+            "success": success,
+            "out_of_bounds": out_of_bounds_fail,
+        }  # FIXME: does not account for multiple scenes, only for the last one executed.
 
         (
             voxel_init,
@@ -399,8 +418,8 @@ class RepairsEnv(gym.Env):
             mech_graph_des,
             elec_graph_init,
             elec_graph_des,
-            rewards,
-            dones,
+            rewards_by_scenes.flatten(),
+            dones_by_scenes.flatten(),
             info,
         )
 
@@ -420,24 +439,33 @@ class RepairsEnv(gym.Env):
         num_env_per_scene = self.ml_batch_dim // self.concurrent_scenes
         scene_idx = envs_idx // num_env_per_scene
         env_in_scene_idx = envs_idx % num_env_per_scene
-        env_per_scene_idx = env_in_scene_idx.reshape(self.concurrent_scenes, -1)
+        # env_per_scene_idx = env_in_scene_idx.reshape(self.concurrent_scenes, -1)
+        # ^ not true because env_per_scene_idx is not a full scene id tensor, only partial. (won't work with e.g. scene_idx=[0])
         unique_scene_idx, counts = torch.unique(scene_idx, return_counts=True)
 
-        # update the scene
-        # Reset robot joint positions to default
+        # pad scene counts with zeros for absent in this batch envs
+        counts_full = torch.zeros(
+            self.concurrent_scenes, dtype=torch.int64, device=self.device
+        )
+        counts_full[unique_scene_idx] = counts
 
         # get data for the entire batch.
         reset_scene_data: list[ConcurrentSceneData | None] = (  # none if counts were 0.
-            self.env_dataloader.get_processed_data(counts.to(dtype=torch.int16))
+            self.env_dataloader.get_processed_data(counts_full.to(dtype=torch.int16))
         )
-        # print("reset_scene_data", reset_scene_data)
 
         for scene_id in range(len(reset_scene_data)):  # iter over scene data
             reset_scene = reset_scene_data[scene_id]
-            reset_env_ids_this_scene = env_per_scene_idx[scene_id]
+            reset_env_ids_this_scene = env_in_scene_idx[scene_idx == scene_id]
+            # ^ get reset_env_ids_this_scene as equality of scene_idx to scene_id.
             if reset_scene is None:
-                continue  # I don't remember why, but this is probably sound?
+                assert reset_env_ids_this_scene.shape[0] == 0, (
+                    "reset_env_ids_this_scene should be empty if reset_scene is None"
+                )
+                continue  # if no reset data was necessary, skip
 
+            # update the scene
+            # Reset robot joint positions to default
             dof_pos = self.default_dof_pos.expand(reset_scene.batch_dim, -1)
 
             self.concurrent_scenes_data[scene_id].gs_entities[
