@@ -16,6 +16,9 @@ def fastener_hole(radius: float, depth: float, joint_name: str = "fastener_hole1
     Returns:
         Tuple: A tuple containing the created Hole object and its location.
     """
+    if radius > 2.5 or depth > 4:
+        print("Warning: radius > 2.5 or depth > 4. Is this for centimeters??")
+
     # make a hole
     fastener_hole1 = Hole(radius=radius, depth=depth)
     fastener_loc = Locations((0, 0, -radius))

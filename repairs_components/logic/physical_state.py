@@ -126,7 +126,9 @@ class PhysicalState:
             # TODO logic for fastener rebuild...
             for edge_index, edge_attr in zip(graph.edge_index.t(), graph.edge_attr):
                 fastener_id = edge_attr[0]  # assume it is the first element
-                fastener_size = edge_attr[1]
+                fastener_size = edge_attr[
+                    1
+                ]  # TODO: should be in separate graphs before merge!
                 fastener_name = fastener_id_to_name[fastener_id]
                 connected_to_1 = self.reverse_indices[edge_index[0].item()]
                 connected_to_2 = self.reverse_indices[edge_index[1].item()]

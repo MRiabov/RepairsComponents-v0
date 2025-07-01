@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from build123d import Compound
+import numpy as np
 
 
 from repairs_components.geometry.base_env.tooling_stand_plate import (
@@ -42,3 +43,20 @@ class EnvSetup(ABC):
         # note: I don't import because it fails running on non-GPU WSL node.
 
         render_and_save(scene, camera_1, camera_2)
+
+    def validate(self):
+        """Validate the environment setup."""
+        geom = self.desired_state_geom()
+        intersect, parts, intersect_volume = geom.do_children_intersect()
+        assert not intersect, (
+            f"Compound children intersect. Intersecting parts: {[part.label for part in parts]}. Intersecting volume: {intersect_volume}."
+        )
+        aabb = geom.bounding_box()
+        assert (np.array(aabb.min.to_tuple()) >= 0).all() & (
+            np.array(aabb.max.to_tuple()) <= np.array(self.STANDARD_ENV_SIZE)
+        ).all(), (
+            f"Compound must be within the environment. Current AABB: {aabb.min} to {aabb.max}. Environment size: {self.STANDARD_ENV_SIZE}."
+        )
+        assert all(part.label and "@" in part.label for part in geom.children), (
+            f"All children must have labels. Currently have: {geom.children}"
+        )

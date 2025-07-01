@@ -12,6 +12,8 @@ from repairs_components.processing.textures import get_color_by_type, get_random
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.geometry.fasteners import Fastener
+from torch_geometric.data import Data
+import numpy as np
 
 
 def translate_state_to_genesis_scene(
@@ -44,7 +46,7 @@ def translate_state_to_genesis_scene(
     for body_name, body_idx in physical_state.body_indices.items():
         assert body_name is not None and "@" in body_name, "Label must contain '@'"
         # note: body name is equal to build123d label here.
-        _, part_type = body_name.split("@", 1)
+        part_name, part_type = body_name.split("@", 1)
         part_type = part_type.lower()
 
         if random_textures:
@@ -62,11 +64,28 @@ def translate_state_to_genesis_scene(
             mesh = gs.morphs.Mesh(file=mesh_path)
             new_entity = scene.add_entity(mesh, surface=surface)
 
+        elif part_type == "fixed_solid":  # TODO fixed solids definition in other parts.
+            mesh_path = str(mesh_file_names[body_name])
+            mesh = gs.morphs.Mesh(file=mesh_path, fixed=True)  # fixed!
+            new_entity = scene.add_entity(mesh, surface=surface)
+
         elif part_type in ("connector", "button", "led", "switch"):
             mjcf_path = str(mesh_file_names[body_name])
             # FIXME: deprecate MJCF from here and use native genesis configs.
             mesh = gs.morphs.MJCF(file=mjcf_path, name=body_name, links_to_keep=True)
             new_entity = scene.add_entity(mesh, surface=surface)
+
+        elif part_type == "fastener":
+            mjcf_path = str(mesh_file_names[body_name])
+            assert mjcf_path.endswith(".xml"), "Expected MJCF path to end with xml."
+            # mjcf is acceptable for fasteners because it's faster(?)
+            mesh = gs.morphs.MJCF(file=mjcf_path, name=body_name, links_to_keep=True)
+            new_entity = scene.add_entity(mesh, surface=surface)
+            # and how it will be moved later does not matter now
+
+            # TODO: get edge attr... get
+            # NOTE!!! I haven't exactly thought this through yet. Scheme something on paper.
+
         else:
             raise NotImplementedError(
                 f"Not implemented for translation part type: {part_type}"
@@ -259,3 +278,32 @@ def translate_compound_to_sim_state(
                 raise NotImplementedError(f"Part type {part.label} not implemented.")
 
     return sim_state
+
+
+def create_constraints_based_on_graph(
+    env_state: RepairsSimState, gs_entities: dict[str, RigidEntity], scene: gs.Scene
+):
+    """Create fastener (weld) constraints based on graph."""  # note: in the future could be e.g. bearing constraints. But weld constraints as fasteners for now.
+    rigid_solver = scene.sim.rigid_solver
+    all_base_links = np.full(
+        len(env_state.physical_state[0].indices), -1
+    )  # fill with -1
+
+    for entity_id in env_state.physical_state[0].indices:
+        entity = gs_entities[entity_id]
+        all_base_links[entity_id] = entity.base_link.idx
+
+    for env_id, state in enumerate(env_state.physical_state):
+        graph: Data = state.graph
+        for edge_id, edge in enumerate(graph.edge_index):
+            fastener_id = graph.edge_attr[
+                edge_id, 0
+            ]  # 0 or whichever index is correct for fastener id.
+
+            # FIXME: this kind of works but does not account for fastener constraint
+            # should actually be linked to a fastener, and fastener is linked to another body.
+
+            rigid_solver.add_weld_constraint(
+                all_base_links[edge[0]], all_base_links[edge[1]], env_idx=env_id
+            )  # ^ this is not correct
+            # genesis supports constraints on per-scene basis.

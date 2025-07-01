@@ -15,6 +15,8 @@ from genesis.engine.entities import RigidEntity
 
 
 class Fastener(Component):
+    "Fastener class. Reminder: all values are in cm."
+
     def __init__(
         self,
         constraint_b_active: bool,
@@ -22,11 +24,11 @@ class Fastener(Component):
         | None = None,  # how will it be constrained in case of hole?
         initial_body_b: str | None = None,
         name: str = "",  # just name them by int ids. except special cases.
-        thread_pitch: float = 0.5,
-        length: float = 10.0,
-        diameter: float = 3.0,
-        head_diameter: float = 5.5,
-        head_height: float = 2.0,
+        thread_pitch: float = 0.05,
+        length: float = 1.5,
+        diameter: float = 0.5,
+        head_diameter: float = 0.75,
+        head_height: float = 0.3,
         screwdriver_name: str = "screwdriver",
     ):
         assert initial_body_a is not None, "initial_body_a must be provided"
@@ -57,10 +59,10 @@ class Fastener(Component):
         return f"""
             <body name="{self.name}">
                 <freejoint name="{self.name}_joint"/>
-                <geom name="{self.name}_shaft" type="cylinder" size="{self.diameter / 2000} {self.length / 2000}" 
-                    pos="0 0 {self.length / 2000}" rgba="0.8 0.8 0.8 1" mass="0.1"/>
-                <geom name="{self.name}_head" type="cylinder" size="{self.head_diameter / 2000} {self.head_height / 2000}" 
-                    pos="0 0 {(self.length + self.head_height / 2) / 2000}" rgba="0.5 0.5 0.5 1" mass="0.05"/>
+                <geom name="{self.name}_shaft" type="cylinder" size="{self.diameter / 200} {self.length / 200}" 
+                    pos="0 0 {self.length / 200}" rgba="0.8 0.8 0.8 1" mass="0.1"/>
+                <geom name="{self.name}_head" type="cylinder" size="{self.head_diameter / 200} {self.head_height / 200}" 
+                    pos="0 0 {(self.length + self.head_height / 2) / 200}" rgba="0.5 0.5 0.5 1" mass="0.05"/>
                 <body name="{self.name}_tip" pos="0 0 0">
                     <!-- Tip is located at 0,0,0 -->
                 </body>
@@ -81,9 +83,9 @@ class Fastener(Component):
             <equality name="{self.name}_to_screwdriver" active="false">
                 <weld body1="{self.name}" body2="{self.screwdriver_name}" relpose="true"/>
             </equality>
-            """
+            """  # FIXME: mjcf may be outdated!!!
 
-    def bd_geometry(self):
+    def bd_geometry(self) -> tuple[Part, tuple]:
         """Create a build123d geometry for the fastener.
 
         Returns:
@@ -92,12 +94,13 @@ class Fastener(Component):
         from build123d import BuildPart, Cylinder, Pos, Align
 
         with BuildPart() as screw:
-            # Create the shaft (main cylinder)
-            shaft = Cylinder(
-                radius=self.diameter / 2,  # Convert diameter to radius
-                height=self.length,
-                align=(Align.CENTER, Align.CENTER, Align.MIN),
-            )
+            with Locations(Pos(0, 0, -self.length + self.head_height / 2)):
+                # Create the shaft (main cylinder)
+                shaft = Cylinder(
+                    radius=self.diameter / 2,  # Convert diameter to radius
+                    height=self.length,
+                    align=(Align.CENTER, Align.CENTER, Align.MIN),
+                )
 
             # Create the head (wider cylinder)
             with Locations(Pos(0, 0, self.head_height / 2)):
