@@ -151,7 +151,7 @@ class MultiEnvDataLoader:
 
     def generate_sequential(
         self, num_configs_to_generate_per_scene: torch.Tensor, save_to_disk: bool = True
-    ) -> tuple[list[Any], Any]:
+    ) -> tuple[list[Any], list[dict]]:
         """
         Generate configs non-async (sequentially) for all environments. Use when async is not necessary, e.g. generating the dataset.
         Args:
@@ -163,6 +163,7 @@ class MultiEnvDataLoader:
         generated_configs, aux = self.preprocessing_fn(
             num_configs_to_generate_per_scene, save_to_disk=save_to_disk
         )
+        assert isinstance(aux, list), "aux must be a list"
 
         return generated_configs, aux
 
@@ -313,7 +314,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
 
     def generate_sequential(
         self, num_configs_to_generate_per_scene: torch.Tensor
-    ) -> tuple[list[ConcurrentSceneData], dict[str, str]]:
+    ) -> tuple[list[ConcurrentSceneData], list[dict[str, str]]]:
         """
         Repairs-specific: merges configs, handles mesh file names, etc.
         Returns (merged_batches, mesh_file_names) for online mode, else just batches.

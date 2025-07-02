@@ -47,7 +47,7 @@ def create_data(
             scene_data,
             base_dir,
             scene_id,
-            mesh_file_name_mapping=mesh_file_names,
+            mesh_file_name_mapping=mesh_file_names[scene_id],
         )
 
 
@@ -72,6 +72,9 @@ def save_concurrent_scene_metadata(
             f"gs_entities: {data.gs_entities.keys()}\n"
             f"mesh_file_name_mapping: {mesh_file_name_mapping.keys()}"
         )
+    assert isinstance(mesh_file_name_mapping, dict), (
+        "mesh_file_name_mapping must be a dict"
+    )
     if env_idx is None:
         env_idx = list(range(data.batch_dim))
     scene_dir = base_dir / f"scene_{scene_id}"

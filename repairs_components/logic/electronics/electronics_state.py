@@ -18,7 +18,7 @@ class ElectronicsState(SimState):
     graph: Data = field(default_factory=Data)
     "Note: don't take this graph. Use export_graph() instead."  # TODO: merge all node features into one.
     indices: dict[str, int] = field(default_factory=dict)
-    reverse_indices: dict[int, str] = field(default_factory=dict)
+    inverse_indices: dict[int, str] = field(default_factory=dict)
     # TODO add reverse indices updates where they need to be.
     _graph_built: bool = field(default=False, init=False)
     device: torch.device = field(
@@ -30,7 +30,7 @@ class ElectronicsState(SimState):
     def __post_init__(self):
         # Initialize sparse graph representation
         self.indices = {}
-        self.reverse_indices = {}
+        self.inverse_indices = {}
         self.graph = Data()
         self.graph.edge_index = torch.empty(
             (2, 0), dtype=torch.long, device=self.device
@@ -56,7 +56,7 @@ class ElectronicsState(SimState):
 
         # Build index mapping
         self.indices = {name: idx for idx, name in enumerate(self.components.keys())}
-        self.reverse_indices = {idx: name for name, idx in self.indices.items()}
+        self.inverse_indices = {idx: name for name, idx in self.indices.items()}
         num_nodes = len(self.indices)
 
         # Initialize feature tensors
@@ -454,7 +454,7 @@ class ElectronicsState(SimState):
     def connect(self, id_1: int, id_2: int):
         "Connect two components"
         # not good but will do
-        self.connect(self.reverse_indices[id_1], self.reverse_indices[id_2])
+        self.connect(self.inverse_indices[id_1], self.inverse_indices[id_2])
 
     def clear_connections(self):
         "Disconnect all connections between a component"
@@ -485,12 +485,12 @@ class ElectronicsState(SimState):
         # Create a new ElectronicsState instance
         state = cls()
         state.indices = indices
-        state.reverse_indices = {v: k for k, v in indices.items()}
+        state.inverse_indices = {v: k for k, v in indices.items()}
         state.graph = graph
 
         # Rebuild components from individual feature tensors
         for component_id in range(graph.num_nodes):
-            component_name = state.reverse_indices[component_id]
+            component_name = state.inverse_indices[component_id]
 
             # Get component features from individual tensors
             max_voltage = graph.max_voltage[component_id].item()
@@ -527,8 +527,8 @@ class ElectronicsState(SimState):
         # Rebuild connections from edge_index
         if hasattr(graph, "edge_index") and graph.edge_index is not None:
             for src_idx, dst_idx in graph.edge_index.t().tolist():
-                src_name = state.reverse_indices[src_idx]
-                dst_name = state.reverse_indices[dst_idx]
+                src_name = state.inverse_indices[src_idx]
+                dst_name = state.inverse_indices[dst_idx]
                 state.components[src_name].connect(state.components[dst_name])
 
         state._graph_built = True

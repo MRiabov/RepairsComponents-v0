@@ -42,30 +42,50 @@ class Fastener(Component):
         self.screwdriver_name = screwdriver_name
         # self.a_constraint_active = True # note: a_constraint_active is always True now.
         self.b_constraint_active = constraint_b_active
-        self.name = get_fastener_singleton_name(self.diameter, self.head_height)
+        self.name = get_fastener_singleton_name(self.diameter, self.length)
 
     def get_mjcf(self):
         """Get MJCF of a screw.
 
         Args:
-            thread_pitch: Distance between threads in mm.
-            length: Total length of the screw in mm.
-            diameter: Outer diameter of the screw thread in mm.
-            head_diameter: Diameter of the screw head in mm.
-            head_height: Height of the screw head in mm.
+            thread_pitch: Distance between threads in cm.
+            length: Total length of the screw in cm.
+            diameter: Outer diameter of the screw thread in cm.
+            head_diameter: Diameter of the screw head in cm.
+            head_height: Height of the screw head in cm.
         """
+        # MJCF expects meters, Build123d uses cm, so convert cm to m
+        shaft_radius = self.diameter / 2 / 100
+        shaft_length = self.length / 100
+        head_radius = self.head_diameter / 2 / 100
+        head_height = self.head_height / 100
+        # Head base at z=0, head centered at head_height/2, shaft centered at -shaft_length/2
+        # Tip body at z=-shaft_length
         return f"""
-            <body name="{self.name}">
-                <freejoint name="{self.name}_joint"/>
-                <geom name="{self.name}_shaft" type="cylinder" size="{self.diameter / 200} {self.length / 200}" 
-                    pos="0 0 {self.length / 200}" rgba="0.8 0.8 0.8 1" mass="0.1"/>
-                <geom name="{self.name}_head" type="cylinder" size="{self.head_diameter / 200} {self.head_height / 200}" 
-                    pos="0 0 {(self.length + self.head_height / 2) / 200}" rgba="0.5 0.5 0.5 1" mass="0.05"/>
-                <body name="{self.name}_tip" pos="0 0 0">
-                    <!-- Tip is located at 0,0,0  FIXME: bad idea!-->
-                </body>
+    <mujoco>
+    <worldbody>
+        <body name="{self.name}">
+            <!-- <joint name="{self.name}_base_joint" type="weld"/> -->
+            <geom name="{self.name}_head" type="cylinder"
+                  size="{head_radius} {head_height / 2}"
+                  pos="0 0 {head_height / 2}"
+                  rgba="0.5 0.5 0.5 1"
+                  density="7800"/>
+
+            <geom name="{self.name}_shaft" type="cylinder"
+                  size="{shaft_radius} {shaft_length / 2}"
+                  pos="0 0 {-shaft_length / 2}"
+                  rgba="0.8 0.8 0.8 1"
+                  density="7800"/>
+
+            <body name="{self.name}_tip" pos="0 0 {-shaft_length}">
+                <!-- Tip is located at the end of the shaft (z=-shaft_length) -->
+                <site name="{self.name}_tip_site" pos="0 0 0" size="0.001" rgba="1 0 0 1"/>
             </body>
-            """  # FIXME: mjcf is outdated!
+        </body>
+    </worldbody>
+    </mujoco>
+"""
 
     def bd_geometry(self) -> tuple[Part, tuple]:
         """Create a build123d geometry for the fastener.
@@ -178,7 +198,8 @@ def activate_part_connection(
     hole_link_name: str,
 ):
     rigid_solver = scene.sim.rigid_solver
-    fastener_head_joint = np.array(fastener_entity.base_link.idx)
+    # fastener_head_joint = np.array(fastener_entity.base_link.idx)
+    fastener_head_joint = np.array(fastener_entity.base_joint.idx)
     other_body_hole_link = np.array(other_entity.get_link(hole_link_name).idx)
     rigid_solver.add_weld_constraint(
         fastener_head_joint, other_body_hole_link
@@ -229,32 +250,33 @@ class FastenerHolder(Component):
 # model.eq_active[model.equality(name_to_id(model, "equality", f"{name}_to_screwdriver"))] = 1
 
 
-def get_fastener_singleton_name(diameter: float, height: float) -> str:
-    """Return the name for a fastener singleton based on its diameter and height."""
+def get_fastener_singleton_name(diameter: float, length: float) -> str:
+    """Return the name for a fastener singleton based on its diameter and length."""
     diameter_str = f"{diameter:.2f}"
-    height_str = f"{height:.2f}"
-    return f"fastener_d{diameter_str}_h{height_str}@fastener"
+    length_str = f"{length:.2f}"
+    return f"fastener_d{diameter_str}_l{length_str}@fastener"
 
 
 def get_fastener_params_from_name(name: str) -> tuple[float, float]:
-    """Return the diameter and height of a fastener singleton based on its name."""
+    """Return the diameter and lengthF of a fastener singleton based on its name."""
     diameter_str = name.split("_")[1][1:]  # [1:] - remove 'd'
-    height_str = name.split("_")[2][1:]  # [1:] - remove 'h'
-    return float(diameter_str), float(height_str)
+    length_str = name.split("_")[2][1:]  # [1:] - remove 'h'
+    length_str = length_str.split("@")[0]  # remove everything after '@'
+    return float(diameter_str), float(length_str)
 
 
 def get_singleton_fastener_save_path(
-    diameter: float, height: float, base_dir: Path
+    diameter: float, length: float, base_dir: Path
 ) -> Path:
-    """Return the save path for a fastener singleton based on its diameter and height."""
+    """Return the save path for a fastener singleton based on its diameter and length."""
     return (
         base_dir
         / "shared"
         / "fasteners"
-        / f"fastener_d{diameter:.2f}_h{height:.2f}.xml"
+        / f"fastener_d{diameter:.2f}_h{length:.2f}.xml"
     )
 
 
 def get_fastener_save_path_from_name(name: str, base_dir: Path) -> Path:
     """Return the save path for a fastener singleton based on its name."""
-    return base_dir / "shared" / "fasteners" / name
+    return base_dir / "shared" / "fasteners" / (name + ".xml")

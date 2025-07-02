@@ -215,7 +215,6 @@ class RepairsEnv(gym.Env):
         mesh_file_names = get_scene_mesh_file_names(
             self.env_setup_ids.tolist(), base_dir, append_path=True
         )
-        # Sequential scene construction (taichi is not thread-safe)
 
         self.scenes = []
         self.concurrent_scenes_data = []

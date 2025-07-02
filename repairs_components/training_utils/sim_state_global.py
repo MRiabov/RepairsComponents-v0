@@ -29,6 +29,7 @@ class RepairsSimState(SimState):
     # to prevent computation of certain objects if they are not present.
     has_electronics: bool = False
     has_fluid: bool = False
+    # has_fasteners: bool = False # maybe add (non-priority)
 
     def __init__(self, batch_dim: int):
         super().__init__()

@@ -38,7 +38,7 @@ class PhysicalState:
     """  # this is kind of unnecessary... again.
 
     body_indices: dict[str, int] = field(default_factory=dict)
-    reverse_indices: dict[int, str] = field(default_factory=dict)
+    inverse_indices: dict[int, str] = field(default_factory=dict)
     # fastener_ids: dict[int, str] = field(default_factory=dict) # fixme: I don't remember how, but this is unused.
 
     # Fastener metadata (shared across batch)
@@ -111,10 +111,10 @@ class PhysicalState:
 
             if indices is None:
                 self.body_indices = {}
-                self.reverse_indices = {}
+                self.inverse_indices = {}
             else:
                 self.body_indices = indices
-                self.reverse_indices = {v: k for k, v in indices.items()}
+                self.inverse_indices = {v: k for k, v in indices.items()}
             # self.fastener = {}
         else:
             assert indices is not None, "Indices must be provided if graph is not None"
@@ -123,7 +123,7 @@ class PhysicalState:
             # )
             self.graph = graph
             self.body_indices = indices
-            self.reverse_indices = {v: k for k, v in indices.items()}
+            self.inverse_indices = {v: k for k, v in indices.items()}
             self.device = device
             # self.fastener = {}
 
@@ -205,7 +205,7 @@ class PhysicalState:
 
         idx = len(self.body_indices)
         self.body_indices[name] = idx
-        self.reverse_indices[idx] = name
+        self.inverse_indices[idx] = name
 
         # Ensure all graph tensors are on the correct device before concatenation
         self.graph = self.graph.to(self.device)

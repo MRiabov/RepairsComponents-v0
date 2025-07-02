@@ -99,10 +99,13 @@ def translate_state_to_genesis_scene(
         gs_entities[body_name] = new_entity
 
     singleton_fastener_morphs = {}  # cache to reduce load times.
-    for edge_idx, edge in enumerate(sim_state.physical_state[0].graph.edge_index):
-        edge_attr = sim_state.physical_state[0].graph.edge_attr[edge_idx]
-        fastener_d = edge_attr[1]
-        fastener_h = edge_attr[2]
+
+    for fastener_id, attached_to in enumerate(
+        sim_state.physical_state[0].graph.fasteners_attached_to
+    ):
+        fastener_d = sim_state.physical_state[0].graph.fasteners_diam[fastener_id]
+        fastener_h = sim_state.physical_state[0].graph.fasteners_length[fastener_id]
+
         fastener_name = get_fastener_singleton_name(
             float(fastener_d), float(fastener_h)
         )
@@ -110,13 +113,20 @@ def translate_state_to_genesis_scene(
 
         # mjcf is acceptable for fasteners because it's faster(?)
         if fastener_name not in singleton_fastener_morphs:
-            morph = gs.morphs.MJCF(file=fastener_path)
+            morph = gs.morphs.MJCF(file=str(fastener_path))
             # note^ this kind of stuff better be globally cached.
             singleton_fastener_morphs[fastener_name] = morph
         else:
             morph = singleton_fastener_morphs[fastener_name]
         new_entity = scene.add_entity(morph, surface=surface)
         # and how it will be moved later does not matter now
+        
+
+        # store fastener entity in gs_entities
+        gs_entities[f"{fastener_id}@fastener"] = new_entity
+
+        # NOTE: ^ there probably is sense to store fasteners as fasteners id in gs_entities, not as length+height.
+        # there is no need for length+height, but there is value in unique id.
 
     return scene, gs_entities
 
@@ -303,49 +313,49 @@ def create_constraints_based_on_graph(
 ):
     """Create fastener (weld) constraints based on graph. Done once in the start."""  # note: in the future could be e.g. bearing constraints. But weld constraints as fasteners for now.
     rigid_solver = scene.sim.rigid_solver
-    all_base_links = np.full(
-        len(env_state.physical_state[0].indices), -1
-    )  # fill with -1
-
-    for entity_id in env_state.physical_state[0].indices:
-        entity = gs_entities[entity_id]
-        all_base_links[entity_id] = entity.base_link.idx
-
-    assert all_base_links.min() >= 0, "Some base link failed to register."
-    # ^ although this shouldn't be the case, ever.
+    all_base_links = {}
+    # all_base_links= np.full(
+    #     len(env_state.physical_state[0].body_indices), -1
+    # )  # fill with -1
+    # < note: there is some unnecessary roundtrip that makes me use the `all_base_links` dict.
+    # however it doesn't matter, it's minor optimization.
+    # assert all_base_links.min() >= 0, "Some base link failed to register."
+    for entity_name in env_state.physical_state[0].body_indices:
+        # NOTE: body_indices does not include fasteners
+        entity = gs_entities[entity_name]
+        all_base_links[entity_name] = entity.base_link.idx
 
     for env_id, state in enumerate(env_state.physical_state):
         graph: Data = state.graph
-        for edge_id, edge in enumerate(graph.edge_index):
-            fastener_id = graph.edge_attr[
-                edge_id, 0
-            ]  # 0 or whichever index is correct for fastener id.
+        # FIXME: this kind of works but does not account for fastener constraint
+        # should actually be linked to a fastener, and fastener is linked to another body.
 
-            # FIXME: this kind of works but does not account for fastener constraint
-            # should actually be linked to a fastener, and fastener is linked to another body.
+        # genesis supports constraints on per-scene basis.
+
+        for fastener_id, connected_to in enumerate(graph.fasteners_attached_to):
+            body_a_id = connected_to[0]
+            body_b_id = connected_to[1]
 
             fastener_entity = gs_entities[f"{fastener_id}@fastener"]
+            # fastener_base_link_idx = fastener_entity.base_link.idx
             fastener_base_link_idx = fastener_entity.base_link.idx
 
-            # weld to fastener, and fastener to other body
-            rigid_solver.add_weld_constraint(
-                all_base_links[edge[0]], fastener_base_link_idx, env_idx=env_id
-            )
-
-            rigid_solver.add_weld_constraint(
-                fastener_base_link_idx, all_base_links[edge[1]], env_idx=env_id
-            )
-            # genesis supports constraints on per-scene basis.
-        for i in range(len(graph.free_fastener_pos)):
-            fastener_entity = gs_entities[f"{fastener_id}@fastener"]  # def incorrect.
-            fastener_base_link_idx = fastener_entity.base_link.idx
-
-            # if not connected nowhere, leave as is.
-            connected_to = graph.free_fastener_connected_to[i]
-
-            if connected_to != -1:
+            if body_a_id.item() != -1:
+                body_a_name = env_state.physical_state[env_id].inverse_indices[
+                    body_a_id.item()
+                ]
+                # weld the fastener to bodies in which id!=-1
                 rigid_solver.add_weld_constraint(
-                    all_base_links[connected_to], fastener_base_link_idx, env_idx=env_id
+                    fastener_base_link_idx, all_base_links[body_a_name], envs_idx=env_id
+                )
+
+            if body_b_id.item() != -1:
+                body_b_name = env_state.physical_state[env_id].inverse_indices[
+                    body_b_id.item()
+                ]
+                # weld the fastener to bodies in which id!=-1
+                rigid_solver.add_weld_constraint(
+                    fastener_base_link_idx, all_base_links[body_b_name], envs_idx=env_id
                 )
 
 

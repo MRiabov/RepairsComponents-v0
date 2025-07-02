@@ -12,7 +12,11 @@ from pathlib import Path
 import time
 from genesis.engine.entities import RigidEntity
 from repairs_components.geometry.base_env import tooling_stand_plate
-from repairs_components.geometry.fasteners import get_fastener_save_path_from_name
+from repairs_components.geometry.fasteners import (
+    Fastener,
+    get_fastener_params_from_name,
+    get_fastener_save_path_from_name,
+)
 from repairs_components.processing.voxel_export import export_voxel_grid
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
@@ -64,6 +68,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     # ) # not true. it must be split amongst tasks
 
     scene_config_batches: list[ConcurrentSceneData] = []
+    mesh_file_names_per_scene: list[dict] = []
     # create starting_state
     for scene_idx, scene_gen_count in enumerate(num_configs_to_generate_per_scene):
         if scene_gen_count == 0:
@@ -136,6 +141,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 scene_id=scene_idx,
                 solid_export_format="gltf",
             )
+            mesh_file_names_per_scene.append(mesh_file_names)
 
             torch.save(  # only save after all are done
                 torch.stack(voxel_grids_initial, dim=0),
@@ -145,6 +151,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 torch.stack(voxel_grids_desired, dim=0),
                 save_path / "voxels" / f"vox_des_{scene_idx}.pt",
             )
+        else:
+            mesh_file_names_per_scene.append({})
 
         voxel_grids_initial = torch.stack(voxel_grids_initial, dim=0)
         voxel_grids_desired = torch.stack(voxel_grids_desired, dim=0)
@@ -186,7 +194,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             )
 
     # note: RepairsSimState comparison won't work without moving the desired physical state by `move_by` from base env.
-    return scene_config_batches, (mesh_file_names if save else {})
+    return scene_config_batches, mesh_file_names_per_scene
 
 
 def starting_state_geom(
@@ -394,7 +402,23 @@ def persist_meshes_and_mjcf(
                 f.write(mjcf)
 
         elif part_type == "fastener":
-            mesh_file_names[child.label] = str(
-                get_fastener_save_path_from_name(child.label, save_dir)
+            fastener_shared_path = get_fastener_save_path_from_name(
+                child.label, save_dir
             )
+            if not fastener_shared_path.exists():
+                fastener_diameter, fastener_height = get_fastener_params_from_name(
+                    child.label
+                )
+                fastener_mjcf = Fastener(
+                    False,
+                    "123",
+                    "123",
+                    length=fastener_height,
+                    diameter=fastener_diameter,
+                ).get_mjcf()
+                fastener_shared_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(fastener_shared_path, "w") as f:
+                    f.write(fastener_mjcf)
+
+            mesh_file_names[child.label] = str(fastener_shared_path)
     return mesh_file_names
