@@ -12,6 +12,7 @@ from pathlib import Path
 import time
 from genesis.engine.entities import RigidEntity
 from repairs_components.geometry.base_env import tooling_stand_plate
+from repairs_components.geometry.fasteners import get_fastener_save_path_from_name
 from repairs_components.processing.voxel_export import export_voxel_grid
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
@@ -133,7 +134,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 desired_state_geom_,
                 save_dir=save_path,
                 scene_id=scene_idx,
-                export_format="gltf",
+                solid_export_format="gltf",
             )
 
             torch.save(  # only save after all are done
@@ -354,9 +355,9 @@ def generate_scene_meshes(base_dir: Path):
 
 
 def persist_meshes_and_mjcf(
-    b123d_compound: Compound, save_dir: Path, scene_id: int, export_format="gltf"
+    b123d_compound: Compound, save_dir: Path, scene_id: int, solid_export_format="gltf"
 ):
-    assert export_format in ("gltf", "stl")
+    assert solid_export_format in ("gltf", "stl")
 
     mesh_file_names = {}
 
@@ -367,19 +368,23 @@ def persist_meshes_and_mjcf(
     for child in children:
         assert child.label is not None, "Child must have a label"
         assert "@" in child.label, "Part label must have a type delimiter."
-        _part_name, part_type = child.label.split("@")
+        _part_name, part_type = child.label.split("@", 2)
         center = child.center(CenterOf.BOUNDING_BOX)
-        if export_format == "gltf":
-            mesh_file_name = f"{child.label}.gltf"
-            export_gltf(
-                child.moved(Pos(-center)),
-                save_dir / f"scene_{scene_id}" / mesh_file_name,
-                unit=Unit.CM,
-            )
-        elif export_format == "stl":
-            # fixme: stl does not resize? hmm. (resize units)
-            mesh_file_name = f"{child.label}.stl"
-            export_stl(child, file_path=save_dir / f"scene_{scene_id}" / mesh_file_name)
+        if part_type == "solid":
+            if solid_export_format == "gltf":
+                mesh_file_name = f"{child.label}.gltf"
+                export_gltf(
+                    child.moved(Pos(-center)),
+                    save_dir / f"scene_{scene_id}" / mesh_file_name,
+                    unit=Unit.CM,
+                )
+            elif solid_export_format == "stl":
+                # fixme: stl does not resize? hmm. (resize units)
+                mesh_file_name = f"{child.label}.stl"
+                export_stl(
+                    child, file_path=save_dir / f"scene_{scene_id}" / mesh_file_name
+                )
+            mesh_file_names[child.label] = mesh_file_name
 
         # FIXME: deprecate mjcf!
         if part_type in ("connector", "button", "led", "switch"):
@@ -388,5 +393,8 @@ def persist_meshes_and_mjcf(
             with open(save_dir / f"scene_{scene_id}" / f"{child.label}.xml", "w") as f:
                 f.write(mjcf)
 
-        mesh_file_names[child.label] = mesh_file_name
+        elif part_type == "fastener":
+            mesh_file_names[child.label] = str(
+                get_fastener_save_path_from_name(child.label, save_dir)
+            )
     return mesh_file_names

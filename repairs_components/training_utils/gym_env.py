@@ -17,6 +17,10 @@ from repairs_components.processing.scene_creation_funnel import (
     move_entities_to_pos,
 )
 from repairs_components.processing.tasks import Task
+from repairs_components.processing.translation import (
+    create_constraints_based_on_graph,
+    reset_constraints,
+)
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     merge_scene_configs_at_idx,
@@ -486,9 +490,18 @@ class RepairsEnv(gym.Env):
             # merge the
             self.concurrent_scenes_data[scene_id] = updated_scene_data
 
+            # reset the constraints
+            reset_constraints(updated_scene_data.scene)
+
             # Move entities to their starting positions
             move_entities_to_pos(
                 updated_scene_data.gs_entities, updated_scene_data.current_state
+            )
+
+            create_constraints_based_on_graph(
+                updated_scene_data.current_state,
+                updated_scene_data.gs_entities,
+                updated_scene_data.scene,
             )
 
             # Update visual states to show the new positions

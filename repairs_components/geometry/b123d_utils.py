@@ -3,7 +3,7 @@ import build123d as bd
 import ocp_vscode
 
 
-def fastener_hole(radius: float, depth: float, joint_name: str = "fastener_hole1"):
+def fastener_hole(radius: float, depth: float, id: int):
     """
     Create a fastener hole with a specified radius and depth, and optionally attach a revolute joint.
     It creates a collision point with which a prospective fastener can intersect and allows for a joint.
@@ -11,7 +11,7 @@ def fastener_hole(radius: float, depth: float, joint_name: str = "fastener_hole1
     Args:
         radius (float): The radius of the hole.
         depth (float): The depth of the hole.
-        joint_name (str): The name of the revolute joint to attach. Name it as "to_{other_part_name}_{id}.
+        id (int): The unique id of the hole.
 
     Returns:
         Tuple: A tuple containing the created Hole object and its location.
@@ -24,8 +24,9 @@ def fastener_hole(radius: float, depth: float, joint_name: str = "fastener_hole1
     fastener_loc = Locations((0, 0, -radius))
     # tuple_pos=[loc.position.to_tuple() for loc in fastener_loc.locations]
     joint_axis = Axis.Z
+    joint = RigidJoint(label=f"fastener_hole_{id}")
 
-    return fastener_hole1, fastener_loc  # TODO - add joint axis?
+    return fastener_hole1, fastener_loc, joint  # TODO - add joint axis?
 
 
 ###debug:

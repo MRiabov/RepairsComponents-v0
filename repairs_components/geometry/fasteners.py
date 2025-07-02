@@ -6,6 +6,7 @@ from MuJoCo-based simulations.
 """
 
 import math
+from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 from repairs_components.geometry.base import Component
 from build123d import *
@@ -23,7 +24,6 @@ class Fastener(Component):
         initial_body_a: str
         | None = None,  # how will it be constrained in case of hole?
         initial_body_b: str | None = None,
-        name: str = "",  # just name them by int ids. except special cases.
         thread_pitch: float = 0.05,
         length: float = 1.5,
         diameter: float = 0.5,
@@ -39,10 +39,10 @@ class Fastener(Component):
         self.diameter = diameter
         self.head_diameter = head_diameter
         self.head_height = head_height
-        self.name = name
         self.screwdriver_name = screwdriver_name
         # self.a_constraint_active = True # note: a_constraint_active is always True now.
         self.b_constraint_active = constraint_b_active
+        self.name = get_fastener_singleton_name(self.diameter, self.head_height)
 
     def get_mjcf(self):
         """Get MJCF of a screw.
@@ -53,9 +53,7 @@ class Fastener(Component):
             diameter: Outer diameter of the screw thread in mm.
             head_diameter: Diameter of the screw head in mm.
             head_height: Height of the screw head in mm.
-            name: Optional name for the screw.
         """
-
         return f"""
             <body name="{self.name}">
                 <freejoint name="{self.name}_joint"/>
@@ -64,26 +62,10 @@ class Fastener(Component):
                 <geom name="{self.name}_head" type="cylinder" size="{self.head_diameter / 200} {self.head_height / 200}" 
                     pos="0 0 {(self.length + self.head_height / 2) / 200}" rgba="0.5 0.5 0.5 1" mass="0.05"/>
                 <body name="{self.name}_tip" pos="0 0 0">
-                    <!-- Tip is located at 0,0,0 -->
+                    <!-- Tip is located at 0,0,0  FIXME: bad idea!-->
                 </body>
             </body>
-            
-            <!-- NOTE: possibly unnecessary! there is rigid_solver.add_weld_constraint.-->
-
-            <!-- Weld constraints to A and B (both active at spawn)-->
-            <equality name="{self.name}_to_A" active="True">
-                <weld body1="{self.name}" body2="{self.initial_body_a}" relpose="true"/>
-            </equality>
-
-            <equality name="{self.name}_to_B" active="{self.b_constraint_active}">
-                <weld body1="{self.name}" body2="{self.initial_body_b}" relpose="true"/>
-            </equality>
-
-            <!-- Equality constraint to attach to screwdriver -->
-            <equality name="{self.name}_to_screwdriver" active="false">
-                <weld body1="{self.name}" body2="{self.screwdriver_name}" relpose="true"/>
-            </equality>
-            """  # FIXME: mjcf may be outdated!!!
+            """  # FIXME: mjcf is outdated!
 
     def bd_geometry(self) -> tuple[Part, tuple]:
         """Create a build123d geometry for the fastener.
@@ -93,7 +75,7 @@ class Fastener(Component):
         """
         from build123d import BuildPart, Cylinder, Pos, Align
 
-        with BuildPart() as screw:
+        with BuildPart() as fastener:
             with Locations(Pos(0, 0, -self.length + self.head_height / 2)):
                 # Create the shaft (main cylinder)
                 shaft = Cylinder(
@@ -111,20 +93,20 @@ class Fastener(Component):
                 )
             head.faces().filter_by(Axis.Z).sort_by(Axis.Z).last
 
-            CylindricalJoint("fastener_joint_a", to_part=None, axis=Axis.Z)
-            CylindricalJoint("fastener_joint_b", to_part=None, axis=Axis.Z)
-            CylindricalJoint("fastener_joint_tip", to_part=None, axis=Axis.Z)
+            RigidJoint("fastener_joint_a")
+            RigidJoint("fastener_joint_b")
+            RigidJoint("fastener_joint_tip")
 
-        screw = screw.part
-        screw.color = Color(0.58, 0.44, 0.86, 0.8)
-        screw.label = self.name + "@fastener"
+        fastener = fastener.part
+        fastener.color = Color(0.58, 0.44, 0.86, 0.8)
+        fastener.label = self.name
 
         # set collision detection position at the tip of the fastener
         fastener_collision_detection_position = (
             shaft.faces().sort_by(Axis.Z).last.center().to_tuple()
         )
 
-        return screw, fastener_collision_detection_position
+        return fastener, fastener_collision_detection_position
 
 
 import numpy as np
@@ -245,3 +227,34 @@ class FastenerHolder(Component):
 # To remove A/B constraint and activate screwdriver constraint
 # model.eq_active[model.equality(name_to_id(model, "equality", f"{name}_to_ab"))] = 0
 # model.eq_active[model.equality(name_to_id(model, "equality", f"{name}_to_screwdriver"))] = 1
+
+
+def get_fastener_singleton_name(diameter: float, height: float) -> str:
+    """Return the name for a fastener singleton based on its diameter and height."""
+    diameter_str = f"{diameter:.2f}"
+    height_str = f"{height:.2f}"
+    return f"fastener_d{diameter_str}_h{height_str}@fastener"
+
+
+def get_fastener_params_from_name(name: str) -> tuple[float, float]:
+    """Return the diameter and height of a fastener singleton based on its name."""
+    diameter_str = name.split("_")[1][1:]  # [1:] - remove 'd'
+    height_str = name.split("_")[2][1:]  # [1:] - remove 'h'
+    return float(diameter_str), float(height_str)
+
+
+def get_singleton_fastener_save_path(
+    diameter: float, height: float, base_dir: Path
+) -> Path:
+    """Return the save path for a fastener singleton based on its diameter and height."""
+    return (
+        base_dir
+        / "shared"
+        / "fasteners"
+        / f"fastener_d{diameter:.2f}_h{height:.2f}.xml"
+    )
+
+
+def get_fastener_save_path_from_name(name: str, base_dir: Path) -> Path:
+    """Return the save path for a fastener singleton based on its name."""
+    return base_dir / "shared" / "fasteners" / name

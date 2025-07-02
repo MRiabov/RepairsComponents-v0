@@ -29,7 +29,7 @@ def test_physical_state_diff_basic():
     state1.register_body(
         "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
     )
-    state1.connect("conn1", "body1", "body2")
+    state1.connect_fastener_to_one_body("conn1", "body1", "body2")
 
     state2.register_body(
         "body1", position=torch.tensor([0.1, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
@@ -40,8 +40,8 @@ def test_physical_state_diff_basic():
     state2.register_body(
         "body3", position=torch.tensor([0, 1, 0]), rotation=torch.tensor([1, 0, 0, 0])
     )  # New body
-    state2.connect("conn1", "body1", "body2")
-    state2.connect("conn2", "body2", "body3")  # New connection
+    state2.connect_fastener_to_one_body("conn1", "body1", "body2")
+    state2.connect_fastener_to_one_body("conn2", "body2", "body3")  # New connection
 
     # Get the diff
     diff_graph = state1.diff(state2)
@@ -120,7 +120,7 @@ def test_physical_state_no_changes():
     state1.register_body(
         "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
     )
-    state1.connect("conn1", "body1", "body2")
+    state1.connect_fastener_to_one_body("conn1", "body1", "body2")
 
     state2 = PhysicalState()
     state2.register_body(
@@ -129,7 +129,7 @@ def test_physical_state_no_changes():
     state2.register_body(
         "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
     )
-    state2.connect("conn1", "body1", "body2")
+    state2.connect_fastener_to_one_body("conn1", "body1", "body2")
 
     diff_graph = state1.diff(state2)
 

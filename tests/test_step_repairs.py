@@ -69,7 +69,7 @@ def test_step_repairs(has_electronics):
         def stub_connect(self, fastener_name, body_a, body_b):
             self.calls.append((fastener_name, body_a))
 
-        ps.connect = stub_connect.__get__(ps, PhysicalState)  # type: ignore
+        ps.connect_fastener_to_one_body = stub_connect.__get__(ps, PhysicalState)  # type: ignore
         sim_state.physical_state.append(ps)
     # stub tool
     sim_state.tool_state = [DummyToolState(DummyTool()), DummyToolState(DummyTool("h"))]  # type: ignore[reportGeneralTypeIssues]

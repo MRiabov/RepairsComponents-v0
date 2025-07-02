@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from build123d import Compound
+from build123d import Compound, Part
 import numpy as np
 
 
@@ -60,3 +60,32 @@ class EnvSetup(ABC):
         assert all(part.label and "@" in part.label for part in geom.children), (
             f"All children must have labels. Currently have: {geom.children}"
         )
+        fastener_count = len(
+            [part for part in geom.children if part.label.endswith("@fastener")]
+        )
+        assert fastener_count < 12, (
+            f"At most 12 fasteners can be present. Currently: {fastener_count}"
+        )  # supported by buffers.
+        for part in geom.children:
+            part_name, part_type = part.label.split("@", 2)
+            assert part_type in (
+                "solid",
+                "fixed_solid",  # TODO: add fixed solids
+                "fastener",
+                "connector",
+                "button",
+                "led",
+                "switch",
+            ), (
+                f"Part type must be one of {('solid', 'fastener', 'connector', 'button', 'led', 'switch')}. Currently have: {part_type}."
+            )
+            if part_type == "fastener":
+                assert part.joints["fastener_joint_a"].connected_to is not None, (
+                    "Fastener joint A must be connected."
+                )
+                assert isinstance(part.joints["fastener_joint_a"].connected_to, Part), (
+                    "Fastener joint A must be connected to a part."
+                )
+                assert part.joints["fastener_joint_aF"].connected_to.label.endswith(
+                    "@solid"
+                ), "Fastener joint A must be connected to a solid."

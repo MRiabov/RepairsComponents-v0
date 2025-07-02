@@ -163,6 +163,9 @@ class AssembleTask(Task):
 
         return None  # No valid position found after max_attempts
 
+    # NOTE!!! build123d provides a method to pack parts in 2D space without overlaps.
+    # pack.pack
+    # although it's not random.
     def _pack_2d(self, part_infos, bin_width, bin_height):
         """Randomly pack parts in 2D space without overlaps.
 

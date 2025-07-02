@@ -11,7 +11,11 @@ from repairs_components.logic.electronics.component import ElectricalComponent
 from repairs_components.processing.textures import get_color_by_type, get_random_texture
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.tools.screwdriver import Screwdriver
-from repairs_components.geometry.fasteners import Fastener
+from repairs_components.geometry.fasteners import (
+    Fastener,
+    get_fastener_singleton_name,
+    get_singleton_fastener_save_path,
+)
 from torch_geometric.data import Data
 import numpy as np
 
@@ -30,12 +34,21 @@ def translate_state_to_genesis_scene(
         "Translated assembly is empty."
     )
     assert len(mesh_file_names) > 0, "No meshes provided."
-    assert len(mesh_file_names) == len(sim_state.physical_state[0].body_indices), (
-        "Number of meshes does not match number of bodies."
-    )
-    assert set(mesh_file_names.keys()) == set(
+    val_mesh_file_names = {  # val - validation
+        k: v for k, v in mesh_file_names.items() if not k.endswith("@fastener")
+    }
+    assert (
+        len(val_mesh_file_names) == len(sim_state.physical_state[0].body_indices)
+    ), f"""Number of meshes ({len(val_mesh_file_names)}) does not match number of bodies ({len(sim_state.physical_state[0].body_indices)}).
+    Mesh names: {val_mesh_file_names.keys()}
+    Body names: {sim_state.physical_state[0].body_indices.keys()}
+    Original (unfiltered) mesh names: {mesh_file_names.keys()}"""
+    assert set(val_mesh_file_names.keys()) == set(
         sim_state.physical_state[0].body_indices.keys()
-    ), "Mesh names do not match body indices."
+    ), f"""Mesh names do not match body indices.
+    Mesh names: {val_mesh_file_names.keys()}
+    Body names: {sim_state.physical_state[0].body_indices.keys()}
+    Original (unfiltered) mesh names: {mesh_file_names.keys()}"""
 
     gs_entities: dict[str, RigidEntity] = {}
 
@@ -74,24 +87,36 @@ def translate_state_to_genesis_scene(
             # FIXME: deprecate MJCF from here and use native genesis configs.
             mesh = gs.morphs.MJCF(file=mjcf_path, name=body_name, links_to_keep=True)
             new_entity = scene.add_entity(mesh, surface=surface)
-
         elif part_type == "fastener":
-            mjcf_path = str(mesh_file_names[body_name])
-            assert mjcf_path.endswith(".xml"), "Expected MJCF path to end with xml."
-            # mjcf is acceptable for fasteners because it's faster(?)
-            mesh = gs.morphs.MJCF(file=mjcf_path, name=body_name, links_to_keep=True)
-            new_entity = scene.add_entity(mesh, surface=surface)
-            # and how it will be moved later does not matter now
-
-            # TODO: get edge attr... get
-            # NOTE!!! I haven't exactly thought this through yet. Scheme something on paper.
-
+            raise ValueError(
+                "Fasteners should be defined only in edge attributes or free bodies, not in indices."
+            )
         else:
             raise NotImplementedError(
                 f"Not implemented for translation part type: {part_type}"
             )
 
         gs_entities[body_name] = new_entity
+
+    singleton_fastener_morphs = {}  # cache to reduce load times.
+    for edge_idx, edge in enumerate(sim_state.physical_state[0].graph.edge_index):
+        edge_attr = sim_state.physical_state[0].graph.edge_attr[edge_idx]
+        fastener_d = edge_attr[1]
+        fastener_h = edge_attr[2]
+        fastener_name = get_fastener_singleton_name(
+            float(fastener_d), float(fastener_h)
+        )
+        fastener_path = mesh_file_names[fastener_name]
+
+        # mjcf is acceptable for fasteners because it's faster(?)
+        if fastener_name not in singleton_fastener_morphs:
+            morph = gs.morphs.MJCF(file=fastener_path)
+            # note^ this kind of stuff better be globally cached.
+            singleton_fastener_morphs[fastener_name] = morph
+        else:
+            morph = singleton_fastener_morphs[fastener_name]
+        new_entity = scene.add_entity(morph, surface=surface)
+        # and how it will be moved later does not matter now
 
     return scene, gs_entities
 
@@ -231,18 +256,17 @@ def translate_compound_to_sim_state(
                 assert "fastener_joint_tip" in part.joints, (
                     "Fastener must have a tip joint."
                 )
+
                 joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
                 joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
                 joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
 
-                # are active
-                constraint_a_active = joint_a.connected_to is not None
+                # check if constraint_b active
                 constraint_b_active = joint_b.connected_to is not None
 
                 # if active, get connected to names
-                initial_body_a = (
-                    joint_a.connected_to.parent if constraint_a_active else None
-                )
+                # a is always active
+                initial_body_a = joint_a.connected_to.parent
                 initial_body_b = (
                     joint_b.connected_to.parent if constraint_b_active else None
                 )
@@ -253,19 +277,13 @@ def translate_compound_to_sim_state(
                 )
 
                 fastener = Fastener(
-                    initial_body_a=initial_body_a.label
-                    if constraint_a_active
-                    else None,
+                    initial_body_a=initial_body_a.label,
                     initial_body_b=initial_body_b.label
                     if constraint_b_active
                     else None,
-                    constraint_a_active=constraint_a_active,
                     constraint_b_active=constraint_b_active,
-                    name=part.label,
                 )
-                sim_state.physical_state[env_idx].register_fastener(
-                    fastener.name, fastener
-                )
+                sim_state.physical_state[env_idx].register_fastener(fastener)
 
             # FIXME: no electronics implemented???
             elif part.label.endswith("@liquid"):
@@ -283,7 +301,7 @@ def translate_compound_to_sim_state(
 def create_constraints_based_on_graph(
     env_state: RepairsSimState, gs_entities: dict[str, RigidEntity], scene: gs.Scene
 ):
-    """Create fastener (weld) constraints based on graph."""  # note: in the future could be e.g. bearing constraints. But weld constraints as fasteners for now.
+    """Create fastener (weld) constraints based on graph. Done once in the start."""  # note: in the future could be e.g. bearing constraints. But weld constraints as fasteners for now.
     rigid_solver = scene.sim.rigid_solver
     all_base_links = np.full(
         len(env_state.physical_state[0].indices), -1
@@ -292,6 +310,9 @@ def create_constraints_based_on_graph(
     for entity_id in env_state.physical_state[0].indices:
         entity = gs_entities[entity_id]
         all_base_links[entity_id] = entity.base_link.idx
+
+    assert all_base_links.min() >= 0, "Some base link failed to register."
+    # ^ although this shouldn't be the case, ever.
 
     for env_id, state in enumerate(env_state.physical_state):
         graph: Data = state.graph
@@ -303,7 +324,30 @@ def create_constraints_based_on_graph(
             # FIXME: this kind of works but does not account for fastener constraint
             # should actually be linked to a fastener, and fastener is linked to another body.
 
+            fastener_entity = gs_entities[f"{fastener_id}@fastener"]
+            fastener_base_link_idx = fastener_entity.base_link.idx
+
+            # weld to fastener, and fastener to other body
             rigid_solver.add_weld_constraint(
-                all_base_links[edge[0]], all_base_links[edge[1]], env_idx=env_id
-            )  # ^ this is not correct
+                all_base_links[edge[0]], fastener_base_link_idx, env_idx=env_id
+            )
+
+            rigid_solver.add_weld_constraint(
+                fastener_base_link_idx, all_base_links[edge[1]], env_idx=env_id
+            )
             # genesis supports constraints on per-scene basis.
+        for i in range(len(graph.free_fastener_pos)):
+            fastener_entity = gs_entities[f"{fastener_id}@fastener"]  # def incorrect.
+            fastener_base_link_idx = fastener_entity.base_link.idx
+
+            # if not connected nowhere, leave as is.
+            connected_to = graph.free_fastener_connected_to[i]
+
+            if connected_to != -1:
+                rigid_solver.add_weld_constraint(
+                    all_base_links[connected_to], fastener_base_link_idx, env_idx=env_id
+                )
+
+
+def reset_constraints(scene: gs.Scene):
+    scene.sim.rigid_solver.joints.clear()  # maybe it'll work?

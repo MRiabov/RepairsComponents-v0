@@ -16,15 +16,19 @@ class TenHoles(EnvSetup):
             with Locations(base_box.faces().filter_by(Axis.Z).sort_by(Axis.Z).last):
                 grid_locs = GridLocations(1.5, 0, 10, 1)
                 with grid_locs:
-                    holes, hole_locs = fastener_hole(radius=0.3, depth=1.6)
+                    _hole, _locs, joint1 = fastener_hole(radius=0.3, depth=1.6, id=0)
 
-        fastener, collision_detection_position = Fastener(
+        fastener_, collision_detection_position = Fastener(
             False, initial_body_a="base_box@solid"
         ).bd_geometry()
-        fasteners = [fastener.moved(loc) for loc in grid_locs.locations]
-        for i, fastener in enumerate(fasteners):
-            fastener.label = f"{i}@fastener"
+        fasteners = []
+        for i, loc in enumerate(grid_locs.locations):
+            fastener = fastener_.moved(loc)
+            fastener.joints["fastener_joint_a"].connect_to(joint1)
+            fasteners.append(fastener)
         base_box.part.label = "base_box@solid"
+
+        Compound(children=[base_box.part, *fasteners]).show_topology()
 
         return Compound(children=[base_box.part, *fasteners]).moved(
             Location((10, 10, 10))
