@@ -66,7 +66,6 @@ class RepairsEnv(gym.Env):
         io_cfg: dict,
         reward_cfg: dict,
         command_cfg: dict,
-        show_viewer: bool = False,
         num_scenes_per_task: int = 1,
         # concurrent_scenes: int = 1,
         use_offline_dataset: bool = False,
@@ -132,7 +131,9 @@ class RepairsEnv(gym.Env):
             self.save_video: bool = io_cfg["save_obs"]["video"]
             self.save_voxel: bool = io_cfg["save_obs"]["voxel"]
             self.save_electronic_graph: bool = io_cfg["save_obs"]["electronic_graph"]
-            self.save_path: str = io_cfg["save_obs"]["path"]
+            self.save_path: str = io_cfg["save_obs"][
+                "path"
+            ]  # path for online obs, not data generation!
             self.save_any: bool = (
                 self.save_video or self.save_voxel or self.save_electronic_graph
             )
@@ -172,7 +173,7 @@ class RepairsEnv(gym.Env):
 
         if not data_already_exists or io_cfg["force_recreate_data"]:
             # if scene meshes don't exist yet, create them now.
-            generate_scene_meshes(base_dir=Path(self.save_path))
+            generate_scene_meshes(base_dir=Path(self.io_cfg["data_dir"]))
             if not data_already_exists and not io_cfg["force_recreate_data"]:
                 print(
                     "Data was not found to exist but force_recreate_data was not called. Still, recreating..."
@@ -225,6 +226,7 @@ class RepairsEnv(gym.Env):
                 sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
                 show_viewer=False,
                 vis_options=gs.options.VisOptions(env_separate_rigid=True),  # type: ignore
+                show_FPS=False,
             )
 
             scene, cameras, gs_entities, _ = initialize_and_build_scene(
@@ -489,8 +491,8 @@ class RepairsEnv(gym.Env):
             # merge the
             self.concurrent_scenes_data[scene_id] = updated_scene_data
 
-            # reset the constraints
-            reset_constraints(updated_scene_data.scene)
+            # # reset the constraints # FIXME: only on certain envs.
+            # reset_constraints(updated_scene_data.scene)
 
             # Move entities to their starting positions
             move_entities_to_pos(
@@ -501,6 +503,7 @@ class RepairsEnv(gym.Env):
                 updated_scene_data.current_state,
                 updated_scene_data.gs_entities,
                 updated_scene_data.scene,
+                env_idx=reset_env_ids_this_scene,
             )
 
             # Update visual states to show the new positions
@@ -547,7 +550,8 @@ class RepairsEnv(gym.Env):
         # Get the scene data for this environment
 
         # Extract cameras from scene data
-        cameras = scene_data.cameras
+        # cameras = scene_data.cameras
+        cameras = scene_data.scene.visualizer.cameras  # tried to debug
         video_obs = _render_all_cameras(cameras)
 
         # get voxel obs

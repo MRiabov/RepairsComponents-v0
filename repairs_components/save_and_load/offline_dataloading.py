@@ -131,7 +131,9 @@ class OfflineDataloader:
 
         self.vox_init_dict[scene_id] = torch.load(vox_init_path)
         self.vox_des_dict[scene_id] = torch.load(vox_des_path)
-        print("shape of vox_init_dict[scene_id]:", self.vox_init_dict[scene_id].shape)
+        print(
+            f"Loaded vox init dict for scene_id {scene_id} with shape: {self.vox_init_dict[scene_id].shape}",
+        )
         # ^ memory calculation: 100k samples*max 15 items * 10 datapoints * float16 =36mil = 36mbytes
         # graphs
         mech_graphs_init, elec_graphs_init, mech_graphs_des, elec_graphs_des = (

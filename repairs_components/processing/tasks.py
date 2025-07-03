@@ -224,6 +224,11 @@ class AssembleTask(Task):
         )  # should filter only for solids, connectors, buttons, etc later.
         part_info = []
 
+        # remove all joints between all parts
+        for part in parts:
+            for joint in part.joints.values():
+                joint.connected_to = None
+
         # Calculate AABBs and determine stable orientations for each part
         for part in parts:
             bbox = part.bounding_box()

@@ -120,7 +120,6 @@ def translate_state_to_genesis_scene(
             morph = singleton_fastener_morphs[fastener_name]
         new_entity = scene.add_entity(morph, surface=surface)
         # and how it will be moved later does not matter now
-        
 
         # store fastener entity in gs_entities
         gs_entities[f"{fastener_id}@fastener"] = new_entity
@@ -272,22 +271,28 @@ def translate_compound_to_sim_state(
                 joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
 
                 # check if constraint_b active
+                # note: constraint a may only be inactive in perturbed "disassembled" states.
+
+                constraint_a_active = joint_a.connected_to is not None
                 constraint_b_active = joint_b.connected_to is not None
 
                 # if active, get connected to names
-                # a is always active
-                initial_body_a = joint_a.connected_to.parent
+                initial_body_a = (
+                    joint_a.connected_to.parent if constraint_a_active else None
+                )
                 initial_body_b = (
                     joint_b.connected_to.parent if constraint_b_active else None
                 )
 
-                # collect names of bodies(?)
-                assert initial_body_a.label and initial_body_a.label, (
-                    "Constrained parts must be labeled"
-                )
+                # # collect names of bodies(?)
+                # assert initial_body_a.label and initial_body_a.label, (
+                #     "Constrained parts must be labeled"
+                # )
 
                 fastener = Fastener(
-                    initial_body_a=initial_body_a.label,
+                    initial_body_a=initial_body_a.label
+                    if constraint_a_active
+                    else None,
                     initial_body_b=initial_body_b.label
                     if constraint_b_active
                     else None,
@@ -309,11 +314,17 @@ def translate_compound_to_sim_state(
 
 
 def create_constraints_based_on_graph(
-    env_state: RepairsSimState, gs_entities: dict[str, RigidEntity], scene: gs.Scene
+    env_state: RepairsSimState,
+    gs_entities: dict[str, RigidEntity],
+    scene: gs.Scene,
+    env_idx: torch.Tensor | None = None,
 ):
     """Create fastener (weld) constraints based on graph. Done once in the start."""  # note: in the future could be e.g. bearing constraints. But weld constraints as fasteners for now.
+    return  # debug because something breaks.
     rigid_solver = scene.sim.rigid_solver
     all_base_links = {}
+    if env_idx is None:
+        env_idx = torch.arange(env_state.scene_batch_dim)
     # all_base_links= np.full(
     #     len(env_state.physical_state[0].body_indices), -1
     # )  # fill with -1
@@ -325,7 +336,16 @@ def create_constraints_based_on_graph(
         entity = gs_entities[entity_name]
         all_base_links[entity_name] = entity.base_link.idx
 
-    for env_id, state in enumerate(env_state.physical_state):
+    # gs seems to be able to hold only so many constraints, so collect all env_idx
+    # for each constraint pair and pass them to genesis in a single call.
+    # NOTE: untested below.
+
+    #   key: (fastener_base_link_idx, body_base_link_idx)
+    # value: list[int] env_ids where this connection exists
+    connections: dict[tuple[int, int], list[int]] = {}
+
+    for env_id in env_idx.tolist():
+        state = env_state.physical_state[env_id]
         graph: Data = state.graph
         # FIXME: this kind of works but does not account for fastener constraint
         # should actually be linked to a fastener, and fastener is linked to another body.
@@ -333,30 +353,35 @@ def create_constraints_based_on_graph(
         # genesis supports constraints on per-scene basis.
 
         for fastener_id, connected_to in enumerate(graph.fasteners_attached_to):
-            body_a_id = connected_to[0]
-            body_b_id = connected_to[1]
-
             fastener_entity = gs_entities[f"{fastener_id}@fastener"]
-            # fastener_base_link_idx = fastener_entity.base_link.idx
             fastener_base_link_idx = fastener_entity.base_link.idx
 
-            if body_a_id.item() != -1:
-                body_a_name = env_state.physical_state[env_id].inverse_indices[
-                    body_a_id.item()
-                ]
-                # weld the fastener to bodies in which id!=-1
-                rigid_solver.add_weld_constraint(
-                    fastener_base_link_idx, all_base_links[body_a_name], envs_idx=env_id
-                )
+            # connected_to is a tensor with two elements (body_a, body_b)
+            for body_id in connected_to:
+                if body_id.item() == -1:
+                    # Fastener not attached to anything in this position
+                    continue
 
-            if body_b_id.item() != -1:
-                body_b_name = env_state.physical_state[env_id].inverse_indices[
-                    body_b_id.item()
+                body_name = env_state.physical_state[env_id].inverse_indices[
+                    body_id.item()
                 ]
-                # weld the fastener to bodies in which id!=-1
-                rigid_solver.add_weld_constraint(
-                    fastener_base_link_idx, all_base_links[body_b_name], envs_idx=env_id
-                )
+                body_base_link_idx = all_base_links[body_name]
+
+                key = (fastener_base_link_idx, body_base_link_idx)
+                env_list = connections.setdefault(key, [])
+                env_list.append(env_id)
+
+    # Now that we have aggregated env ids for each unique fastener-body pair, add
+    # the weld constraints just once per pair.
+    for (fastener_idx, body_idx), env_ids in connections.items():
+        # Deduplicate env_ids to be safe
+        unique_env_ids = sorted(set(env_ids))
+        rigid_solver.add_weld_constraint(
+            torch.tensor(fastener_idx).unsqueeze(0).cuda().contiguous(),
+            torch.tensor(body_idx).unsqueeze(0).cuda().contiguous(),
+            envs_idx=torch.tensor(unique_env_ids).cuda().contiguous(),
+        )  # move to cuda because some error.
+        # NOTE: unsqueeze(0) is a workaround for len of 0d tensor bug.
 
 
 def reset_constraints(scene: gs.Scene):

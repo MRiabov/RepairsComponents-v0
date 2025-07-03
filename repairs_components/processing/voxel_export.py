@@ -8,6 +8,8 @@ from build123d import Compound, Part
 from typing import Any
 import torch
 from pathlib import Path
+import torch_scatter
+from torch_scatter import scatter_min
 
 
 # Define part type to color mapping (for priority extraction)
@@ -135,14 +137,16 @@ def export_voxel_grid(
 
     # Collect voxel coordinates and labels for sparse output
     all_sparse = []
+
     # mesh all parts in a single scene
     for mesh, part_type, key in zip(meshes, part_types, mesh_keys):
         # Get or build sparse tensor
+        # --- Retrieve or build LOCAL (re-centered) sparse voxel grid ---
         cache_hit = (
             cached and cache is not None and key in cache and "sparse" in cache[key]
         )
         if cache_hit:
-            sparse = cache[key]["sparse"]
+            sparse_local = cache[key]["sparse"]
         else:
             # Voxelize mesh and collect coordinates
             assert (mesh.bounding_box.extents < (voxel_size * 256)).all(), (
@@ -150,42 +154,81 @@ def export_voxel_grid(
             )
             vox = trimesh.voxel.creation.voxelize(mesh, pitch=voxel_size)
             assert vox is not None, "Voxelization has failed."
-            # note: coords_np are a tensor of (points, 3). In one case it is 60002*3
 
-            # Get coordinates in grid space # of this shape to scene voxel grid. #1e-6 for eps - to avoid floating point error cast lower than 0.
-            coords_np = np.round((vox.points - mins + 1e-5) / voxel_size).astype(
-                np.uint8
+            mesh_min = mesh.bounds[0]  # part origin in world units
+            # Local voxel coordinates (starting at 0) – makes cached representation reusable
+            coords_np_local = np.round(
+                (vox.points - mesh_min + 1e-5) / voxel_size
+            ).astype(np.uint8)
+            assert coords_np_local.min() >= 0, (
+                f"Some voxel points are negative (local coords). Got: {coords_np_local.min()}"
             )
-            assert coords_np.min() >= 0, (
-                f"Some vox points are out of bounds. Abs min is {vox.points - mins} "
-            )
-            assert coords_np.max() < 256, (
-                f"Some vox points are out of bounds. Abs max is {vox.points - mins} "
+            assert coords_np_local.max() < 256, (
+                f"Local voxel coords exceed grid. Got: {coords_np_local.max()}"
             )
 
-            # Implementation note: below can be technically made outside of the loop.
-            # Convert to tensor and get features
-            coords = torch.from_numpy(coords_np).to(device)
+            coords_local = torch.from_numpy(coords_np_local).to(device)
             feats = torch.full(
-                (coords.shape[0], 1),
-                PART_TYPE_LABEL.get(part_type, 0),  # get type of the part.
+                (coords_local.shape[0], 1),
+                PART_TYPE_LABEL.get(part_type, 0),
                 dtype=torch.uint8,
                 device=device,
             )
-            # note: ideally csr for storage, but whatever.
-            sparse = to_sparse_coo(coords, feats, device)
+            sparse_local = to_sparse_coo(coords_local, feats, device).coalesce()
 
-            # note: I won't save sparse matrix here because I'll do it later and batched. Because why not.
-
+            # Store LOCAL sparse grid in cache for future re-use
             if cached and cache is not None:
-                cache[key]["sparse"] = sparse
-        # dev note: this must be below the loop!
+                cache[key]["sparse"] = sparse_local
+
+        # --- Shift local sparse grid to SCENE coordinates ---
+        mesh_min = mesh.bounds[0]
+        offset_vox = np.round((mesh_min - mins) / voxel_size).astype(np.int16)  # (3,)
+        if (offset_vox != 0).any():  # if any of the voxels are not at 0, shift them
+            offset_t = torch.tensor(
+                offset_vox, device=device, dtype=torch.long
+            ).unsqueeze(1)  # [3,1]
+            shifted_indices = sparse_local.indices() + offset_t
+            # Clamp any indices that accidentally became 256 (rounding edge-case) back to 255
+            if (shifted_indices >= 256).any():
+                shifted_indices = torch.clamp(shifted_indices, max=255)
+            sparse = torch.sparse_coo_tensor(
+                shifted_indices,
+                sparse_local.values(),
+                size=(256, 256, 256),
+                device=device,
+            ).coalesce()
+        else:
+            sparse = sparse_local
+
         all_sparse.append(sparse)
 
-    # add all sparse tensors into one
-    # holdup. Does this not stack all shapes to start from 0,0?
-    sparse_scene = torch.cat(all_sparse, dim=0)
-    sparse_scene = sparse_scene.coalesce()
+    # Merge all sparse tensors into a single scene tensor
+    sparse_scene_stack_values = torch.cat([s.values() for s in all_sparse], dim=0)
+    sparse_scene_stack_indices = torch.cat([s.indices() for s in all_sparse], dim=1)
+
+    # Transpose indices so that each row is a voxel coordinate [x, y, z]
+    indices_t = sparse_scene_stack_indices.t().contiguous()  # [N, 3]
+
+    # Find unique voxel coordinates and an inverse mapping back to each stacked voxel
+    unique_indices_t, inverse = torch.unique(indices_t, dim=0, return_inverse=True)
+
+    # For overlapping voxels keep the minimum label (lower label = higher priority)
+    values, _ = scatter_min(
+        sparse_scene_stack_values,
+        inverse,
+        dim=0,
+        dim_size=unique_indices_t.size(0),
+    )
+
+    # Convert indices back to the [3, N] format expected by sparse_coo_tensor
+    unique_indices = unique_indices_t.t().contiguous()
+
+    sparse_scene = torch.sparse_coo_tensor(
+        unique_indices,
+        values,
+        size=(256, 256, 256),
+        device=device,
+    ).coalesce()
 
     return (sparse_scene, cache) if cached else sparse_scene
 

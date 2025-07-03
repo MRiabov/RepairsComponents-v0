@@ -238,12 +238,14 @@ class PhysicalState:
         assert fastener.name not in self.body_indices, (
             f"Fasteners can't be registered as bodies!"
         )
-        assert fastener.initial_body_a is not None, (
-            "Fastener must have at least one body"
-        )
-        assert fastener.initial_body_a in self.body_indices, (
-            f"Body {fastener.initial_body_a} marked as connected to fastener {fastener.name} is not registered"
-        )
+        if fastener.initial_body_a is not None:
+            assert fastener.initial_body_a in self.body_indices, (
+                f"Body {fastener.initial_body_a} marked as connected to fastener {fastener.name} is not registered"
+            )
+        if fastener.initial_body_b is not None:
+            assert fastener.initial_body_b in self.body_indices, (
+                f"Body {fastener.initial_body_b} marked as connected to fastener {fastener.name} is not registered"
+            )
         fastener_id = len(self.graph.fasteners_loc)
         self.graph.fasteners_loc = torch.cat(
             [self.graph.fasteners_loc, torch.zeros((1, 3), device=self.device)], dim=0
@@ -273,8 +275,8 @@ class PhysicalState:
             dim=0,
         )
 
-        self.connect_fastener_to_one_body(fastener_id, fastener.initial_body_a)
-
+        if fastener.initial_body_a is not None:
+            self.connect_fastener_to_one_body(fastener_id, fastener.initial_body_a)
         if fastener.initial_body_b is not None:
             self.connect_fastener_to_one_body(fastener_id, fastener.initial_body_b)
 

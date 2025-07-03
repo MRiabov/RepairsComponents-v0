@@ -289,11 +289,7 @@ def add_base_scene_geometry(scene: gs.Scene):
     camera_1 = scene.add_camera(
         # pos=(1, 2.5, 3.5),
         pos=(1, 2.5, 3.5),  # Position camera further away and above
-        lookat=(
-            0,
-            0,
-            0.2,
-        ),  # Look at the center of the working pos
+        lookat=(0, 0, 0.2),  # Look at the center of the working pos
         # lookat=(
         #     0.64 / 2,
         #     0.64 / 2 + tooling_stand_plate.STAND_PLATE_DEPTH / 100,
@@ -304,12 +300,9 @@ def add_base_scene_geometry(scene: gs.Scene):
 
     camera_2 = scene.add_camera(
         pos=(-2.5, 1.5, 1.5),  # second camera from the other side
-        lookat=(
-            0,
-            0,
-            0.2,
-        ),  # Look at the center of the working pos
+        lookat=(0, 0, 0.2),  # Look at the center of the working pos
         res=(256, 256),  # (1024, 1024),
+        GUI=False,
     )
     _plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
     return scene, [camera_1, camera_2], franka
@@ -409,12 +402,8 @@ def persist_meshes_and_mjcf(
                 fastener_diameter, fastener_height = get_fastener_params_from_name(
                     child.label
                 )
-                fastener_mjcf = Fastener(
-                    False,
-                    "123",
-                    "123",
-                    length=fastener_height,
-                    diameter=fastener_diameter,
+                fastener_mjcf = Fastener(  # constraint and b not noted as unnecessary
+                    False, length=fastener_height, diameter=fastener_diameter
                 ).get_mjcf()
                 fastener_shared_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(fastener_shared_path, "w") as f:

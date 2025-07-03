@@ -31,7 +31,10 @@ class Fastener(Component):
         head_height: float = 0.3,
         screwdriver_name: str = "screwdriver",
     ):
-        assert initial_body_a is not None, "initial_body_a must be provided"
+        # assert initial_body_a is not None, "initial_body_a must be provided"
+        assert head_diameter > diameter, (
+            "head_diameter of a fastener must be greater than diameter"
+        )
         self.initial_body_a = initial_body_a
         self.initial_body_b = initial_body_b
         self.thread_pitch = thread_pitch

@@ -16,7 +16,7 @@ from repairs_components.logic.physical_state import _diff_edge_features
 class ElectronicsState(SimState):
     components: dict[str, ElectricalComponent] = field(default_factory=dict)
     graph: Data = field(default_factory=Data)
-    "Note: don't take this graph. Use export_graph() instead."  # TODO: merge all node features into one.
+    "Note: don't use this graph for learning. Use export_graph() instead."  # TODO: merge all node features into one.
     indices: dict[str, int] = field(default_factory=dict)
     inverse_indices: dict[int, str] = field(default_factory=dict)
     # TODO add reverse indices updates where they need to be.
@@ -34,7 +34,7 @@ class ElectronicsState(SimState):
         self.graph = Data()
         self.graph.edge_index = torch.empty(
             (2, 0), dtype=torch.long, device=self.device
-        )
+        )  # NOTE: I think there is sense in keeping edge index in electronics because of many-to-many connections, unlike with fasteners.
         # Initialize individual feature tensors
         self.graph.max_voltage = torch.tensor(
             [], dtype=torch.float32, device=self.device
