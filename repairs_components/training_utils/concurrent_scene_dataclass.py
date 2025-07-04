@@ -24,7 +24,6 @@ class ConcurrentSceneData:
 
     scene: gs.Scene
     gs_entities: dict[str, RigidEntity]
-    cameras: tuple[Camera, Camera]
     init_state: RepairsSimState
     current_state: RepairsSimState
     desired_state: RepairsSimState
@@ -114,11 +113,7 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         or set(scene_configs[0].gs_entities.keys()) == set(scene_cfg.gs_entities.keys())
         for scene_cfg in scene_configs
     )
-    assert all(  # handle partial configs.
-        scene_configs[0].cameras is None
-        or len(scene_configs[0].cameras) == len(scene_cfg.cameras)
-        for scene_cfg in scene_configs
-    )
+
 
     # create a single big RewardHistorys
     reward_history = RewardHistory(
@@ -167,7 +162,6 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         scene_id=scene_configs[0].scene_id,
         scene=scene_configs[0].scene,
         gs_entities=scene_configs[0].gs_entities,
-        cameras=scene_configs[0].cameras,
         batch_dim=new_batch_dim,
         reward_history=reward_history,
         step_count=torch.zeros(new_batch_dim, dtype=torch.int),
@@ -228,7 +222,6 @@ def merge_scene_configs_at_idx(
             scene_id=old_scene_config.scene_id,
             scene=old_scene_config.scene,
             gs_entities=old_scene_config.gs_entities,
-            cameras=old_scene_config.cameras,
             batch_dim=old_scene_config.batch_dim,
             reward_history=old_scene_config.reward_history.merge_at_idx(
                 new_scene_config.reward_history, old_idx
@@ -324,7 +317,6 @@ def split_scene_config(scene_config: ConcurrentSceneData):
             ConcurrentSceneData(
                 scene=scene_config.scene,
                 gs_entities=scene_config.gs_entities,
-                cameras=scene_config.cameras,
                 init_state=init,
                 current_state=curr,
                 desired_state=des,

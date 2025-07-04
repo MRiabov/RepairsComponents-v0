@@ -149,7 +149,6 @@ class RepairsEnv(gym.Env):
         # Using dataclass to store concurrent scene data for better organization and clarity
         self.concurrent_scenes_data: list[ConcurrentSceneData] = []
 
-        self.scenes = []
         task = tasks[0]  # any task will suffice for init.
 
         # -- data pregeneration --
@@ -217,7 +216,6 @@ class RepairsEnv(gym.Env):
             self.env_setup_ids.tolist(), base_dir, append_path=True
         )
 
-        self.scenes = []
         self.concurrent_scenes_data = []
 
         for scene_id in range(len(self.env_setup_ids)):
@@ -225,16 +223,20 @@ class RepairsEnv(gym.Env):
             scene = gs.Scene(
                 sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
                 show_viewer=False,
-                vis_options=gs.options.VisOptions(env_separate_rigid=True),  # type: ignore
-                show_FPS=False,
+                vis_options=gs.options.VisOptions(
+                    env_separate_rigid=True,
+                    shadow=True,
+                ),  # type: ignore
+                # show_FPS=False,
             )
 
-            scene, cameras, gs_entities, _ = initialize_and_build_scene(
+            scene, gs_entities, _ = initialize_and_build_scene(
                 scene,
                 partial_env_configs[scene_id].desired_state,
                 mesh_file_names[scene_id],
                 self.per_scene_batch_dim,
                 random_textures=use_random_textures,
+                base_dir=base_dir,
                 scene_id=scene_id,
             )
 
@@ -242,7 +244,6 @@ class RepairsEnv(gym.Env):
             scene_data = ConcurrentSceneData(
                 scene=scene,
                 gs_entities=gs_entities,
-                cameras=tuple(cameras),
                 init_state=partial_env_configs[scene_id].init_state,
                 current_state=partial_env_configs[scene_id].current_state,
                 desired_state=partial_env_configs[scene_id].desired_state,
@@ -258,7 +259,6 @@ class RepairsEnv(gym.Env):
             )
 
             # store built scene and data
-            self.scenes.append(scene)
             self.concurrent_scenes_data.append(scene_data)
 
         print(f"Data generation took {time.time() - data_gen_start_time} seconds")
@@ -270,8 +270,16 @@ class RepairsEnv(gym.Env):
 
         self.last_step_time = time.perf_counter()
 
-        # Initialize environment to starting state
+        # debug: Initialize environment to starting state
+        for scene_data in self.concurrent_scenes_data:
+            scene_data.scene.step()  # mb it will fix something.
+        self._observe_all_scenes()
+        print("prereset render successful")
         self.reset()
+        for scene_data in self.concurrent_scenes_data:
+            scene_data.scene.step()  # mb it will fix something.
+        self._observe_all_scenes()
+        print("post-reset render successful")
 
         print("Repairs environment initialized")
 
@@ -332,7 +340,7 @@ class RepairsEnv(gym.Env):
                 target_pos=pos,
                 target_quat=quat,
                 gripper_force=gripper_force,
-                render=False,
+                render=True,
                 keypoint_distance=0.1,  # 10cm as suggested
                 num_steps_between_keypoints=10,
             )
@@ -352,6 +360,7 @@ class RepairsEnv(gym.Env):
 
             # Update the scene data with the new state
             scene_data.current_state = current_sim_state
+            self.concurrent_scenes_data[scene_id] = scene_data
 
             # voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
             #     self._observe_scene(scene_data)
@@ -469,13 +478,29 @@ class RepairsEnv(gym.Env):
                 )
                 continue  # if no reset data was necessary, skip
 
+            self._observe_all_scenes()
+            print("pre-scene-reset render successful")
+
+            self.concurrent_scenes_data[scene_id].scene.reset(
+                envs_idx=reset_env_ids_this_scene
+            )
+            self.concurrent_scenes_data[
+                scene_id
+            ].scene.visualizer.update_visual_states()
+
             # update the scene
             # Reset robot joint positions to default
             dof_pos = self.default_dof_pos.expand(reset_scene.batch_dim, -1)
 
+            self.concurrent_scenes_data[scene_id].scene.step()
+            self._observe_all_scenes()
+            print("pre-set-dofs-position render successful")
             self.concurrent_scenes_data[scene_id].gs_entities[
                 "franka@control"
             ].set_dofs_position(position=dof_pos, envs_idx=reset_env_ids_this_scene)
+            self.concurrent_scenes_data[scene_id].scene.step()
+            self._observe_all_scenes()
+            print("post-set-dofs-position render successful")
 
             # Create a mask for which environments to reset in this scene
             reset_mask = torch.zeros(
@@ -549,8 +574,14 @@ class RepairsEnv(gym.Env):
         # Process a single environment
         # Get the scene data for this environment
 
+        # # DEBUG
+        # # Make sure the physics engine ticked at least once – this initialises
+        # # internal OpenGL framebuffers (e.g. shadow maps).  Without it the very
+        # # first `camera.render()` may raise `GL_INVALID_OPERATION` inside Genesis.
+        # scene_data.scene.step()
+        # # /// didn't work
+
         # Extract cameras from scene data
-        # cameras = scene_data.cameras
         cameras = scene_data.scene.visualizer.cameras  # tried to debug
         video_obs = _render_all_cameras(cameras)
 
@@ -585,6 +616,7 @@ class RepairsEnv(gym.Env):
 
     def _observe_all_scenes(self):
         """A helper to merge all voxel and graph observations."""
+
         all_voxel_init = []
         all_voxel_des = []
         all_video_obs = []
@@ -592,7 +624,11 @@ class RepairsEnv(gym.Env):
         all_mech_graph_des = []
         all_elec_graph_init = []
         all_elec_graph_des = []
+        assert (
+            self.concurrent_scenes_data[0].scene != self.concurrent_scenes_data[1].scene
+        ), "Scenes are the same"
         for scene_data in self.concurrent_scenes_data:
+            scene_data.scene.visualizer.update_visual_states()
             (
                 voxel_init,
                 voxel_des,

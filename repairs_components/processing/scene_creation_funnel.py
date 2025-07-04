@@ -164,7 +164,6 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         this_scene_configs = ConcurrentSceneData(
             scene=None,
             gs_entities=None,
-            cameras=None,
             init_state=starting_sim_state,
             current_state=copy.deepcopy(starting_sim_state),
             desired_state=desired_sim_state,
@@ -226,6 +225,7 @@ def initialize_and_build_scene(
     desired_sim_state: RepairsSimState,
     mesh_file_names: dict[str, str],
     batch_dim: int,
+    base_dir: Path,
     scene_id: int = 0,  # logging only
     random_textures: bool = False,
 ):
@@ -236,13 +236,20 @@ def initialize_and_build_scene(
     )
 
     # initiate cameras and others in genesis scene:
-    first_desired_scene, cameras, franka = add_base_scene_geometry(first_desired_scene)
+    first_desired_scene, cameras, franka = add_base_scene_geometry(
+        first_desired_scene, base_dir
+    )
     initial_gs_entities["franka@control"] = franka
 
     # build a single scene... but batched
     print(f"Building scene number {scene_id}...")
     start_time = time.time()
     first_desired_scene.build(n_envs=batch_dim)
+    # debug render
+    first_desired_scene.step()
+    for camera in cameras:
+        camera.render(rgb=True, depth=True, normal=True)
+    # debug end
     print(f"Built scene number {scene_id} in {time.time() - start_time} seconds.")
 
     # ===== Control Parameters =====
@@ -262,14 +269,21 @@ def initialize_and_build_scene(
         upper=np.array([87, 87, 87, 87, 12, 12, 12, 100, 100]),
     )
 
-    return first_desired_scene, cameras, initial_gs_entities, franka
+    # debug render # no 2, after dofs params.
+    first_desired_scene.step()
+    for camera in cameras:
+        camera.render(rgb=True, depth=True, normal=True)
+    print("debug render 2 is successful.")
+    # debug end
+
+    return first_desired_scene, initial_gs_entities, franka
 
 
-def add_base_scene_geometry(scene: gs.Scene):
+def add_base_scene_geometry(scene: gs.Scene, base_dir: Path):
     # NOTE: the tooling stand is repositioned to 0,0,-0.1 to position all parts on the very center of scene.
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(  # note: filepath necessary because debug switches it to other repo when running from Repairs-v0.
-            file="/workspace/RepairsComponents-v0/geom_exports/tooling_stands/tool_stand_plate.gltf",
+            file=str(tooling_stand_plate.export_path(base_dir)),
             scale=1,  # Use 1.0 scale since we're working in cm
             pos=(0, -(0.64 / 2 + 0.2), -0.2),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis

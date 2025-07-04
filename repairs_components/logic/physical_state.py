@@ -164,6 +164,18 @@ class PhysicalState:
 
     def export_graph(self):
         """Export the graph to a torch_geometric Data object usable by ML."""
+
+        # only export fasteners which aren not attached to nothing.
+        global_feat_mask = (self.graph.fasteners_attached_to == -1).any(dim=-1)
+        global_feat_export = torch.cat(
+            [
+                self.graph.fasteners_loc[global_feat_mask],
+                self.graph.fasteners_quat[global_feat_mask],
+                (self.graph.fasteners_attached_to[global_feat_mask] == -1).float(),
+                # export which are attached and which not, but not their ids.
+            ],
+            dim=-1,
+        )
         graph = Data(  # expected len of x - 8.
             x=torch.cat(
                 [
@@ -177,14 +189,7 @@ class PhysicalState:
             edge_index=self.graph.edge_index,
             edge_attr=self.graph.edge_attr,  # e.g. fastener size.
             num_nodes=len(self.body_indices),
-            global_feat=torch.cat(
-                [
-                    self.graph.fasteners_loc,
-                    self.graph.fasteners_quat,
-                    self.graph.fasteners_attached_to,
-                ],
-                dim=-1,
-            ),
+            global_feat=global_feat_export,
             # batch=self.graph.batch,
             # global_feat_count=self.graph.fasteners_loc.shape[0],
             # ^export global fastener features as a part of graph.

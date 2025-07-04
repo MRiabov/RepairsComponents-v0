@@ -77,7 +77,9 @@ def step_repairs(
                     scene_id
                 ].current_tool.picked_up_fastener_name
                 hole_name = hole_keys[insert_indices[scene_id].item()]
-                activate_hand_connection(gs_entities[name], hole_name)
+                activate_hand_connection(
+                    scene, gs_entities[name], gs_entities["franka@control"]
+                )
                 sim_state.physical_state[scene_id].connect(name, hole_name, None)
 
     return success, total_diff_left, sim_state, diff

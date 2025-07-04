@@ -62,11 +62,13 @@ def translate_state_to_genesis_scene(
         part_name, part_type = body_name.split("@", 1)
         part_type = part_type.lower()
 
-        if random_textures:
-            surface = get_random_texture(part_type)
-        else:
-            # get color by type
-            surface = gs.surfaces.Plastic(color=get_color_by_type(part_type))
+        # DEBUG: (turn this back on)
+        # if random_textures:
+        #     surface = get_random_texture(part_type)
+        # else:
+        #     # get color by type
+        #     surface = gs.surfaces.Plastic(color=get_color_by_type(part_type))
+        surface = gs.surfaces.Plastic(color=(1, 1, 1, 1))
 
         pos = physical_state.graph.position[body_idx]
         quat = physical_state.graph.quat[body_idx]

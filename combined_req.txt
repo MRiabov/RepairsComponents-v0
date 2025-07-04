@@ -1,5 +1,6 @@
 ## numpy==1.26.4
 git+https://github.com/Genesis-Embodied-AI/Genesis.git # genesis.
+#tried: 17cb22e02f9022ef4695a4cd99a5822cb836d3ee status: failed, for the same reason.
 torch==2.5.1
 torch_geometric
 torchrl
@@ -11,6 +12,7 @@ trimesh # note: not used in voxelization, but required for genesis.
 gymnasium
 ompl
 ruff
+pyrender  #how was it not installed before?
 ## git+https://github.com/mit-han-lab/torchsparse.git
 
 ## torch_scatter # note: something fails in uv, install separately.

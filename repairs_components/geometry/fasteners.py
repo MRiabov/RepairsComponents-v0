@@ -167,7 +167,6 @@ def check_fastener_possible_insertion(
 
 def activate_hand_connection(
     scene: gs.Scene,
-    fastener: Fastener,
     fastener_entity: RigidEntity,
     franka_arm: RigidEntity,
 ):

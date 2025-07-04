@@ -31,8 +31,8 @@ class EnvSetup(ABC):
         """
         pass
 
-    def get_default_b123d_env(self):
-        return plate_env_bd_geometry()
+    # def get_default_b123d_env(self):
+    #     return plate_env_bd_geometry()
 
     # def get_default_genesis_scene(self):
     #     return genesis_setup()

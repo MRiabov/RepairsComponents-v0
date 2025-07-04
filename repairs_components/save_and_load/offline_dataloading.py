@@ -167,7 +167,6 @@ class OfflineDataloader:
         sim_state = ConcurrentSceneData(
             scene=None,
             gs_entities=None,
-            cameras=None,
             init_state=init_sim_state,
             current_state=copy.deepcopy(init_sim_state),
             desired_state=des_sim_state,

@@ -87,7 +87,7 @@ def execute_straight_line_trajectory(
             for camera in cameras:
                 camera.render()
 
-    # let dry-run for 80 steps.
+    # let dry-run for 10 steps.
     for _ in range(10):  # note was 100, but reduced to 10 for debug.
         scene.step(
             update_visualizer=render, refresh_visualizer=render
@@ -98,6 +98,9 @@ def execute_straight_line_trajectory(
             cameras = scene.visualizer.cameras
             for camera in cameras:
                 camera.render()
+    if not render:
+        # dev note: not doing this has resulted in an opaque OpenGL error.
+        scene.visualizer.update(force=True, auto=True)
 
     # print(franka.get_links_pos()[:, 7])  # hand.
 
