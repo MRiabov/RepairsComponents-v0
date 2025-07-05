@@ -6,17 +6,18 @@ Order:
 """
 
 import copy
-import json
 import pathlib
 from pathlib import Path
 import time
 from genesis.engine.entities import RigidEntity
+from genesis.engine.entities.rigid_entity import RigidJoint, RigidLink
 from repairs_components.geometry.base_env import tooling_stand_plate
 from repairs_components.geometry.fasteners import (
     Fastener,
     get_fastener_params_from_name,
     get_fastener_save_path_from_name,
 )
+from repairs_components.logic.tools import screwdriver
 from repairs_components.processing.voxel_export import export_voxel_grid
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
@@ -236,20 +237,23 @@ def initialize_and_build_scene(
     )
 
     # initiate cameras and others in genesis scene:
-    first_desired_scene, cameras, franka = add_base_scene_geometry(
-        first_desired_scene, base_dir
+    first_desired_scene, cameras, franka, screwdriver, screwdriver_grip = (
+        add_base_scene_geometry(first_desired_scene, base_dir, batch_dim=batch_dim)
     )
     initial_gs_entities["franka@control"] = franka
+    initial_gs_entities["screwdriver@control"] = screwdriver
+    initial_gs_entities["screwdriver_grip@tool_grip"] = screwdriver_grip
 
     # build a single scene... but batched
     print(f"Building scene number {scene_id}...")
     start_time = time.time()
     first_desired_scene.build(n_envs=batch_dim)
-    # debug render
-    first_desired_scene.step()
-    for camera in cameras:
-        camera.render(rgb=True, depth=True, normal=True)
-    # debug end
+    # scene.rigid_solver.add_weld_constraint(
+    #     screwdriver_grip.base_link.idx,
+    #     screwdriver.base_link.idx,
+    #     envs_idx=torch.arange(batch_dim),
+    # ) # note: fails with cuda error (?). Just constrain directly for now.
+
     print(f"Built scene number {scene_id} in {time.time() - start_time} seconds.")
 
     # ===== Control Parameters =====
@@ -269,17 +273,10 @@ def initialize_and_build_scene(
         upper=np.array([87, 87, 87, 87, 12, 12, 12, 100, 100]),
     )
 
-    # debug render # no 2, after dofs params.
-    first_desired_scene.step()
-    for camera in cameras:
-        camera.render(rgb=True, depth=True, normal=True)
-    print("debug render 2 is successful.")
-    # debug end
-
-    return first_desired_scene, initial_gs_entities, franka
+    return first_desired_scene, initial_gs_entities
 
 
-def add_base_scene_geometry(scene: gs.Scene, base_dir: Path):
+def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
     # NOTE: the tooling stand is repositioned to 0,0,-0.1 to position all parts on the very center of scene.
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(  # note: filepath necessary because debug switches it to other repo when running from Repairs-v0.
@@ -318,8 +315,26 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path):
         res=(256, 256),  # (1024, 1024),
         GUI=False,
     )
-    _plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
-    return scene, [camera_1, camera_2], franka
+    plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
+
+    screwdriver_stub = screwdriver.Screwdriver()
+    screwdriver_: RigidEntity = scene.add_entity(
+        gs.morphs.Mesh(
+            file=str(screwdriver_stub.export_path(base_dir)),
+            pos=(-0.2, -(0.64 / 2 + 0.2 / 2), 0),
+            scale=0.1,
+        ),
+        surface=gs.surfaces.Plastic(color=(1.0, 0.5, 0.0, 1)),
+    )  # TODO set x pos to be more appropriate
+    # note: some issues with adding a link... so I will `weld` the attachment 0-volume body to the base link
+    # this is a fairly bad solution though.
+    screwdriver_grip: RigidEntity = scene.add_entity(
+        gs.morphs.Sphere(
+            pos=(-0.2, -(0.64 / 2 + 0.2 / 2), 0.3), radius=0.001, collision=False
+        )
+    )  # type: ignore
+
+    return (scene, [camera_1, camera_2], franka, screwdriver_, screwdriver_grip)
 
 
 def move_entities_to_pos(
@@ -367,6 +382,15 @@ def generate_scene_meshes(base_dir: Path):
         tooling_stand_plate.plate_env_bd_geometry(
             export_geom_gltf=True, base_dir=base_dir
         )
+    screwdriver_stub = screwdriver.Screwdriver("")
+    if not screwdriver_stub.export_path(base_dir=base_dir).exists():
+        print("Screwdriver mesh not found. Generating...")
+        screwdriver_stub.bd_geometry(export=True, base_dir=base_dir)
+        screwdriver_mjcf = screwdriver_stub.get_mjcf(base_dir=base_dir)
+        path = base_dir / "shared/tools/screwdriver.xml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            f.write(screwdriver_mjcf)
 
 
 def persist_meshes_and_mjcf(

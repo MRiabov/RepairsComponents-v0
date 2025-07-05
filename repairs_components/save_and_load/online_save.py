@@ -3,9 +3,11 @@ import torch
 import os
 from concurrent.futures import ThreadPoolExecutor
 from repairs_components.training_utils.sim_state_global import RepairsSimState
+from genesis.vis.visualizer import Camera
 
 # Executor for asynchronous saving of tensors
 env_executor = ThreadPoolExecutor(max_workers=4)
+# note: can render async too.
 
 
 def _save_tensor(tensor: torch.Tensor, path: str):
@@ -17,11 +19,16 @@ def optional_save(
     save_voxel: bool = False,
     save_image: bool = False,
     save_state: bool = False,
+    save_video: bool = False,
+    video_cams: list[Camera] | None = None,
+    save_video_every_steps=-1,
+    video_len=-1,
+    current_step=-1,
     sim_state: Optional[RepairsSimState] = None,
     obs_image: Optional[torch.Tensor] = None,
     voxel_grids_initial: Optional[torch.Tensor] = None,
     voxel_grids_desired: Optional[torch.Tensor] = None,
-    save_path: str = "./dataset/render",
+    save_path: str = "./data/obs/video",
 ):
     """Optionally save the state to a JSON file, and the observation image."""
 
@@ -45,3 +52,28 @@ def optional_save(
             )
             des_path = os.path.join(save_path, "voxel_desired.pt")
             env_executor.submit(_save_tensor, voxel_grids_desired, des_path)
+        if save_video:
+            assert (
+                video_cams is not None
+                and video_len > 0
+                and save_video_every_steps > 0
+                and current_step != -1
+            ), (
+                "video_cams, video_len, current_step and save_video_every_steps must be provided to save_video, got: "
+                f"video_cams={video_cams}, video_len={video_len}, save_video_every_steps={save_video_every_steps}, current_step={current_step}"
+            )
+            assert save_video_every_steps > video_len, (
+                "save_video_every_steps must be greater than video_len"
+            )  # save video every save_video_every_steps [1000] steps with len video_len [50].
+            if current_step % save_video_every_steps == 0:
+                for cam in video_cams:
+                    cam.start_recording()
+                    # note: can render async too, see gs examples.
+            if current_step % save_video_every_steps == video_len - 1:
+                for cam_id, cam in enumerate(video_cams):
+                    video_idx = (
+                        current_step // save_video_every_steps
+                    ) * save_video_every_steps
+                    cam.stop_recording(
+                        f"{save_path}/video_{video_idx:04d}_cam{cam_id}.mp4"
+                    )

@@ -1,3 +1,4 @@
+import pathlib
 import time
 from functools import partial
 from typing import List
@@ -121,6 +122,8 @@ class RepairsEnv(gym.Env):
         (base_dir / "graphs").mkdir(exist_ok=True, parents=True)
         (base_dir / "voxels").mkdir(exist_ok=True)
         (base_dir / "meshes").mkdir(exist_ok=True)
+        debug_render_dir = base_dir / "debug_render"
+        debug_render_dir.mkdir(exist_ok=True)
         for scene_id in io_cfg["env_setup_ids"]:
             (base_dir / f"scene_{scene_id}").mkdir(exist_ok=True)
         use_random_textures = obs_cfg["use_random_textures"]
@@ -141,7 +144,9 @@ class RepairsEnv(gym.Env):
                 optional_save,
                 save_any=self.save_any,
                 save_path=self.save_path,
-                save_image=self.save_video,
+                save_video=self.save_video,
+                save_video_every_steps=io_cfg["save_obs"]["new_video_every"],
+                video_len=io_cfg["save_obs"]["video_len"],
                 save_voxel=self.save_voxel,
                 save_state=self.save_electronic_graph,
             )
@@ -230,7 +235,7 @@ class RepairsEnv(gym.Env):
                 # show_FPS=False,
             )
 
-            scene, gs_entities, _ = initialize_and_build_scene(
+            scene, gs_entities = initialize_and_build_scene(
                 scene,
                 partial_env_configs[scene_id].desired_state,
                 mesh_file_names[scene_id],
@@ -270,16 +275,24 @@ class RepairsEnv(gym.Env):
 
         self.last_step_time = time.perf_counter()
 
-        # debug: Initialize environment to starting state
-        for scene_data in self.concurrent_scenes_data:
-            scene_data.scene.step()  # mb it will fix something.
-        self._observe_all_scenes()
-        print("prereset render successful")
         self.reset()
+        # debug render all envs
+        import cv2
+
         for scene_data in self.concurrent_scenes_data:
-            scene_data.scene.step()  # mb it will fix something.
-        self._observe_all_scenes()
-        print("post-reset render successful")
+            debug_render = []
+            for cam in scene_data.scene.visualizer.cameras:
+                render_out = cam.render(rgb=True)
+                rgb = render_out[0][0]  # from tuple and 1st in batch.
+                debug_render.append(rgb)
+
+            for i, rgb_img in enumerate(debug_render):
+                cv2.imwrite(
+                    str(
+                        debug_render_dir / f"debug_render_{scene_data.scene_id}_{i}.png"
+                    ),
+                    rgb_img,
+                )
 
         print("Repairs environment initialized")
 
@@ -362,24 +375,11 @@ class RepairsEnv(gym.Env):
             scene_data.current_state = current_sim_state
             self.concurrent_scenes_data[scene_id] = scene_data
 
-            # voxel_init, voxel_des, video_obs, graph_obs, graph_des = (
-            #     self._observe_scene(scene_data)
-            # )
-
             # Compute reward based on progress toward the goal
             dones = calculate_done(scene_data)  # note: pretty expensive.
             rewards = scene_data.reward_history.calculate_reward_this_timestep(
                 scene_data
             )
-
-            # # save the step information if necessary.
-            # self.partial_save(
-            #     sim_state=scene_data.current_state,
-            #     obs_image=video_obs,
-            #     voxel_grids_initial=voxel_init,
-            #     voxel_grids_desired=voxel_des,
-            #     # NOTE: ideally save voxel only after reset.
-            # )
 
             # check if any entity is out of bounds
             out_of_bounds_fail = out_of_bounds(
@@ -415,12 +415,9 @@ class RepairsEnv(gym.Env):
             elec_graph_des,
         ) = self._observe_all_scenes()
         print(
-            "step happened. Time elapsed:",
-            str(time.perf_counter() - self.last_step_time) + "s",
-            "Rewards:",
-            rewards.mean().item(),
-            "out_of_bounds_fail:",
-            out_of_bounds_fail.float().mean().item(),
+            f"step happened. Time elapsed: {str(time.perf_counter() - self.last_step_time)}s",
+            f"Rewards: {rewards.mean().item()}",
+            f"out_of_bounds_fail: {out_of_bounds_fail.float().mean().item()}",
         )
         self.last_step_time = time.perf_counter()
 
@@ -478,29 +475,18 @@ class RepairsEnv(gym.Env):
                 )
                 continue  # if no reset data was necessary, skip
 
-            self._observe_all_scenes()
-            print("pre-scene-reset render successful")
-
             self.concurrent_scenes_data[scene_id].scene.reset(
                 envs_idx=reset_env_ids_this_scene
             )
-            self.concurrent_scenes_data[
-                scene_id
-            ].scene.visualizer.update_visual_states()
 
             # update the scene
             # Reset robot joint positions to default
             dof_pos = self.default_dof_pos.expand(reset_scene.batch_dim, -1)
 
             self.concurrent_scenes_data[scene_id].scene.step()
-            self._observe_all_scenes()
-            print("pre-set-dofs-position render successful")
             self.concurrent_scenes_data[scene_id].gs_entities[
                 "franka@control"
             ].set_dofs_position(position=dof_pos, envs_idx=reset_env_ids_this_scene)
-            self.concurrent_scenes_data[scene_id].scene.step()
-            self._observe_all_scenes()
-            print("post-set-dofs-position render successful")
 
             # Create a mask for which environments to reset in this scene
             reset_mask = torch.zeros(
@@ -574,15 +560,8 @@ class RepairsEnv(gym.Env):
         # Process a single environment
         # Get the scene data for this environment
 
-        # # DEBUG
-        # # Make sure the physics engine ticked at least once – this initialises
-        # # internal OpenGL framebuffers (e.g. shadow maps).  Without it the very
-        # # first `camera.render()` may raise `GL_INVALID_OPERATION` inside Genesis.
-        # scene_data.scene.step()
-        # # /// didn't work
-
         # Extract cameras from scene data
-        cameras = scene_data.scene.visualizer.cameras  # tried to debug
+        cameras = scene_data.scene.visualizer.cameras
         video_obs = _render_all_cameras(cameras)
 
         # get voxel obs
@@ -624,11 +603,7 @@ class RepairsEnv(gym.Env):
         all_mech_graph_des = []
         all_elec_graph_init = []
         all_elec_graph_des = []
-        assert (
-            self.concurrent_scenes_data[0].scene != self.concurrent_scenes_data[1].scene
-        ), "Scenes are the same"
         for scene_data in self.concurrent_scenes_data:
-            scene_data.scene.visualizer.update_visual_states()
             (
                 voxel_init,
                 voxel_des,

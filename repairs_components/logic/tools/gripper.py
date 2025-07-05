@@ -17,3 +17,6 @@ class Gripper(Tool):
         raise NotImplementedError(
             "Unnecessary bd geometry for gripper tool, use MJCF instead."
         )
+
+    def dist_from_grip_link(self):
+        raise NotImplementedError("Unnecessary for gripper tool.")

@@ -19,7 +19,7 @@ from repairs_components.training_utils.sim_state_global import (
 class ConcurrentSceneData:
     """Dataclass for concurrent scene data.
     Each entry is batched with a single batch dim, calculated
-    as batch_dim // concurrent_scenes (except scene, gs_entities and cameras,
+    as batch_dim // concurrent_scenes (except scene and gs_entities
     since they are singletons.)"""
 
     scene: gs.Scene
@@ -113,7 +113,6 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         or set(scene_configs[0].gs_entities.keys()) == set(scene_cfg.gs_entities.keys())
         for scene_cfg in scene_configs
     )
-
 
     # create a single big RewardHistorys
     reward_history = RewardHistory(

@@ -10,6 +10,10 @@ from repairs_components.logic.tools.screwdriver import Screwdriver
 class ToolState(SimState):
     current_tool: Tool = Gripper()
     current_tool_id: int = ToolsEnum.GRIPPER.value
+    all_tools = {  # for convenience only (for now)
+        "gripper": Gripper(),
+        "screwdriver": Screwdriver(),
+    }
 
     def diff(self, other: "ToolState") -> tuple[dict[str, np.ndarray], int]:
         """Compute differences in tool state between two states."""

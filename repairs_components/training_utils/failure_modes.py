@@ -8,6 +8,8 @@ def out_of_bounds(
     """Check that any genesis entity is out of bounds"""
     gs_entities_no_control = gs_entities.copy()
     del gs_entities_no_control["franka@control"]
+    del gs_entities_no_control["screwdriver@control"]
+    del gs_entities_no_control["screwdriver_grip@tool_grip"]
     aabb = torch.stack(
         [entity.get_AABB() for entity in gs_entities_no_control.values()], dim=1
     )  # ^ batch_shape, num_entities, 2, 3
