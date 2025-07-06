@@ -1,7 +1,6 @@
 from abc import abstractmethod
 from genesis import gs
 from genesis.engine.entities import RigidEntity
-import numpy as np
 import torch
 from repairs_components.geometry.base import Component
 from dataclasses import dataclass
@@ -38,9 +37,10 @@ class Tool(Component):
 def attach_tool_to_arm(
     scene: gs.Scene, tool: RigidEntity, arm: RigidEntity, env_idx: torch.Tensor
 ):
+    device = env_idx.device
     # TODO assertion of similar orientaion and close position.
-    tool_base_link = np.array(tool.base_link.idx_local)
-    arm_hand_link = np.array(arm.get_link("hand").idx_local)
+    tool_base_link = torch.tensor(tool.base_link.idx, device=device)
+    arm_hand_link = torch.tensor(arm.get_link("hand").idx, device=device)
 
     arm_hand_pos = arm.get_pos(envs_idx=env_idx)
     arm_hand_quat = arm.get_quat(envs_idx=env_idx)
@@ -48,16 +48,35 @@ def attach_tool_to_arm(
     # set the tool attachment link to the same position as the arm hand link
     tool.set_pos(arm_hand_pos, env_idx)  # I hope it works...
     tool.set_quat(arm_hand_quat, env_idx)
+
+    # debuge
+    assert (
+        not torch.isnan(tool_base_link).any()
+        and tool_base_link >= 0
+        and tool_base_link <= scene.rigid_solver.n_links
+    )
+    assert (
+        not torch.isnan(arm_hand_link).any()
+        and arm_hand_link >= 0
+        and arm_hand_link <= scene.rigid_solver.n_links
+    )
+    assert (
+        not torch.isnan(env_idx).any()
+        and (env_idx >= 0).all()
+        and (env_idx < scene.n_envs).all()
+    )
+
     scene.sim.rigid_solver.add_weld_constraint(
-        np.expand_dims(tool_base_link, 0), np.expand_dims(arm_hand_link, 0), env_idx
+        tool_base_link.unsqueeze(0), arm_hand_link.unsqueeze(0), env_idx
     )
 
 
 def detach_tool_from_arm(
     scene: gs.Scene, tool: RigidEntity, arm: RigidEntity, env_idx: torch.Tensor
 ):
-    tool_base_link = np.array(tool.get_link(attachment_link_name).idx_local)
-    arm_hand_link = np.array(arm.get_link("hand").idx_local)
+    device = env_idx.device
+    tool_base_link = torch.tensor(tool.base_link.idx, device=device)
+    arm_hand_link = torch.tensor(arm.get_link("hand").idx, device=device)
     scene.sim.rigid_solver.delete_weld_constraint(
-        tool_base_link, arm_hand_link, env_idx
+        tool_base_link.unsqueeze(0), arm_hand_link.unsqueeze(0), env_idx
     )

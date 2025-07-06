@@ -136,6 +136,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
     scene: gs.Scene,
     gs_entities: dict[str, RigidEntity],
     sim_state: RepairsSimState,
+    device: torch.device | None = None,
 ):
     """
     Get raw values from sim scene.
@@ -156,6 +157,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
     assert all(
         (
             not isinstance(ts.current_tool, Screwdriver)
+            or ts.current_tool.picked_up_fastener_name is None
             or ts.current_tool.picked_up_fastener_name.endswith("@fastener")
         )
         for ts in sim_state.tool_state
@@ -165,22 +167,22 @@ def translate_genesis_to_python(  # translate to sim state, really.
     fastener_hole_positions: dict[str, torch.Tensor] = {}
     male_connector_positions: dict[str, torch.Tensor] = {}
     female_connector_positions: dict[str, torch.Tensor] = {}
-    picked_up_tip = torch.full((n_envs, 3), float("nan"))
+    picked_up_tip = torch.full((n_envs, 3), float("nan"), device=device)
 
     # loop entities and dispatch by suffix
     for full_name, entity in gs_entities.items():
         parts = full_name.split("@")
         tag2 = "@".join(parts[-2:]) if len(parts) > 1 else parts[-1]
         if tag2 == "male@connector":
-            male_connector_positions[full_name] = entity.get_links_pos(env_idx)[
-                "connector_point"
-            ]
+            male_connector_positions[full_name] = torch.tensor(
+                entity.get_links_pos(env_idx)["connector_point"], device=device
+            )
         elif tag2 == "female@connector":
-            female_connector_positions[full_name] = entity.get_links_pos(env_idx)[
-                "connector_point"
-            ]
+            female_connector_positions[full_name] = torch.tensor(
+                entity.get_links_pos(env_idx)["connector_point"], device=device
+            )
         elif tag2 == "solid":
-            hole_pos = get_fastener_hole_positions(entity)
+            hole_pos = get_fastener_hole_positions(entity, device=device)
             fastener_hole_positions[full_name] = hole_pos
             pos_all = entity.get_pos(env_idx)
             ang_all = entity.get_ang(env_idx)
@@ -200,12 +202,13 @@ def translate_genesis_to_python(  # translate to sim state, really.
                     for ts in sim_state.tool_state
                 ],
                 dtype=torch.bool,
+                device=device,
             )
             if mask.any():
                 link = next(
                     l for l in entity.links if l.name.endswith("_to_screwdriver")
                 )
-                pos_full = link.get_pos(env_idx)
+                pos_full = torch.tensor(link.get_pos(env_idx), device=device)
                 picked_up_tip[mask] = pos_full[mask]
 
     return (
@@ -217,12 +220,16 @@ def translate_genesis_to_python(  # translate to sim state, really.
     )
 
 
-def get_fastener_hole_positions(entity: RigidEntity):
+def get_fastener_hole_positions(
+    entity: RigidEntity, device: torch.device | None = None
+):
     link: RigidLink
     fastener_hole_positions = {}
     for link in entity.links:
         if link.name.endswith("_hole"):  # if fastener hole... (how to get IDs?)
-            fastener_hole_pos = link.get_pos()  # not sure how to get the env.
+            fastener_hole_pos = torch.tensor(
+                link.get_pos(), device=device
+            )  # not sure how to get the env.
             fastener_hole_positions.update({link.name[:-3]: fastener_hole_pos})
     return fastener_hole_positions
 

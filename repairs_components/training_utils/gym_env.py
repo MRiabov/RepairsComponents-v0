@@ -475,9 +475,9 @@ class RepairsEnv(gym.Env):
                 )
                 continue  # if no reset data was necessary, skip
 
-            self.concurrent_scenes_data[scene_id].scene.reset(
-                envs_idx=reset_env_ids_this_scene
-            )
+            # self.concurrent_scenes_data[scene_id].scene.reset(
+            #     envs_idx=reset_env_ids_this_scene
+            # ) #FIXME: commented out, possibly is very bad!
 
             # update the scene
             # Reset robot joint positions to default
