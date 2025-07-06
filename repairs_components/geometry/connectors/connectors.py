@@ -2,8 +2,10 @@ from enum import IntEnum
 import sys
 import os
 
-from build123d import Compound, Part, VectorLike, Color
+from build123d import Axis, Compound, Part, Vector, VectorLike, Color
+from build123d.geometry import Location
 from genesis import gs
+from websockets.typing import Origin
 from repairs_components.logic.electronics.component import (
     ElectricalComponent,
     ElectricalComponentsEnum,
@@ -58,7 +60,7 @@ class Connector(ElectricalComponent):
         moved_to_male: VectorLike,
         moved_to_female: VectorLike | None = None,
         connected=True,
-    ) -> tuple[Part | Compound, Part, np.ndarray, Part | Compound, Part, np.ndarray]:
+    ) -> tuple[Part | Compound, np.ndarray, Part | Compound, np.ndarray | None]:
         """
         return build123d geometry of containers, colored as the connector color and with connector metadata.
         """
@@ -66,62 +68,80 @@ class Connector(ElectricalComponent):
             assert moved_to_female is not None, (
                 "When labelled as disconnected, expect that the moved_to_female is populated."
             )
-        geom_male, male_connector_collision_detection_position = self.bd_geometry_male(
-            moved_to_male
-        )
-        (
-            geom_female,
-            # female_connector_def,
-            female_connector_collision_detection_position,
-        ) = self.bd_geometry_female(moved_to_female)
+        else:
+            assert moved_to_female is None, (
+                "When labelled as connected, expect that the moved_to_female is None."
+            )
+            moved_to_female = (0, 0, 0)  # init empty moved_to_female.
+
+        geom_male = self.bd_geometry_male(moved_to_male)
+        geom_female = self.bd_geometry_female(moved_to_female)
+
+        # TODO: get collision detection position from the geometry.
+        # get the aabb of a CHILD sphere. also discard that sphere from the geometry.
 
         if connected:
             # TODO: move geom_female into the position where connector positions would be equal,
             # with connected_at_angle difference between them.
-            (
+            # Step 1: Rotate around female_connector_collision_detection_position
+            female_connector_collision_detection_position = geom_female.children[
+                -1
+            ].center()
+            rotation_axis = Axis(
+                origin=Vector(*female_connector_collision_detection_position),
+                direction=(0, 0, 1),  # or any custom axis normal to the mating face
+            )
+            # get the index of the non-zero element -
+            angle_idx = torch.tensor(self.connected_at_angle).nonzero().squeeze(0)
+            # assert that there is only one axis to rotate around
+            assert angle_idx.shape[0] == 1, "Can rotate only over 1 axis."
+            # rotate.
+            geom_female = geom_female.rotate(
+                axis=rotation_axis,
+                angle=float(self.connected_at_angle[angle_idx.item()]),
+            )
+
+            # Step 2: Translate to match male connector position
+            pos_diff = (
                 male_connector_collision_detection_position
                 - female_connector_collision_detection_position
             )
-            geom_female.move()
+
+            geom_female = geom_female.moved(Location(pos_diff))
 
         geom_male.color = Color(0.5, 0.5, 0.5, 0.8)
         geom_female.color = Color(0.5, 0.5, 0.5, 0.8)
 
-        male_connector_def.color = Color(1, 1, 0, 0.5)  # yellow
-        female_connector_def.color = Color(1, 1, 0, 0.5)
+        # male_connector_def.color = Color(1, 1, 0, 0.5)  # yellow
+        # female_connector_def.color = Color(1, 1, 0, 0.5)
 
         return (
             geom_male,
-            male_connector_def,
             male_connector_collision_detection_position,
             geom_female,
-            female_connector_def,
-            female_connector_collision_detection_position,
+            female_connector_collision_detection_position if not connected else None,
         )
 
     @abstractmethod
-    def bd_geometry_male(
-        self, moved_to: VectorLike
-    ) -> tuple[Part | Compound, Part, np.ndarray]:
+    def bd_geometry_male(self, moved_to: VectorLike) -> Part | Compound:
         "Returns: A geometrical part, a connector markup part, and a numpy array of connector collision detection positions"
         pass
 
     @abstractmethod
-    def bd_geometry_female(
-        self, moved_to: VectorLike
-    ) -> tuple[Part | Compound, Part, np.ndarray]:  # type:ignore
+    def bd_geometry_female(self, moved_to: VectorLike) -> Part | Compound:
         "Returns: A geometrical part, a connector markup part, and a numpy array of connector collision detection positions"
         pass
 
-    def color_and_label(self, geom: Part, connector_def: Part):
+    def color_and_label(self, geom: Part):
+        # note: removing connector_def.
         geom.color = Color(0.5, 0.5, 0.5, 0.8)
-        connector_def.color = Color(1, 1, 0, 0.5)
+        # connector_def.color = Color(1, 1, 0, 0.5)
 
         # to indicate typing to the model
         geom.label = self.name + "@solid"
-        connector_def.label = self.name + "@connector"
+        # connector_def.label = self.name + "@connector"
 
-        return geom, connector_def
+        return geom  # , connector_def
 
 
 def check_connections(

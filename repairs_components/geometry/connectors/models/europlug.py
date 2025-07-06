@@ -37,21 +37,13 @@ class Europlug(Connector):
                     Circle(pin_diameter / 2)
             pins = extrude(pin_sketch.sketch, pin_len)
 
-        connector_def = Part()
-        connector_def = extrude(
-            pin_sketch.sketch, pin_len, mode=Mode.ADD, target=connector_def
-        )
-        connector_collision_detection_position = np.array(
-            connector_def.center().to_tuple()
-        )
+        with BuildPart() as connector_center:
+            with Locations(pins.center(CenterOf.BOUNDING_BOX)):
+                Sphere(0.1)  # just get the center of this sphere later.
 
-        return (
-            self.color_and_label(
-                plug_part.part.moved(Location(moved_to)),
-                connector_def.moved(Location(moved_to)),
-            ),
-            connector_collision_detection_position,
-        )
+        plug_part.part.children += connector_center.part
+
+        return self.color_and_label(plug_part.part.moved(Location(moved_to)))
 
     def bd_geometry_female(self, moved_to: bd.VectorLike):
         """
@@ -69,24 +61,26 @@ class Europlug(Connector):
             rightmost = socket_body.faces().sort_by(Axis.X)[-1]
             with BuildSketch(rightmost) as hole_sketch:
                 with GridLocations(0, pin_dist, 1, 2):
-                    Circle(hole_diameter / 2)
+                    hole_circles = Circle(hole_diameter / 2)
+
             # Extrude the holes into the socket body
-            holes = extrude(hole_sketch.sketch, -pin_len - 2, mode=Mode.SUBTRACT)
+            holes = extrude(hole_circles, -pin_len - 2, mode=Mode.SUBTRACT)
+
             base_joint = RigidJoint(
                 "native"
             )  # native "base" joint, so will hold despite perturbations.
+            # connector_center = Locations(holes.center(CenterOf.BOUNDING_BOX))
 
-        connector_def = Part()
-        # The connector definition is the negative space where the pins would go
-        connector_def = extrude(
-            hole_sketch.sketch, -pin_len - 2, mode=Mode.ADD, target=connector_def
-        )
-        connector_collision_detection_position = np.array(
-            connector_def.center().to_tuple()
-        )  # a general rule that should work. # to debug if can't be matched.
+        with BuildPart() as connector_center:
+            with Locations(holes.center(CenterOf.BOUNDING_BOX)):
+                Sphere(0.1)  # just get the center of this sphere later.
 
-        return self.color_and_label(
-            socket_part.part.moved(Location(moved_to)),
-            connector_def.moved(Location(moved_to)),
-            connector_collision_detection_position,
-        )
+        socket_part.part.children += connector_center.part
+
+        return self.color_and_label(socket_part.part.moved(Location(moved_to)))
+
+
+if __name__ == "__main__":
+    from ocp_vscode import show
+
+    show(Europlug("europlug@connectors").bd_geometry((0, 0, 0), connected=True))
