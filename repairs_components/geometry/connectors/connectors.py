@@ -2,7 +2,16 @@ from enum import IntEnum
 import sys
 import os
 
-from build123d import Axis, Compound, Part, Vector, VectorLike, Color
+from build123d import (
+    Axis,
+    CenterOf,
+    Compound,
+    Part,
+    Rotation,
+    Vector,
+    VectorLike,
+    Color,
+)
 from build123d.geometry import Location
 from genesis import gs
 from websockets.typing import Origin
@@ -17,6 +26,8 @@ from typing import Mapping
 
 
 class Connector(ElectricalComponent):
+    _connector_def_size = 0.3  # vis only
+
     def propagate(self, voltage: float, current: float) -> tuple[float, float]:
         return voltage, current  # pass through.
 
@@ -80,40 +91,38 @@ class Connector(ElectricalComponent):
         # TODO: get collision detection position from the geometry.
         # get the aabb of a CHILD sphere. also discard that sphere from the geometry.
 
+        # get the aabb of a child sphere.
+        male_connector_collision_detection_position = geom_male.children[-1].center(
+            CenterOf.BOUNDING_BOX
+        )
+        female_connector_collision_detection_position = geom_female.children[-1].center(
+            CenterOf.BOUNDING_BOX
+        )
+
         if connected:
-            # TODO: move geom_female into the position where connector positions would be equal,
+            # TODO: move geom_male into the position where connector positions would be equal,
             # with connected_at_angle difference between them.
             # Step 1: Rotate around female_connector_collision_detection_position
-            female_connector_collision_detection_position = geom_female.children[
-                -1
-            ].center()
-            rotation_axis = Axis(
-                origin=Vector(*female_connector_collision_detection_position),
-                direction=(0, 0, 1),  # or any custom axis normal to the mating face
-            )
             # get the index of the non-zero element -
-            angle_idx = torch.tensor(self.connected_at_angle).nonzero().squeeze(0)
-            # assert that there is only one axis to rotate around
-            assert angle_idx.shape[0] == 1, "Can rotate only over 1 axis."
             # rotate.
-            geom_female = geom_female.rotate(
-                axis=rotation_axis,
-                angle=float(self.connected_at_angle[angle_idx.item()]),
+            geom_male = Rotation(self.connected_at_angle) * geom_male
+
+            # NOTE: translate the CHILDREN, not just the parent.
+            geom_male = Compound(
+                children=[child.rotate(Axis.Z, 180) for child in geom_male.children]
             )
 
-            # Step 2: Translate to match male connector position
+            male_connector_collision_detection_position = geom_male.children[-1].center(
+                CenterOf.BOUNDING_BOX
+            )
+
+            # Step 2: Translate to match female connector position
             pos_diff = (
-                male_connector_collision_detection_position
-                - female_connector_collision_detection_position
+                female_connector_collision_detection_position
+                - male_connector_collision_detection_position
             )
 
-            geom_female = geom_female.moved(Location(pos_diff))
-
-        geom_male.color = Color(0.5, 0.5, 0.5, 0.8)
-        geom_female.color = Color(0.5, 0.5, 0.5, 0.8)
-
-        # male_connector_def.color = Color(1, 1, 0, 0.5)  # yellow
-        # female_connector_def.color = Color(1, 1, 0, 0.5)
+            geom_male = geom_male.moved(Location(pos_diff))
 
         return (
             geom_male,
@@ -132,16 +141,23 @@ class Connector(ElectricalComponent):
         "Returns: A geometrical part, a connector markup part, and a numpy array of connector collision detection positions"
         pass
 
-    def color_and_label(self, geom: Part):
+    def color_and_label(self, geom: Compound):
         # note: removing connector_def.
-        geom.color = Color(0.5, 0.5, 0.5, 0.8)
-        # connector_def.color = Color(1, 1, 0, 0.5)
+        assert len(geom.children) == 2, "Expected a two children for the geometry."
+        assert geom.children[1].volume < geom.children[0].volume, (
+            "Expected the connector to be smaller than the geometry."
+        )
+        assert geom.children[1].volume < 0.2, (
+            "Expected the connector to be smaller than 0.2."
+        )  # sanity check - connector defs should be tiny. sphere with R=0.3 has volume 0.113
+        geom.children[0].color = Color(0.5, 0.5, 0.5, 0.8)
+        geom.children[1].color = Color(1, 1, 0, 0.5)
 
         # to indicate typing to the model
-        geom.label = self.name + "@solid"
-        # connector_def.label = self.name + "@connector"
+        geom.label = self.name + "@solid"  # should be @connector?
+        geom.children[1].label = self.name + "@connector"
 
-        return geom  # , connector_def
+        return geom
 
 
 def check_connections(

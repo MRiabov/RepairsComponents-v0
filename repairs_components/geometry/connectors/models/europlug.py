@@ -39,11 +39,13 @@ class Europlug(Connector):
 
         with BuildPart() as connector_center:
             with Locations(pins.center(CenterOf.BOUNDING_BOX)):
-                Sphere(0.1)  # just get the center of this sphere later.
+                Sphere(
+                    self._connector_def_size
+                )  # just get the center of this sphere later.
 
-        plug_part.part.children += connector_center.part
+        plug_part = Compound(children=[plug_part.part, connector_center.part])
 
-        return self.color_and_label(plug_part.part.moved(Location(moved_to)))
+        return self.color_and_label(plug_part.moved(Location(moved_to)))
 
     def bd_geometry_female(self, moved_to: bd.VectorLike):
         """
@@ -58,13 +60,13 @@ class Europlug(Connector):
             fillet(socket_body.faces().filter_by(Axis.X).last.edges(), 7)
 
             # Create holes for the pins on the rightmost face
-            rightmost = socket_body.faces().sort_by(Axis.X)[-1]
+            rightmost = socket_body.faces().filter_by(Axis.X).sort_by(Axis.X).last
             with BuildSketch(rightmost) as hole_sketch:
                 with GridLocations(0, pin_dist, 1, 2):
                     hole_circles = Circle(hole_diameter / 2)
 
             # Extrude the holes into the socket body
-            holes = extrude(hole_circles, -pin_len - 2, mode=Mode.SUBTRACT)
+            holes = extrude(hole_sketch.sketch, -pin_len - 2, mode=Mode.SUBTRACT)
 
             base_joint = RigidJoint(
                 "native"
@@ -72,12 +74,16 @@ class Europlug(Connector):
             # connector_center = Locations(holes.center(CenterOf.BOUNDING_BOX))
 
         with BuildPart() as connector_center:
-            with Locations(holes.center(CenterOf.BOUNDING_BOX)):
-                Sphere(0.1)  # just get the center of this sphere later.
+            x, y, z = holes.center(CenterOf.BOUNDING_BOX)
+            x += 1.5  # make it easier to plug in.
+            with Locations((x, y, z)):
+                Sphere(
+                    self._connector_def_size
+                )  # just get the center of this sphere later.
 
-        socket_part.part.children += connector_center.part
+        socket_part = Compound(children=[socket_part.part, connector_center.part])
 
-        return self.color_and_label(socket_part.part.moved(Location(moved_to)))
+        return self.color_and_label(socket_part.moved(Location(moved_to)))
 
 
 if __name__ == "__main__":
