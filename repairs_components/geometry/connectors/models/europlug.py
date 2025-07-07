@@ -69,7 +69,7 @@ class Europlug(Connector):
             holes = extrude(hole_sketch.sketch, -pin_len - 2, mode=Mode.SUBTRACT)
 
             base_joint = RigidJoint(
-                "native"
+                "native"  # FIXME: joints were deprecated.
             )  # native "base" joint, so will hold despite perturbations.
             # connector_center = Locations(holes.center(CenterOf.BOUNDING_BOX))
 
@@ -81,7 +81,10 @@ class Europlug(Connector):
                     self._connector_def_size
                 )  # just get the center of this sphere later.
 
-        socket_part = Compound(children=[socket_part.part, connector_center.part])
+        socket_part = Compound(
+            children=[socket_part.part, connector_center.part],
+            joints={"native": base_joint},
+        )
 
         return self.color_and_label(socket_part.moved(Location(moved_to)))
 

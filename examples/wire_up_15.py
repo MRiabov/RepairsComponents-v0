@@ -14,38 +14,41 @@ class WireUp(EnvSetup):
 
     def desired_state_geom(self) -> Compound:
         with BuildPart() as elec_panel:
-            Box(60, 40, 100)
-            with Locations(elec_panel.faces().filter_by(Axis.Y).sort_by(Axis.Y).first):
-                hole_grid_locs = GridLocations(0, 30, 1, 4)
+            Box(300, 80, 100)
+            joints = []
+            with Locations(
+                elec_panel.faces().filter_by(Axis.Y).sort_by(Axis.Y).first.offset(-25)
+            ):
+                hole_grid_locs = GridLocations(0, 65, 1, 4)
                 with hole_grid_locs:
-                    connector_hole = Box(5, 5, 5, mode=Mode.SUBTRACT)
-                for i in range(4):
-                    joint = RigidJoint(
-                        f"always_{i}", joint_location=hole_grid_locs.locations[i]
-                    )
+                    connector_hole = Box(50, 50, 50, mode=Mode.SUBTRACT)
+
         male_geoms = []
         female_geoms = []
         connect_positions = []
         for i in range(4):
             male_geom, connect_pos, female_geom, _ = Europlug(
-                f"couple_{i}@connectors"
+                f"europlug_{i}"
             ).bd_geometry((0, 0, 0), connected=True)
-            female_geom.move(hole_grid_locs.locations[i])
-            male_geom.move(hole_grid_locs.locations[i])
+            rotated_loc = Location(hole_grid_locs.locations[i].position, (0, 0, -90))
 
+            female_geom.move(rotated_loc)
+            male_geom.move(rotated_loc)
 
             male_geoms.append(male_geom)
             female_geoms.append(female_geom)
             connect_positions.append(connect_pos)
-            joint = RigidJoint(f"always_{i}", to_part=female_geom)
-            joint.connect_to(other=elec_panel.part.joints["always_" + str(i)])
+            # joints[i].connect_to(other=female_geom.joints["native"])
             # note: if label name is "always", keep it even despite perturbations.
+        elec_panel.part.label = "elec_panel@fixed_solid"
         return Compound(children=(male_geoms + female_geoms + [elec_panel.part]))
 
         # FIXME: no way to define that a connector would be constrained to other body.
 
-    def linked_groups(self) -> list[tuple[str, ...]]:
-        return [()]
+    def linked_groups(self) -> dict[str, tuple[list[str]]]:
+        all_female_connectors = [f"europlug_{i}_female@connector" for i in range(4)]
+        return {"mech_linked": ([*all_female_connectors, "elec_panel@solid"],)}
 
 
-show(WireUp().desired_state_geom())
+if __name__ == "__main__":
+    show(WireUp().desired_state_geom())

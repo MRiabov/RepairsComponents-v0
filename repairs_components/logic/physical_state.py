@@ -36,6 +36,7 @@ class PhysicalState:
     - free_fasteners_quat
     - free_fasteners_attached_to
     """  # this is kind of unnecessary... again.
+    # TODO encode mass, and possibly velocity.
 
     body_indices: dict[str, int] = field(default_factory=dict)
     inverse_indices: dict[int, str] = field(default_factory=dict)
@@ -56,6 +57,11 @@ class PhysicalState:
     # free_fasteners_attached_to: torch.Tensor = field(
     #     default_factory=lambda: torch.zeros((0,), dtype=torch.int8)
     # )
+
+    permanently_constrained_parts: list[list[str]] = field(default_factory=list)
+    """List of lists of permanently constrained parts (linked_groups from EnvSetup)"""
+
+    # TODO electronics connection positions?
 
     def __init__(
         self,

@@ -76,8 +76,9 @@ class EnvSetup(ABC):
                 "button",
                 "led",
                 "switch",
+                "connector_def",
             ), (
-                f"Part type must be one of {('solid', 'fastener', 'connector', 'button', 'led', 'switch')}. Currently have: {part_type}."
+                f"Part type must be one of {('solid', 'fastener', 'connector', 'button', 'led', 'switch', 'connector_def')}. Currently have: {part_type}."
             )
             if part_type == "fastener":
                 assert part.joints["fastener_joint_a"].connected_to is not None, (

@@ -6,6 +6,7 @@ from genesis.engine.entities.rigid_entity.rigid_link import RigidLink
 from genesis.engine.entities import RigidEntity
 import torch
 from pathlib import Path
+from repairs_components.geometry.connectors import connectors
 from repairs_components.geometry.connectors.connectors import Connector
 from repairs_components.logic.electronics.component import ElectricalComponent
 from repairs_components.processing.textures import get_color_by_type, get_random_texture
@@ -74,17 +75,17 @@ def translate_state_to_genesis_scene(
         quat = physical_state.graph.quat[body_idx]
         count_fasteners_held = physical_state.graph.count_fasteners_held[body_idx]
 
-        if part_type == "solid":
+        if (
+            part_type == "solid"
+            or part_type == "fixed_solid"
+            or part_type == "connector"
+        ):
+            fixed = part_type == "fixed_solid"
             mesh_path = str(mesh_file_names[body_name])
-            mesh = gs.morphs.Mesh(file=mesh_path)
+            mesh = gs.morphs.Mesh(file=mesh_path, fixed=fixed)
             new_entity = scene.add_entity(mesh, surface=surface)
 
-        elif part_type == "fixed_solid":  # TODO fixed solids definition in other parts.
-            mesh_path = str(mesh_file_names[body_name])
-            mesh = gs.morphs.Mesh(file=mesh_path, fixed=True)  # fixed!
-            new_entity = scene.add_entity(mesh, surface=surface)
-
-        elif part_type in ("connector", "button", "led", "switch"):
+        elif part_type in ("button", "led", "switch"):
             mjcf_path = str(mesh_file_names[body_name])
             # FIXME: deprecate MJCF from here and use native genesis configs.
             mesh = gs.morphs.MJCF(file=mjcf_path, name=body_name, links_to_keep=True)
@@ -93,6 +94,7 @@ def translate_state_to_genesis_scene(
             raise ValueError(
                 "Fasteners should be defined only in edge attributes or free bodies, not in indices."
             )
+
         else:
             raise NotImplementedError(
                 f"Not implemented for translation part type: {part_type}"
@@ -181,7 +183,8 @@ def translate_genesis_to_python(  # translate to sim state, really.
             female_connector_positions[full_name] = torch.tensor(
                 entity.get_links_pos(env_idx)["connector_point"], device=device
             )
-        elif tag2 == "solid":
+        elif tag2 == "solid" or tag2 == "fixed_solid":
+            # TODO: I haven't explicitly handled fixed solids, but it may be unnecessary(?)
             hole_pos = get_fastener_hole_positions(entity, device=device)
             fastener_hole_positions[full_name] = hole_pos
             pos_all = entity.get_pos(env_idx)
@@ -191,7 +194,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
                     full_name, pos_all[i], ang_all[i]
                 )
         elif tag2 == "control":
-            continue
+            continue  # skip.
         else:
             # note: it will be more troublesome to handle a non-implemented error in batching, so whatever.
             # it should be really checked in a separate assertion.
@@ -235,7 +238,7 @@ def get_fastener_hole_positions(
 
 
 def translate_compound_to_sim_state(
-    batch_b123d_compounds: list[Compound],
+    batch_b123d_compounds: list[Compound], connected_bodies: list[list[str]] = []
 ) -> RepairsSimState:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
     assert len(batch_b123d_compounds) > 0, "Batch must not be empty."
@@ -246,6 +249,9 @@ def translate_compound_to_sim_state(
 
     for env_idx in range(len(batch_b123d_compounds)):
         b123d_compound = batch_b123d_compounds[env_idx]
+        part_dict = {part.label: part for part in b123d_compound.descendants}
+        connector_def_positions = {}  # not tensor because we will require labels.
+
         for part in b123d_compound.descendants:
             part: Part
             assert part.label, (
@@ -253,6 +259,8 @@ def translate_compound_to_sim_state(
             )
             assert "@" in part.label, "Part must annotate type."
             assert part.volume > 0, "Part must have a volume."
+
+            part_name, part_type = part.label.split("@", 1)
             # physical state
             if part.label.endswith("@solid"):
                 sim_state.physical_state[env_idx].register_body(
@@ -313,11 +321,29 @@ def translate_compound_to_sim_state(
             elif part.label.endswith("@liquid"):
                 raise NotImplementedError("Liquid is not handled yet.")
             elif part.label.endswith("@button"):
-                continue
+                raise NotImplementedError("Buttons are not handled yet.")
             elif part.label.endswith("@connector"):
-                raise NotImplementedError("Connector is not handled yet.")
+                # register the solid part of the connector
+                sim_state.physical_state[env_idx].register_body(
+                    name=part.label,
+                    # position=part.position.to_tuple(), # this isn't always true
+                    position=part.center(CenterOf.BOUNDING_BOX).to_tuple(),
+                    rotation=part.location.orientation.to_tuple(),
+                )  # BEWARE OF ROTATION AND POSITION NOT BEING TRANSLATED. (compounds don't translate pos automatically.)
+
+                # get the connector def position
+                connector_def = part_dict[part_name + "@connector_def"]
+                connector_def_position = (
+                    connector_def.children[-1].center(CenterOf.BOUNDING_BOX).to_tuple()
+                )  # ^beware!!! this must be translated as in children translation.
+                connector_def_positions[part_name] = connector_def_position
             else:
                 raise NotImplementedError(f"Part type {part.label} not implemented.")
+
+        connection_idx = connectors.check_connections(connector_def_positions)
+    # TODO I'll do this later.
+    # possibly (reasonably) we can encode XYZ and quat of connector def positions into electronics state features.
+    # however this won't mean they will be returned in export_graph.
 
     return sim_state
 

@@ -30,7 +30,9 @@ class Task(ABC):
         )
 
         # Ensure the part fits in the environment
-        assert not np.any(max_xy < min_xy), "Compound is too large for the environment."
+        assert not np.any(max_xy < min_xy), (
+            f"Compound is too large for the environment. Size: {size}"
+        )
 
         # Generate random position within the valid range
         target_xy = np.random.uniform(min_xy, max_xy)
