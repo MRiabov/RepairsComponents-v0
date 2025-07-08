@@ -5,18 +5,20 @@ Genesis supports MJCF (MuJoCo) format for model definition, allowing for easy mi
 from MuJoCo-based simulations.
 """
 
-import math
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
 from repairs_components.geometry.base import Component
 from build123d import *
 from dataclasses import dataclass
 import genesis as gs
 from genesis.engine.entities import RigidEntity
+import numpy as np
+import torch
+from typing import Mapping
 
 
+@dataclass
 class Fastener(Component):
-    "Fastener class. Reminder: all values are in cm."
+    """Fastener class. All values are in millimeters (mm)."""
 
     def __init__(
         self,
@@ -24,11 +26,11 @@ class Fastener(Component):
         initial_body_a: str
         | None = None,  # how will it be constrained in case of hole?
         initial_body_b: str | None = None,
-        thread_pitch: float = 0.05,
-        length: float = 1.5,
-        diameter: float = 0.5,
-        head_diameter: float = 0.75,
-        head_height: float = 0.3,
+        thread_pitch: float = 0.5,  # mm
+        length: float = 15.0,  # mm
+        diameter: float = 5.0,  # mm
+        head_diameter: float = 7.5,  # mm
+        head_height: float = 3.0,  # mm
         screwdriver_name: str = "screwdriver",
     ):
         # assert initial_body_a is not None, "initial_body_a must be provided"
@@ -51,17 +53,17 @@ class Fastener(Component):
         """Get MJCF of a screw.
 
         Args:
-            thread_pitch: Distance between threads in cm.
-            length: Total length of the screw in cm.
-            diameter: Outer diameter of the screw thread in cm.
-            head_diameter: Diameter of the screw head in cm.
-            head_height: Height of the screw head in cm.
+            thread_pitch: Distance between threads in mm.
+            length: Total length of the screw in mm.
+            diameter: Outer diameter of the screw thread in mm.
+            head_diameter: Diameter of the screw head in mm.
+            head_height: Height of the screw head in mm.
         """
-        # MJCF expects meters, Build123d uses cm, so convert cm to m
-        shaft_radius = self.diameter / 2 / 100
-        shaft_length = self.length / 100
-        head_radius = self.head_diameter / 2 / 100
-        head_height = self.head_height / 100
+        # MJCF expects meters, Build123d uses mm, so convert mm to m
+        shaft_radius = self.diameter / 2 / 1000
+        shaft_length = self.length / 1000
+        head_radius = self.head_diameter / 2 / 1000
+        head_height = self.head_height / 1000
         # Head base at z=0, head centered at head_height/2, shaft centered at -shaft_length/2
         # Tip body at z=-shaft_length
         return f"""
@@ -130,11 +132,6 @@ class Fastener(Component):
         )
 
         return fastener, fastener_collision_detection_position
-
-
-import numpy as np
-import torch
-from typing import Mapping
 
 
 def check_fastener_possible_insertion(

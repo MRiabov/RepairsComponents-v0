@@ -11,7 +11,7 @@ class Task(ABC):
     def perturb_desired_state(
         self,
         compound: Compound,
-        env_size=(64, 64, 64),  # cm
+        env_size=(640, 640, 640),  # mm
     ) -> Compound:
         """Perturb the desired state of the task. Only move in x and y directions, the minimum of Z axis should be kept at 0."""
         # Get the bounding box of the original compound

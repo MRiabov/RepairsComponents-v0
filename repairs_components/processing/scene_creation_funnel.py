@@ -90,17 +90,21 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
         for _ in range(scene_gen_count):
             task_id = task_ids[_]  # randomly select a task
             starting_scene_geom_ = starting_state_geom(
-                env_setups[scene_idx], tasks[task_id], env_size=(64, 64, 64)
+                env_setups[scene_idx],
+                tasks[task_id],
+                env_size=(640, 640, 640),  # mm
             )  # create task... in a for loop...
             # note: at the moment the starting scene goes out of bounds a little, but whatever, it'll only generalize better.
             desired_state_geom_ = desired_state_geom(
-                env_setups[scene_idx], tasks[task_id], env_size=(64, 64, 64)
+                env_setups[scene_idx],
+                tasks[task_id],
+                env_size=(640, 640, 640),  # mm
             )
 
             # voxelize both (sparsely!)
             starting_voxel_grid, voxelization_cache = export_voxel_grid(
                 starting_scene_geom_,
-                voxel_size=64 / 256,
+                voxel_size=640 / vox_res,  # mm / voxel
                 cached=True,
                 cache=voxelization_cache,
                 save=save,
@@ -109,7 +113,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             )
             desired_voxel_grid, voxelization_cache = export_voxel_grid(
                 desired_state_geom_,
-                voxel_size=64 / 256,
+                voxel_size=640 / vox_res,  # mm / voxel
                 cached=True,
                 cache=voxelization_cache,
                 save=save,
@@ -281,7 +285,7 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(  # note: filepath necessary because debug switches it to other repo when running from Repairs-v0.
             file=str(tooling_stand_plate.export_path(base_dir)),
-            scale=1,  # Use 1.0 scale since we're working in cm
+            scale=1,  # Use 1.0 scale since we're working in mm # uuh?
             pos=(0, -(0.64 / 2 + 0.2), -0.2),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
             fixed=True,
@@ -303,7 +307,7 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
         lookat=(0, 0, 0.2),  # Look at the center of the working pos
         # lookat=(
         #     0.64 / 2,
-        #     0.64 / 2 + tooling_stand_plate.STAND_PLATE_DEPTH / 100,
+        #     0.64 / 2 + tooling_stand_plate.STAND_PLATE_DEPTH / 1000,
         #     0.3,
         # ),  # Look at the center of the working pos
         res=(256, 256),  # (1024, 1024),
@@ -345,7 +349,7 @@ def move_entities_to_pos(
     """Move parts to their necessary positions. Can be used both in reset and init."""
     if env_idx is None:
         env_idx = torch.arange(len(starting_sim_state.physical_state))
-    # batch collect all positions (cm to meters) across environments
+    # batch collect all positions (mm to meters) across environments
     all_positions = (
         torch.stack(
             [
@@ -354,7 +358,7 @@ def move_entities_to_pos(
             ],
             dim=0,
         )
-        / 100
+        / 1000
     )
 
     # set positions for each entity in batch
@@ -415,7 +419,7 @@ def persist_meshes_and_mjcf(
                 export_gltf(
                     child.moved(Pos(-center)),
                     save_dir / f"scene_{scene_id}" / mesh_file_name,
-                    unit=Unit.CM,
+                    unit=Unit.MM,
                 )
             elif solid_export_format == "stl":
                 # fixme: stl does not resize? hmm. (resize units)

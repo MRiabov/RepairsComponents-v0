@@ -12,43 +12,43 @@ import os
 from genesis.engine.entities import RigidEntity
 import genesis as gs
 
-WORKING_SPACE_SIZE = (64, 64, 64)  # cm
+WORKING_SPACE_SIZE = (640, 640, 640)  # mm
 
 
 # Note: here Y is depth, X is length and Z is height.
 # Constants from tooling_geometry.md
 TOOL_SLOT_COUNT = 4
-TOOL_SLOT_SIZE = 12  # cm
-TOOL_SLOT_DEPTH = 15  # cm
-TOOL_SLOT_SPACING = 18  # cm, center-to-center
+TOOL_SLOT_SIZE = 120  # mm
+TOOL_SLOT_DEPTH = 150  # mm
+TOOL_SLOT_SPACING = 180  # mm, center-to-center
 
 # fastener slots
 FASTENER_HOLE_COUNT = 12
-FASTENER_HOLE_DIAMETER = 1
-FASTENER_HOLE_DEPTH = 3  # cm
-FASTENER_HOLE_SPACING = 4  # cm, center-to-center
+FASTENER_HOLE_DIAMETER = 10  # mm
+FASTENER_HOLE_DEPTH = 30  # mm
+FASTENER_HOLE_SPACING = 40  # mm, center-to-center
 
 # robot arm slot.
-ROBOT_ARM_BASE_WIDTH = 20
+ROBOT_ARM_BASE_WIDTH = 200  # mm
 
 
 # stand plate
-TOOLING_SPACE_WIDTH = 60 + (ROBOT_ARM_BASE_WIDTH)
-FASTENER_SPACE_WIDTH = 20
-STAND_PLATE_WIDTH = TOOLING_SPACE_WIDTH + FASTENER_SPACE_WIDTH  # cm
-STAND_PLATE_DEPTH = 40  # cm
-STAND_PLATE_HEIGHT = 20  # cm
+TOOLING_SPACE_WIDTH = 600 + (ROBOT_ARM_BASE_WIDTH)  # mm
+FASTENER_SPACE_WIDTH = 200  # mm
+STAND_PLATE_WIDTH = TOOLING_SPACE_WIDTH + FASTENER_SPACE_WIDTH  # mm
+STAND_PLATE_DEPTH = 400  # mm
+STAND_PLATE_HEIGHT = 200  # mm
 
 
 # guard wall
-GUARD_WALL_THICKNESS = 1.2  # cm
-GUARD_WALL_HEIGHT = 12.0  # cm
+GUARD_WALL_THICKNESS = 12.0  # mm
+GUARD_WALL_HEIGHT = 120.0  # mm
 
-MOUNT_HOLE_DIAMETER = 0.6  # cm
-MAGNET_DIAMETER = 1.0  # cm
-MAGNET_DEPTH = 0.3  # cm
-ALIGNMENT_PIN_DIAMETER = 0.4  # cm
-ALIGNMENT_PIN_HEIGHT = 0.8  # cm
+MOUNT_HOLE_DIAMETER = 6.0  # mm
+MAGNET_DIAMETER = 10.0  # mm
+MAGNET_DEPTH = 3.0  # mm
+ALIGNMENT_PIN_DIAMETER = 4.0  # mm
+ALIGNMENT_PIN_HEIGHT = 8.0  # mm
 
 # for exporting the environment; moved as the center of the parts.
 SCENE_CENTER = (0, 20 + STAND_PLATE_DEPTH / 2, STAND_PLATE_HEIGHT)
@@ -97,7 +97,7 @@ def plate_env_bd_geometry(export_geom_gltf: bool, base_dir: Path | None = None) 
             Box(WORKING_SPACE_SIZE[0], WORKING_SPACE_SIZE[1], STAND_PLATE_HEIGHT)
 
     # # on the top of the stand plate
-    plate_env_export = scale(plate_env.part, 0.01)  # convert to mm.
+    plate_env_export = scale(plate_env.part, 1.0)  # already in mm
 
     if export_geom_gltf:
         assert base_dir is not None, (
@@ -124,7 +124,7 @@ def genesis_setup(scene: gs.Scene, base_dir: Path):
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(
             file=str(export_path(base_dir)),
-            scale=1,  # Use 1.0 scale since we're working in cm
+            scale=1,
             pos=(0, 0, 0.1),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
             fixed=True,
@@ -137,7 +137,7 @@ def genesis_setup(scene: gs.Scene, base_dir: Path):
     franka = scene.add_entity(
         gs.morphs.MJCF(
             file="xml/franka_emika_panda/panda.xml",
-            pos=(0.3, STAND_PLATE_DEPTH / 100 / 2, 0.20),
+            pos=(0.3, STAND_PLATE_DEPTH / 1000 / 2, 0.20),
         ),
     )
 
@@ -147,7 +147,7 @@ def genesis_setup(scene: gs.Scene, base_dir: Path):
         pos=(1, 2.5, 3.5),  # Position camera further away and above
         lookat=(
             0.64 / 2,
-            0.64 / 2 + STAND_PLATE_DEPTH / 100,
+            0.64 / 2 + STAND_PLATE_DEPTH / 1000,
             0.3,
         ),  # Look at the center of the working pos
         res=(256, 256),  # (1024,1024) for debug
@@ -157,7 +157,7 @@ def genesis_setup(scene: gs.Scene, base_dir: Path):
         pos=(-2.5, 1.5, 1.5),  # second camera from the other side
         lookat=(
             0.64 / 2,
-            0.64 / 2 + STAND_PLATE_DEPTH / 100,
+            0.64 / 2 + STAND_PLATE_DEPTH / 1000,
             0.3,
         ),  # Look at the center of the working pos
         res=(256, 256),  # (1024,1024) for debug
