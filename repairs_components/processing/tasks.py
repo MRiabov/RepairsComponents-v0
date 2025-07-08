@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from build123d import Compound, Location, Part, Pos
+from build123d import CenterOf, Compound, Location, Part, Pos, Axis
 import numpy as np
+from dataclasses import dataclass
 from enum import IntEnum
 
 
@@ -16,12 +17,15 @@ class Task(ABC):
         """Perturb the desired state of the task. Only move in x and y directions, the minimum of Z axis should be kept at 0."""
         # Get the bounding box of the original compound
         bbox = compound.bounding_box()
-        aabb_min = np.array(bbox.min.to_tuple())
-        aabb_max = np.array(bbox.max.to_tuple())
+        aabb_min = np.array(tuple(bbox.min))
+        aabb_max = np.array(tuple(bbox.max))
         size = aabb_max - aabb_min
+        assert np.all(size < np.array(env_size)), (
+            f"Compound is too large for the environment. Size: {size}"
+        )
 
         # Calculate the required margin to keep 5 units from each side
-        margin = 5
+        margin = 50
 
         # Calculate min and max positions in XY plane
         min_xy = np.array([margin, margin])
@@ -30,9 +34,6 @@ class Task(ABC):
         )
 
         # Ensure the part fits in the environment
-        assert not np.any(max_xy < min_xy), (
-            f"Compound is too large for the environment. Size: {size}"
-        )
 
         # Generate random position within the valid range
         target_xy = np.random.uniform(min_xy, max_xy)
@@ -53,7 +54,7 @@ class Task(ABC):
         # print(f"Moving by offset: {offset}")
 
         # Move the entire compound as a single unit
-        result = compound.moved(Location(offset))
+        result = compound.located(Location(offset))
 
         # # Debug: Check the resulting position
         # result_bbox = result.bounding_box()
@@ -61,8 +62,8 @@ class Task(ABC):
 
         # Verify the result meets our requirements
         result_bbox = result.bounding_box()
-        result_min = np.array(result_bbox.min.to_tuple())
-        result_max = np.array(result_bbox.max.to_tuple())
+        result_min = np.array(tuple(result_bbox.min))
+        result_max = np.array(tuple(result_bbox.max))
 
         # Check Z-min is at 0 (within floating point tolerance)
         assert np.allclose(result_min[2], 0, atol=1e-6), (
@@ -71,6 +72,12 @@ class Task(ABC):
         # Check dimensions are preserved (within floating point tolerance)
         assert np.allclose(result_max - result_min, size, atol=1e-6), (
             f"Dimensions should be preserved as {size}, got {result_max - result_min}"
+        )
+        assert np.all(result_min >= 0), (
+            f"All dimensions should be non-negative, got {result_min}"
+        )
+        assert np.all(result_max <= env_size), (
+            f"All dimensions should be less than env_size, got {result_max}"
         )
 
         return result
@@ -96,7 +103,7 @@ class AssembleTask(Task):
     It also ensures stable orientation of prolonged parts, e.g. in a table, legs would lie flat on the ground."""
 
     def perturb_desired_state(
-        self, compound: Compound, env_size=(64, 64, 64)
+        self, compound: Compound, env_size=(640, 640, 640)
     ) -> Compound:
         return super().perturb_desired_state(compound, env_size)
 
@@ -126,14 +133,21 @@ class AssembleTask(Task):
                 return (1, 0, 0), np.pi / 2, up_axis  # Rotate 90° around X to make Y up
         return (0, 0, 1), 0.0, 2  # Default to Z-up, no rotation needed
 
-    def _get_random_position(self, part_info, used_rectangles, bin_width, bin_height):
+    def _get_random_position(
+        self,
+        part_info,
+        used_rectangles,
+        bin_max_width,
+        bin_max_height,
+        safety_scale=0.9,
+    ):
         """Find a random non-overlapping position for a part within the bin.
 
         Args:
             part_info: Dictionary containing part dimensions and other info
             used_rectangles: List of already placed rectangles (x1, y1, x2, y2)
-            bin_width: Width of the packing area
-            bin_height: Height of the packing area
+            bin_max_width: Width of the packing area
+            bin_max_height: Height of the packing area
 
         Returns:
             tuple: (x, y) position if found, None if no valid position found
@@ -141,10 +155,17 @@ class AssembleTask(Task):
         w, h = part_info["proj_width"], part_info["proj_height"]
         max_attempts = 100
 
+        # max width by safety scale
+        bin_max_width *= safety_scale
+        bin_max_height *= safety_scale
+        # min width - 0 to 1-safety scale
+        bin_min_width = bin_max_width * (1 - safety_scale)
+        bin_min_height = bin_max_height * (1 - safety_scale)
+
         for _ in range(max_attempts):
             # Try random positions
-            x = np.random.uniform(0, bin_width - w)
-            y = np.random.uniform(0, bin_height - h)
+            x = np.random.uniform(bin_min_width + w / 2, bin_max_width - w / 2)
+            y = np.random.uniform(bin_min_height + h / 2, bin_max_height - h / 2)
 
             new_rect = (x, y, x + w, y + h)
 
@@ -203,7 +224,7 @@ class AssembleTask(Task):
         return placed
 
     def perturb_initial_state(
-        self, compound: Compound, env_size=(64, 64, 64)
+        self, compound: Compound, env_size=(640, 640, 640)
     ) -> Compound:
         """Randomly disassemble the compound into individual parts with non-overlapping positions.
 
@@ -220,23 +241,43 @@ class AssembleTask(Task):
         Returns:
             RepairsSimState: The modified simulation state with disassembled parts
         """
-        # parts = compound.solids()
-        parts = list(
-            filter(lambda x: isinstance(x, Part), compound.descendants)
-        )  # should filter only for solids, connectors, buttons, etc later.
+
+        # NOTE: 100% definitely, this was from 0 to 640. I guess I shifted it to -320 to 320 somewhere later.
+        # and it's ok to have it there.
+        # for now: revert everything back to (0, 0, 0)-(640, 640, 640)
+        # however I suspect this does not account for rotations. So when calculating for part position, it does not account for *new* part rotation
+        # additionally, this does not respect fixed parts. Those should never be touched.
+
+        env_size = np.array(env_size)
+        # Safety margin: keep outer 10 % of XY space empty
+        safety_scale = 0.9
+        safe_env_size = env_size * safety_scale
+        safe_env_min = np.array([-safe_env_size[0] / 2, -safe_env_size[1] / 2, 0])
+        safe_env_max = np.array(
+            [safe_env_size[0] / 2, safe_env_size[1] / 2, env_size[2]]
+        )
+        components = compound.children
+        # note: components because both compounds and children.
         part_info = []
 
-        # remove all joints between all parts
-        for part in parts:
-            for joint in part.joints.values():
+        preprocessed_components = []
+
+        # remove all joints between all parts and recenter (preprocess)
+        for component in components:
+            for joint in component.joints.values():
                 joint.connected_to = None
+            # recenter all objects at their AABB center:
+            # get current center
+            center = np.array(tuple(component.center(CenterOf.BOUNDING_BOX)))
+            component.moved(Pos(-center))  # move by negative center
+            preprocessed_components.append(component)
 
         # Calculate AABBs and determine stable orientations for each part
-        for part in parts:
-            bbox = part.bounding_box()
-            aabb_min = np.array(bbox.min.to_tuple())
-            aabb_max = np.array(bbox.max.to_tuple())
-            aabb_size = aabb_max - aabb_min
+        for component in preprocessed_components:
+            bbox = component.bounding_box()
+            aabb_min = np.array(tuple(bbox.min))
+            aabb_max = np.array(tuple(bbox.max))
+            aabb_size = np.array(tuple(bbox.size))
 
             # Get stable orientation (longest dimension up if significantly elongated)
             (rotation_axis, angle, up_axis) = self._get_stable_orientation(aabb_size)
@@ -251,7 +292,7 @@ class AssembleTask(Task):
 
             part_info.append(
                 {
-                    "part": part,
+                    "part": component,
                     "aabb_min": aabb_min,
                     "aabb_size": aabb_size,
                     "rotation_axis": rotation_axis,
@@ -262,17 +303,12 @@ class AssembleTask(Task):
                 }
             )
 
-        # Use environment size for packing area with some margin
-        bin_width, bin_height = (
-            env_size[0] * 0.8,
-            env_size[1] * 0.8,
-        )  # 80% of environment size
-
         # Pack parts with random positions
-        packed = self._pack_2d(part_info, bin_width, bin_height)
+        packed = self._pack_2d(part_info, safe_env_size[0], safe_env_size[1])
 
         assert packed, ValueError("Failed to find valid positions for all parts")
 
+        new_parts = []
         # Position parts in the environment
         for x, y, info, w, h in packed:
             aabb_min = info["aabb_min"]
@@ -280,55 +316,45 @@ class AssembleTask(Task):
             rotation_axis = info["rotation_axis"]
             rotation_angle = info["rotation_angle"]
             up_axis = info["up_axis"]
-
-            # Calculate center position in the bin with some random jitter
-            jitter_x = np.random.uniform(-50, 50)  # ±50mm jitter
-            jitter_y = np.random.uniform(-50, 50)
-
-            # Calculate position ensuring parts stay within environment bounds
-            half_env_x = env_size[0] / 2
-            half_env_y = env_size[1] / 2
-
+            component = info["part"]
+            
             # Calculate centered position with jitter, ensuring parts stay within bounds
-            pos_x = max(
-                -half_env_x + w / 2,
-                min(half_env_x - w / 2, x + w / 2 - bin_width / 2 + jitter_x),
-            )
-            pos_y = max(
-                -half_env_y + h / 2,
-                min(half_env_y - h / 2, y + h / 2 - bin_height / 2 + jitter_y),
-            )
-
-            # Position on ground with proper height based on orientation
-            # The height should be half the size in the up direction since we're centering
-            if up_axis == 0:  # X is up
-                height = aabb_size[0] / 2
-                pos = Pos(pos_x, pos_y, height)
-            elif up_axis == 1:  # Y is up
-                height = aabb_size[1] / 2
-                pos = Pos(pos_x, pos_y, height)
-            else:  # Z is up (default)
-                height = aabb_size[2] / 2
-                pos = Pos(pos_x, pos_y, height)
-
+            pos_x = x
+            pos_y = y
             # Apply transformation to part
             if abs(rotation_angle) > 1e-6:  # Only rotate if angle is not zero
-                from build123d import Axis
-
                 # Create an axis of rotation at the part's center
                 rotation_axis_obj = Axis(
-                    origin=info["part"].center(), direction=rotation_axis
+                    origin=component.center(), direction=rotation_axis
                 )
-                info["part"] = info["part"].rotate(
+                component = component.rotate(
                     rotation_axis_obj, rotation_angle * 180 / np.pi
                 )  # Convert to degrees
-            info["part"] = info["part"].move(pos)
+            pos = Pos(
+                pos_x, pos_y, component.bounding_box().size.Z / 2
+            )  # this is assuming the part is centered at the origin, which it should be. although not necessarily...
+            new_parts.append(component.located(pos))
 
         # Rebuild compound with new part positions
-        # Note: You'll need to implement this part based on your compound structure
-        # For example: compound = Compound(children=[info['part'] for info in part_info])
-        new_compound = Compound(children=[info["part"] for info in part_info])
+        new_compound = Compound(children=new_parts)
+        assert np.isclose(new_compound.bounding_box().min.Z, 0), (
+            f"New compound has non-zero minimum Z: {new_compound.bounding_box().min.Z}"
+        )
+        assert (
+            np.array(new_compound.bounding_box().min.to_tuple()) >= safe_env_min
+        ).all(), (
+            f"New compound has minimum below safe environment minimum. AABB: {new_compound.bounding_box()}"
+        )
+        assert (
+            np.array(new_compound.bounding_box().max.to_tuple()) <= env_size
+        ).all(), (
+            f"New compound has maximum above environment maximum. AABB: {new_compound.bounding_box()}"
+        )
+
         return new_compound
+
+
+# NOTE!: to apply absolute position to a part, use located. to apply relative position, use moved.
 
 
 # Inverse of AssembleTask: disassemble for desired state, assemble for initial state
@@ -336,13 +362,13 @@ class DisassembleTask(Task):
     """Inverse of AssembleTask: initial state is the assembled desired state, and the desired state is disassembled desired state."""
 
     def perturb_initial_state(
-        self, compound: Compound, env_size=(64, 64, 64)
+        self, compound: Compound, env_size=(640, 640, 640)
     ) -> Compound:
         # Use AssembleTask's perturb_desired_state to create the assembled initial state
         return AssembleTask().perturb_desired_state(compound, env_size)
 
     def perturb_desired_state(
-        self, compound: Compound, env_size=(64, 64, 64)
+        self, compound: Compound, env_size=(640, 640, 640)
     ) -> Compound:
         # Use AssembleTask's perturb_initial_state to create the disassembled desired state
         return AssembleTask().perturb_initial_state(compound, env_size)
@@ -353,12 +379,12 @@ class ReplaceTask(Task):
 
     # NOTE: this code was left unfinished.
     def perturb_initial_state(
-        self, compound: Compound, env_size=(64, 64, 64)
+        self, compound: Compound, env_size=(640, 640, 640)
     ) -> Compound:
         compound = super().perturb_desired_state(compound, env_size)
-        parts = [part for part in compound.descendants if isinstance(part, Part)]
+        parts = [part for part in compound.children if isinstance(part, Part)]
         random_part: Part = np.random.choice(parts)
-        new_part = random_part.moved(
+        new_part = random_part.located(
             Location((10, 10, 10))
         )  # TODO: any position on the ground that is not occupied by another part.
         random_part.label = "part_to_replace"
@@ -366,7 +392,7 @@ class ReplaceTask(Task):
         return compound
 
     def perturb_desired_state(
-        self, compound: Compound, env_size=(64, 64, 64)
+        self, compound: Compound, env_size=(640, 640, 640)
     ) -> Compound:
         # Use AssembleTask's perturb_desired_state to create the disassembled desired state
         return AssembleTask().perturb_desired_state(
@@ -378,16 +404,16 @@ class InsertTask(Task):
     """A task type that marks a single part as "to be inserted", and detaches it from the compound."""
 
     def perturb_initial_state(
-        self, compound: Compound, env_size=(64, 64, 64)
+        self, compound: Compound, env_size=(640, 640, 640)
     ) -> Compound:
         compound = super().perturb_desired_state(compound, env_size)
-        parts = [part for part in compound.descendants if isinstance(part, Part)]
+        parts = [part for part in compound.children if isinstance(part, Part)]
         random_part: Part = np.random.choice(parts)
         random_part.joints = {}  # I hope this detaches it. to be tested.
         return compound
 
     def perturb_desired_state(
-        self, compound: Compound, env_size=(64, 64, 64)
+        self, compound: Compound, env_size=(640, 640, 640)
     ) -> Compound:
         # Use AssembleTask's perturb_desired_state to create the disassembled desired state
         return AssembleTask().perturb_desired_state(
