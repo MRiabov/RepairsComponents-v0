@@ -12,26 +12,26 @@ class TenHoles(EnvSetup):
 
     def desired_state_geom(self) -> Compound:
         with BuildPart() as base_box:
-            Box(20, 20, 20)
+            Box(200, 200, 200)
             with Locations(base_box.faces().filter_by(Axis.Z).sort_by(Axis.Z).last):
-                grid_locs = GridLocations(1.5, 0, 10, 1)
+                grid_locs = GridLocations(15, 0, 10, 1)
                 with grid_locs:
                     _hole, _locs, joint1 = fastener_hole(radius=0.3, depth=1.6, id=0)
 
         fastener_, collision_detection_position = Fastener(
-            False, initial_body_a="base_box@solid"
+            False, initial_body_a="base_box@fixed_solid"
         ).bd_geometry()
         fasteners = []
         for i, loc in enumerate(grid_locs.locations):
             fastener = fastener_.moved(loc)
             fastener.joints["fastener_joint_a"].connect_to(joint1)
             fasteners.append(fastener)
-        base_box.part.label = "base_box@solid"
+        base_box.part.label = "base_box@fixed_solid"
 
         Compound(children=[base_box.part, *fasteners]).show_topology()
 
         return Compound(children=[base_box.part, *fasteners]).moved(
-            Location((10, 10, 10))
+            Location((320, 320, 320))
         )
 
 

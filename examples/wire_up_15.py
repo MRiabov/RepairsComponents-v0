@@ -45,10 +45,12 @@ class WireUp(EnvSetup):
 
         # FIXME: no way to define that a connector would be constrained to other body.
 
+    @property
     def linked_groups(self) -> dict[str, tuple[list[str]]]:
         all_female_connectors = [f"europlug_{i}_female@connector" for i in range(4)]
-        return {"mech_linked": ([*all_female_connectors, "elec_panel@solid"],)}
+        return {"mech_linked": ([*all_female_connectors, "elec_panel@fixed_solid"],)}
 
 
 if __name__ == "__main__":
+    WireUp().validate()
     show(WireUp().desired_state_geom())

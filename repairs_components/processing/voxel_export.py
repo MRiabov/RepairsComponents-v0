@@ -43,7 +43,8 @@ LABEL_TO_PART_TYPE = {v: k for k, v in PART_TYPE_LABEL.items()}
 
 
 def extract_part_type(label: str) -> str:
-    assert "@" in label, 'Expected "@" in the name.'
+    assert label is not None, "Label is None."
+    assert "@" in label, f"Expected '@' in the name. Got: {label}"
     pt = label.split("@")[-1].lower()
     if pt in PART_TYPE_COLORS:
         return pt

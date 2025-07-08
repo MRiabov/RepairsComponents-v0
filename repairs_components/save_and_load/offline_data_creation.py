@@ -23,6 +23,7 @@ def create_data(
     assert len(scene_idx) == len(scene_setups), (
         "Len of scene_idx and scene_setups must match."
     )
+    assert all(scene.validate() for scene in scene_setups), "All scenes must be valid."
     if isinstance(num_configs_to_generate_per_scene, int):
         num_configs_to_generate_per_scene = torch.full(
             (len(scene_setups),), num_configs_to_generate_per_scene, dtype=torch.int16

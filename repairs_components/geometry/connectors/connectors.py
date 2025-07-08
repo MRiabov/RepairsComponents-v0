@@ -141,7 +141,7 @@ class Connector(ElectricalComponent):
         "Returns: A geometrical part, a connector markup part, and a numpy array of connector collision detection positions"
         pass
 
-    def color_and_label(self, geom: Compound, male: bool = True):
+    def color_and_label(self, geom: Compound, male: bool):
         # note: removing connector_def.
         assert len(geom.children) == 2, "Expected a two children for the geometry."
         assert geom.children[1].volume < geom.children[0].volume, (
@@ -154,10 +154,13 @@ class Connector(ElectricalComponent):
         geom.children[1].color = Color(1, 1, 0, 0.5)
 
         # to indicate typing to the model
-        geom.label = self.name + "@connector"  # should be @connector?
         male_or_female = "male" if male else "female"
+        geom.children[
+            0
+        ].label = f"{self.name}_{male_or_female}@connector"  # should be @connector?
         geom.children[1].label = f"{self.name}_{male_or_female}@connector_def"
         # e.g. europlug_{i}_male@connector_def
+        geom.label = f"{self.name}_compound"
 
         return geom
 

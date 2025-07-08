@@ -45,7 +45,7 @@ class Europlug(Connector):
 
         plug_part = Compound(children=[plug_part.part, connector_center.part])
 
-        return self.color_and_label(plug_part.moved(Location(moved_to)))
+        return self.color_and_label(plug_part.moved(Location(moved_to)), male=True)
 
     def bd_geometry_female(self, moved_to: bd.VectorLike):
         """
@@ -86,7 +86,7 @@ class Europlug(Connector):
             joints={"native": base_joint},
         )
 
-        return self.color_and_label(socket_part.moved(Location(moved_to)))
+        return self.color_and_label(socket_part.moved(Location(moved_to)), male=False)
 
 
 if __name__ == "__main__":
