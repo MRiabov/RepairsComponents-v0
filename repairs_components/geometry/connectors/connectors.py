@@ -79,7 +79,7 @@ class Connector(ElectricalComponent):
         base_dir: Path,
         male: bool,
         connector_position: np.ndarray | None = None,
-        density: float = 1000,
+        density: float = 1 / 1000,  # g/mm3
     ):
         """This defines a generic mjcf for a connector with a connector position."""
         if connector_position is None:
@@ -88,9 +88,9 @@ class Connector(ElectricalComponent):
                 if male
                 else self.connector_pos_relative_to_center_female
             )
-        print(
-            "warning: exporting electronics as mjcf is deprecated; replace with native genesis controls."
-        )
+        # print(
+        #     "warning: exporting electronics as mjcf is deprecated; replace with native genesis controls."
+        # ) # if Genesis devs ever add full modelling API it it would be preferable.
         name = self.get_name(self.in_sim_id, male)
         mesh_file_path = str(
             self.save_path_from_name(base_dir, name, "obj")
@@ -98,13 +98,7 @@ class Connector(ElectricalComponent):
         assert Path(mesh_file_path).exists(), (
             f"Mesh file {mesh_file_path} does not exist. Expected obj file."
         )
-        #load mesh, compute mass and inertia.
-        mesh = trimesh.load(mesh_file_path)
-        mesh.density = density
-        mass_properties = mesh.mass_properties
-        mesh_inertia = mass_properties.inertia
-        
-        
+        # NOTE: scale is done in export_obj because mjcf complains about "mesh volume is too small: europlug_0_female . Try setting inertia to shell" otherwise.
         return f"""<mujoco>
         <asset>
             <mesh name="{name}" file="{mesh_file_path}"/>
@@ -112,7 +106,7 @@ class Connector(ElectricalComponent):
         
         <worldbody>
             <body name="{name}">
-                <geom name="{name}_geom" type="mesh" mesh="{name}" density="{mesh_mass}"/>
+                <geom name="{name}_geom" type="mesh" mesh="{name}" density="{density}"/>
                 
                 <body name="connector_point" pos="{connector_position[0]} {connector_position[1]} {connector_position[2]}">
                     <!-- No inertial, geom, or visual tags = fixed frame -->
@@ -263,8 +257,8 @@ class Connector(ElectricalComponent):
         return (
             base_dir
             / "shared"
-            / "connectors"
-            / Path(f"{connector_type}_{in_sim_id}_{male_or_female}.{suffix}")
+            / "connectors"  # note: not use in_sim_id here - it's shared.
+            / Path(f"{connector_type}_{male_or_female}.{suffix}")
         )
 
     def get_path(self, base_dir: Path, male: bool) -> Path:

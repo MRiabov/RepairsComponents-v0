@@ -61,13 +61,13 @@ def step_repairs(
     if (
         False
     ):  # note: currently stuck because of cuda error. Genesis devs could resolve it.
-        threshold_pick_up_tool = 0.75
-        threshold_release_tool = 0.25
+        threshold_pick_up_tool = 7.5
+        threshold_release_tool = 2.5
 
         # pick up tool logic
         pick_up_tool_desired = (
             actions[:, 9] > threshold_pick_up_tool
-        )  # 0.75 is a threshold for picking up tool
+        )  # 7.5mm is a threshold for picking up tool
         release_tool_desired = actions[:, 9] < threshold_release_tool
         gripper_mask = torch.tensor(
             [

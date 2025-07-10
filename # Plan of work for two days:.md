@@ -5,8 +5,8 @@
 3. Collision detection of electronics during simulation is untested. does it work? (WIP)
 4. Collision detection of fasteners during simulation is untested. does it work? 
 5. Diff code may be unupdated. (DONE, untested.)  
-- (next task)Additionally, they need hints (untested.)
-6. Electronics graph collection can not be disabled although it should be.
+- (next task) Additionally, they need hints (untested.)
+6. Electronics graph collection can not be disabled although it should be. 
 7. Only one connector type implemented.
 8. Buttons, LEDs, and switches are not implemented.
 9. Fasteners may not constrain two parts properly. (this is blocked by Genesis bug.)
@@ -14,7 +14,7 @@
 11. Europlug connector_pos_relative_to_center_male and female are not implemented.
 12. connector_pos_relative_to_center_male and female are not used properly. Links are most likely gotten by the center of the part (although I think I fixed it?). Possibly, may not work at all (untested).
 13. Fasteners and electronics rely on MJCF and MJCF does not support links and glb mesh imports. WON'T DO: better to use MJCF and just export to obj. And calculate fixed frames manually.
-14. Simulating my small objects on meter scale is not stable (as indicated by Genesis). Need to change settings of Genesis to milimeter including exports.
+14. Simulating my small objects on meter scale is not stable (as indicated by Genesis). Need to change settings of Genesis to milimeter including exports. (WIP)
 
 
 ## More detailed:
