@@ -202,7 +202,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
 
 
 def starting_state_geom(
-    env_setup: EnvSetup, task: Task, env_size=(64, 64, 64)
+    env_setup: EnvSetup, task: Task, env_size=(640, 640, 640)
 ) -> Compound:
     """
     Perturb the starting state based on the starting state geom.

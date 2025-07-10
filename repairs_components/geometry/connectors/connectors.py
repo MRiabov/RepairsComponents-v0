@@ -160,74 +160,53 @@ class Connector(ElectricalComponent):
         ].label = f"{self.name}_{male_or_female}@connector"  # should be @connector?
         geom.children[1].label = f"{self.name}_{male_or_female}@connector_def"
         # e.g. europlug_{i}_male@connector_def
-        geom.label = f"{self.name}_compound"
+        geom.label = f"{self.name}_{male_or_female}_compound"
 
         return geom
 
 
 def check_connections(
-    male_connectors: Mapping[str, torch.Tensor | np.ndarray],
-    female_connectors: Mapping[str, torch.Tensor | np.ndarray],
+    male_connectors: Mapping[str, torch.Tensor],
+    female_connectors: Mapping[str, torch.Tensor],
     connection_threshold: float = 2.5,
-) -> torch.Tensor:
+) -> list[list[tuple[str, str]]]:
     """
-    Identify feasible male–female connector pairings based on Euclidean proximity.
+    Find all male-female connector pairs that are spatially close.
 
-    Let X_m ∈ ℝ^{M×3} and X_f ∈ ℝ^{F×3} be the arrays of 3D coordinates for M
-    male and F female connector endpoints, respectively. We define the pairwise
-    distance matrix D ∈ ℝ^{M×F} by
-
-        D_{i,j} = || X_m[i, :] − X_f[j, :] ||_2
-
-    A binary adjacency mask A ∈ {0,1}^{M×F} is then obtained by
-
-        A_{i,j} = 1   if   D_{i,j} < τ
-                = 0   otherwise
-
-    where τ is the scalar `connection_threshold`. This function returns the list
-    of all (key_m, key_f) pairs for which A_{i,j} = 1, where key_m and key_f are
-    the dictionary keys from male_connectors and female_connectors respectively.
+    Computes pairwise distances between batched 3D positions of male and female connectors.
+    A connection is valid if the distance is less than `connection_threshold`.
 
     Parameters
     ----------
-    male_connectors : Mapping[str, torch.Tensor | np.ndarray]
-        Dictionary mapping male connector IDs to their 3D coordinates.
-    female_connectors : Mapping[str, torch.Tensor | np.ndarray]
-        Dictionary mapping female connector IDs to their 3D coordinates.
+    male_connectors : Mapping[str, torch.Tensor]
+        Dict mapping male connector names to tensors of shape [B, 3].
+    female_connectors : Mapping[str, torch.Tensor]
+        Dict mapping female connector names to tensors of shape [B, 3].
     connection_threshold : float, default=2.5
-        Maximum allowable Euclidean distance for a valid connection.
+        Max distance allowed for a valid connection.
 
     Returns
     -------
-    connections : torch.Tensor
-        Tensor of shape [num_pairs, 3] with (batch, male_idx, female_idx)
+    connections : list[list[tuple[str, str]]]
+        List of length B (batch size). Each element is a list of (male_name, female_name)
+        pairs that are valid connections in that batch.
     """
     male_keys = list(male_connectors.keys())
     female_keys = list(female_connectors.keys())
-    if not male_keys or not female_keys:
-        # determine batch size from first tensor
-        first = next(iter(male_connectors.values()))
-        batch = first.shape[0] if hasattr(first, "shape") else 1
-        return torch.empty((batch, 0, 3), dtype=torch.long)
-    # GPU-accelerated torch computation: compute batch distances
-    # detect device
-    first_val = next(iter(male_connectors.values()))
-    device = (
-        first_val.device if isinstance(first_val, torch.Tensor) else torch.device("cpu")
-    )
 
-    def to_tensor(x):
-        return x if isinstance(x, torch.Tensor) else torch.tensor(x, device=device)
-
-    male_vals = torch.stack([to_tensor(male_connectors[k]) for k in male_keys], dim=1)
+    male_vals = torch.stack(list(male_connectors.values()), dim=1)  # [B, M, 3]
     female_vals = torch.stack(
-        [to_tensor(female_connectors[k]) for k in female_keys], dim=1
-    )
-    # male_vals: [B, M, 3], female_vals: [B, F, 3]
-    D = torch.linalg.norm(male_vals[:, :, None, :] - female_vals[:, None, :, :], dim=-1)
+        list(female_connectors.values()), dim=1
+    )  # [B, F, 3]
+
+    D = torch.cdist(male_vals, female_vals, p=2)  # [B, M, F]
     mask = D < connection_threshold
-    # return indices tensor of shape [num_pairs, 3] with (batch, male_idx, female_idx)
-    return mask.nonzero(as_tuple=False)
+    indices = mask.nonzero(as_tuple=False)  # [N, 3] with (batch, m_idx, f_idx)
+
+    result: list[list[tuple[str, str]]] = [[] for _ in range(male_vals.shape[0])]
+    for b, m_idx, f_idx in indices.tolist():
+        result[b].append((male_keys[m_idx], female_keys[f_idx]))
+    return result
 
 
 class ConnectorsEnum(IntEnum):

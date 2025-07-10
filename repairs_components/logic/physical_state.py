@@ -99,6 +99,7 @@ class PhysicalState:
             self.graph.quat = torch.empty(
                 (0, 4), dtype=torch.float32, device=self.device
             )
+            self.graph.fixed = torch.empty((0,), dtype=torch.bool, device=self.device)
             self.graph.count_fasteners_held = torch.empty(
                 (0,), dtype=torch.int8, device=self.device
             )  # NOTE: 0 info about fasteners?
@@ -203,7 +204,9 @@ class PhysicalState:
         # print("debug: graph global feat shape", graph.global_feat.shape)
         return graph
 
-    def register_body(self, name: str, position: tuple, rotation: tuple):
+    def register_body(
+        self, name: str, position: tuple, rotation: tuple, fixed: bool = False
+    ):
         assert name not in self.body_indices, f"Body {name} already registered"
         # assert position.shape == (3,) and rotation.shape == (4,) # was a tensor.
         assert len(position) == 3 and len(rotation) == 3, (
@@ -241,6 +244,15 @@ class PhysicalState:
         )
         # set num_nodes manually because otherwise there is no way for PyG to know the number of nodes.
         self.graph.num_nodes = len(self.body_indices)
+        self.graph.fixed = torch.cat(
+            [
+                self.graph.fixed,
+                torch.tensor([fixed], dtype=torch.bool, device=self.device).unsqueeze(
+                    0
+                ),
+            ],
+            dim=0,
+        )  # maybe will put this into hint instead as -1s or something.
 
     def register_fastener(self, fastener: Fastener):
         """A fastener method to register fasteners and add all necessary components.

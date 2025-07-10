@@ -8,7 +8,7 @@ uv venv
 source .venv/bin/activate
 pip install uv
 uv pip install -r /workspace/RepairsComponents-v0/combined_req.txt -U # faster install of torchsparse
-uv pip install build123d==0.9.1 torch==2.5.1 torchvision setuptools 
+uv pip install torch==2.5.1 torchvision setuptools git+https://github.com/gumyr/build123d
 uv pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
 
 

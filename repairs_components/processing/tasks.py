@@ -202,7 +202,7 @@ class AssembleTask(Task):
             bin_height: Height of the packing area
 
         Returns:
-            list: List of tuples (x, y, part_info, w, h) for placed parts
+            list: List of tuples (x, y, part_info) for placed parts
         """
         placed = []
         used_rectangles = []
@@ -218,7 +218,7 @@ class AssembleTask(Task):
             if pos is not None:
                 x, y = pos
                 w, h = part_info["proj_width"], part_info["proj_height"]
-                placed.append((x, y, part_info, w, h))
+                placed.append((x, y, part_info))
                 used_rectangles.append((x, y, x + w, y + h))
 
         return placed
@@ -274,21 +274,29 @@ class AssembleTask(Task):
 
         # Calculate AABBs and determine stable orientations for each part
         for component in preprocessed_components:
-            bbox = component.bounding_box()
-            aabb_min = np.array(tuple(bbox.min))
-            aabb_max = np.array(tuple(bbox.max))
-            aabb_size = np.array(tuple(bbox.size))
-
             # Get stable orientation (longest dimension up if significantly elongated)
-            (rotation_axis, angle, up_axis) = self._get_stable_orientation(aabb_size)
+            (rotation_axis, angle, up_axis) = self._get_stable_orientation(
+                np.array(tuple(component.bounding_box().size))
+            )
 
-            # Project AABB onto ground plane based on up axis
-            if up_axis == 0:  # X is up
-                proj_width, proj_height = aabb_size[1], aabb_size[2]
-            elif up_axis == 1:  # Y is up
-                proj_width, proj_height = aabb_size[0], aabb_size[2]
-            else:  # Z is up (default)
-                proj_width, proj_height = aabb_size[0], aabb_size[1]
+            # Apply transformation to part
+            if abs(angle) > 1e-6:  # Only rotate if angle is not zero
+                # Create an axis of rotation at the part's center
+                rotation_axis_obj = Axis(
+                    origin=component.center(), direction=rotation_axis
+                )
+                component = component.rotate(
+                    rotation_axis_obj, angle * 180 / np.pi
+                )  # Convert to degrees
+
+            # FIXME: it aligns all parts in X axis at the moment.
+
+            # put updated projection dimensions into part_info
+            aabb = component.bounding_box()
+            proj_width = aabb.size.X
+            proj_height = aabb.size.Y
+            aabb_min = np.array(tuple(aabb.min))
+            aabb_size = np.array(tuple(aabb.max))
 
             part_info.append(
                 {
@@ -296,7 +304,6 @@ class AssembleTask(Task):
                     "aabb_min": aabb_min,
                     "aabb_size": aabb_size,
                     "rotation_axis": rotation_axis,
-                    "rotation_angle": angle,
                     "up_axis": up_axis,
                     "proj_width": proj_width,
                     "proj_height": proj_height,
@@ -306,33 +313,17 @@ class AssembleTask(Task):
         # Pack parts with random positions
         packed = self._pack_2d(part_info, safe_env_size[0], safe_env_size[1])
 
+        # FIXME: pack2d makes overlapping shapes (note: this is written in plan for 2 days.md. See a list of bugs there.)
+
         assert packed, ValueError("Failed to find valid positions for all parts")
 
         new_parts = []
         # Position parts in the environment
-        for x, y, info, w, h in packed:
-            aabb_min = info["aabb_min"]
-            aabb_size = info["aabb_size"]
-            rotation_axis = info["rotation_axis"]
-            rotation_angle = info["rotation_angle"]
-            up_axis = info["up_axis"]
+        for x, y, info in packed:
             component = info["part"]
-            
-            # Calculate centered position with jitter, ensuring parts stay within bounds
-            pos_x = x
-            pos_y = y
-            # Apply transformation to part
-            if abs(rotation_angle) > 1e-6:  # Only rotate if angle is not zero
-                # Create an axis of rotation at the part's center
-                rotation_axis_obj = Axis(
-                    origin=component.center(), direction=rotation_axis
-                )
-                component = component.rotate(
-                    rotation_axis_obj, rotation_angle * 180 / np.pi
-                )  # Convert to degrees
-            pos = Pos(
-                pos_x, pos_y, component.bounding_box().size.Z / 2
-            )  # this is assuming the part is centered at the origin, which it should be. although not necessarily...
+
+            # this is assuming the part is centered at the origin, which it should be. although not necessarily...
+            pos = Pos(x, y, component.bounding_box().size.Z / 2)
             new_parts.append(component.located(pos))
 
         # Rebuild compound with new part positions

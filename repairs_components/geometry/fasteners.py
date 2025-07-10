@@ -127,8 +127,8 @@ class Fastener(Component):
         fastener.label = self.name
 
         # set collision detection position at the tip of the fastener
-        fastener_collision_detection_position = (
-            shaft.faces().sort_by(Axis.Z).last.center().to_tuple()
+        fastener_collision_detection_position = tuple(
+            shaft.faces().sort_by(Axis.Z).last.center()
         )
 
         return fastener, fastener_collision_detection_position

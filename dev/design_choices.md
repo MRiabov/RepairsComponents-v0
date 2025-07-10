@@ -55,3 +55,8 @@ Consequently, the desired position would have the hint as (0,0,0) because it's a
 
 %% so the way connector def is used is XYZ and quat hint... but why bother?
 %% but definitely for the *"electronics connectors encoding"* - connectors are encoded as solids.
+
+%% NOTE: put this into tasks. ("add hint encoding to mechanical graph.")
+
+## Modelling:
+Since their export from desired_state_geom, all models should be centered at the origin. It makes downstream work easier.
