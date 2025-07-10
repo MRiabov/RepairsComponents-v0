@@ -1,5 +1,6 @@
 from abc import abstractmethod
 from enum import IntEnum
+from pathlib import Path
 from repairs_components.geometry.base import Component
 import numpy as np
 
@@ -22,6 +23,12 @@ class ElectricalComponent(Component):
     @abstractmethod
     def component_type(self) -> int:
         "Type from ElectricalComponentsEnum using IntEnum.value"
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def get_path(self) -> Path:
+        "Get ElectricalComponent's path in `shared` folder."
         raise NotImplementedError
 
 

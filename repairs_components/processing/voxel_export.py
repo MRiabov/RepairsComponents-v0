@@ -15,12 +15,14 @@ from torch_scatter import scatter_min
 # Define part type to color mapping (for priority extraction)
 PART_TYPE_COLORS = {
     "part_to_replace": [1, 0.5, 0, 0.8],  # orange
-    "connector": [1, 1, 0, 0.8],  # yellow
+    "connector_def": [1, 1, 0, 0.8],  # yellow
+    "connector": [0.9, 0.9, 0, 0.8],  # yellow, but a little greyer.
     "LED": [0, 1, 0, 0.8],  # green
     "switch": [1, 0.25, 0.25, 0.8],
     "fastener_markup": [0.8, 0, 0.8, 0.8],  # magenta-like.
     "button": [1, 0.2, 0.2, 0.8],
     "solid": [0.5, 0.5, 0.5, 0.8],  # grey
+    "fixed_solid": [0.4, 0.4, 0.4, 0.8],  # darker grey
     "fastener": [0.58, 0.44, 0.86, 0.8],  # medium purple
     "fluid": [0, 0, 1, 0.5],  # blue
     "default": [1, 0, 0, 0.8],  # red
@@ -29,14 +31,16 @@ PART_TYPE_COLORS = {
 # Map part types to integer labels
 PART_TYPE_LABEL = {
     "part_to_replace": 1,  # this is the part that will be replaced in "ReplaceTask".
-    "connector": 2,
-    "LED": 3,
-    "fastener": 4,
-    "fastener_markup": 5,  # should be below fastener.
-    "switch": 6,
-    "button": 7,
-    "solid": 8,
-    "fluid": 9,
+    "connector_def": 2,
+    "connector": 3,
+    "LED": 4,
+    "fastener": 5,
+    "fastener_markup": 6,  # should be below fastener.
+    "switch": 7,
+    "button": 8,
+    "solid": 9,
+    "fixed_solid": 10,
+    "fluid": 11,
     "default": 0,
 }
 LABEL_TO_PART_TYPE = {v: k for k, v in PART_TYPE_LABEL.items()}

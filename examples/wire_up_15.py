@@ -27,9 +27,9 @@ class WireUp(EnvSetup):
         female_geoms = []
         connect_positions = []
         for i in range(4):
-            male_geom, connect_pos, female_geom, _ = Europlug(
-                f"europlug_{i}"
-            ).bd_geometry((0, 0, 0), connected=True)
+            male_geom, connect_pos, female_geom, _ = Europlug(i).bd_geometry(
+                (0, 0, 0), connected=True
+            )
             rotated_loc = Location(hole_grid_locs.locations[i].position, (0, 0, -90))
 
             female_geom.move(rotated_loc)
@@ -47,7 +47,9 @@ class WireUp(EnvSetup):
 
     @property
     def linked_groups(self) -> dict[str, tuple[list[str]]]:
-        all_female_connectors = [f"europlug_{i}_female@connector" for i in range(4)]
+        all_female_connectors = [
+            f"{Europlug(i).get_name(i, False)}@connector" for i in range(4)
+        ]
         return {"mech_linked": ([*all_female_connectors, "elec_panel@fixed_solid"],)}
 
 

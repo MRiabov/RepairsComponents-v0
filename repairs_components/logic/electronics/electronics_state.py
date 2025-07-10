@@ -450,12 +450,6 @@ class ElectronicsState(SimState):
         self.components[other_name].connect(self.components[name])
         self._graph_built = False
 
-    @overload
-    def connect(self, id_1: int, id_2: int):
-        "Connect two components"
-        # not good but will do
-        self.connect(self.inverse_indices[id_1], self.inverse_indices[id_2])
-
     def clear_connections(self):
         "Disconnect all connections between a component"
         for component in self.components.values():

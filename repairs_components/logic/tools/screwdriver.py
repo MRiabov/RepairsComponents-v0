@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import torch
+from repairs_components.geometry.b123d_utils import export_obj
 from repairs_components.logic.tools.tool import Tool
 from repairs_components.logic.tools.tool import attachment_link_name
 from pathlib import Path
@@ -21,7 +22,7 @@ class Screwdriver(Tool):
         return 5  # 5 meters. for debug.
 
     def get_mjcf(self, base_dir: Path):
-        # Use the OBJ file for MuJoCo
+        # Get OBJ file
         obj_path = self.export_path(base_dir, "obj")
         return f"""
         <mujoco>
@@ -61,15 +62,9 @@ class Screwdriver(Tool):
         if export:
             assert base_dir is not None, "base_dir must be provided"
             # Export gltf and convert to obj because MJCF does not support gltf.
-            gltf_path = self.export_path(base_dir, "gltf")
-            gltf_path.parent.mkdir(parents=True, exist_ok=True)
-            export_gltf(auto_screwdriver.part, str(gltf_path))
-
-            # convert through trimesh
-            mesh = trimesh.load(str(gltf_path), file_type="gltf")
             obj_path = self.export_path(base_dir, "obj")
-            mesh.export(str(obj_path), file_type="obj")
-            # NOTE: latest Genesis may support glb. this conversion may be unnecessary.
+            obj_path.parent.mkdir(parents=True, exist_ok=True)
+            export_obj(auto_screwdriver.part, obj_path)
 
     def export_path(self, base_dir: Path, file_extension: str = "obj") -> Path:
         return base_dir / f"shared/tools/screwdriver.{file_extension}"

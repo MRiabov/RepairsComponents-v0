@@ -1,4 +1,4 @@
-from build123d import CenterOf, Compound, Part, RevoluteJoint, Unit, export_gltf, Pos
+from build123d import CenterOf, Compound, Part, RevoluteJoint, Unit, Pos
 import genesis as gs
 import tempfile
 
@@ -75,26 +75,24 @@ def translate_state_to_genesis_scene(
         quat = physical_state.graph.quat[body_idx]
         count_fasteners_held = physical_state.graph.count_fasteners_held[body_idx]
 
-        if (
-            part_type == "solid"
-            or part_type == "fixed_solid"
-            or part_type == "connector"
-        ):
-            fixed = part_type == "fixed_solid"
-            mesh_path = str(mesh_file_names[body_name])
-            mesh = gs.morphs.Mesh(file=mesh_path, fixed=fixed)
-            new_entity = scene.add_entity(mesh, surface=surface)
+        mesh_or_mjcf_path = str(mesh_file_names[body_name])
 
+        if part_type == "solid" or part_type == "fixed_solid":
+            fixed = part_type == "fixed_solid"
+            mesh = gs.morphs.Mesh(file=mesh_or_mjcf_path, fixed=fixed)
+            new_entity = scene.add_entity(mesh, surface=surface)
+        elif part_type == "connector":
+            # NOTE: links to keep was on UDRF, not on mjcf!!!
+            mesh = gs.morphs.MJCF(file=mesh_or_mjcf_path)
+            new_entity = scene.add_entity(mesh, surface=surface)
         elif part_type in ("button", "led", "switch"):
-            mjcf_path = str(mesh_file_names[body_name])
-            # FIXME: deprecate MJCF from here and use native genesis configs.
-            mesh = gs.morphs.MJCF(file=mjcf_path, name=body_name, links_to_keep=True)
+            # NOTE: links to keep was on UDRF, not on mjcf!!!
+            mesh = gs.morphs.MJCF(file=mesh_or_mjcf_path)
             new_entity = scene.add_entity(mesh, surface=surface)
         elif part_type == "fastener":
             raise ValueError(
                 "Fasteners should be defined only in edge attributes or free bodies, not in indices."
             )
-
         else:
             raise NotImplementedError(
                 f"Not implemented for translation part type: {part_type}"
@@ -173,17 +171,8 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     # loop entities and dispatch by suffix
     for full_name, entity in gs_entities.items():
-        parts = full_name.split("@")
-        tag2 = "@".join(parts[-2:]) if len(parts) > 1 else parts[-1]
-        if tag2 == "male@connector":
-            male_connector_positions[full_name] = torch.tensor(
-                entity.get_links_pos(env_idx)["connector_point"], device=device
-            )
-        elif tag2 == "female@connector":
-            female_connector_positions[full_name] = torch.tensor(
-                entity.get_links_pos(env_idx)["connector_point"], device=device
-            )
-        elif tag2 == "solid" or tag2 == "fixed_solid":
+        part_name, part_type = full_name.split("@")
+        if part_type in ("solid", "fixed_solid", "connector"):
             # TODO: I haven't explicitly handled fixed solids, but it may be unnecessary(?)
             hole_pos = get_fastener_hole_positions(entity, device=device)
             fastener_hole_positions[full_name] = hole_pos
@@ -193,9 +182,18 @@ def translate_genesis_to_python(  # translate to sim state, really.
                 sim_state.physical_state[i].register_body(
                     full_name, pos_all[i], ang_all[i]
                 )
-        elif tag2 == "control":
+            if part_type == "connector":
+                if part_name.endswith("male"):
+                    male_connector_positions[full_name] = torch.tensor(
+                        entity.get_links_pos(env_idx)["connector_point"], device=device
+                    )
+                elif part_name.endswith("female"):
+                    female_connector_positions[full_name] = torch.tensor(
+                        entity.get_links_pos(env_idx)["connector_point"], device=device
+                    )
+        elif part_type == "control":
             continue  # skip.
-        else:
+        elif part_type == "fastener":
             # note: it will be more troublesome to handle a non-implemented error in batching, so whatever.
             # it should be really checked in a separate assertion.
             mask = torch.tensor(
@@ -242,36 +240,52 @@ def translate_compound_to_sim_state(
 ) -> RepairsSimState:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
     assert len(batch_b123d_compounds) > 0, "Batch must not be empty."
-    assert all(len(compound.descendants) > 0 for compound in batch_b123d_compounds), (
-        "All compounds must have descendants."
+    assert all(len(compound.leaves) > 0 for compound in batch_b123d_compounds), (
+        "All compounds must have children."
     )
     sim_state = RepairsSimState(batch_dim=len(batch_b123d_compounds))
+    all_male_connector_def_positions = []
+    all_female_connector_def_positions = []
 
     for env_idx in range(len(batch_b123d_compounds)):
         b123d_compound = batch_b123d_compounds[env_idx]
-        part_dict = {part.label: part for part in b123d_compound.descendants}
-        connector_def_positions = {}  # not tensor because we will require labels.
+        env_size = np.array((640, 640, 640))
+        expected_bounds_min = np.array((0, 0, 0))
+        expected_bounds_max = np.array((env_size[0], env_size[1], env_size[2]))
+        assert (
+            np.array(tuple(b123d_compound.bounding_box().min)) >= expected_bounds_min
+        ).all() and (
+            np.array(tuple(b123d_compound.bounding_box().max)) <= expected_bounds_max
+        ).all(), (
+            f"Compound must be within bounds. Currently have {b123d_compound.bounding_box()}. Expected AABB min: {expected_bounds_min}, max: {expected_bounds_max} "
+            f"\nAABBs of all parts: { {p.label: p.bounding_box() for p in b123d_compound.leaves} }"
+        )
+        part_dict = {part.label: part for part in b123d_compound.leaves}
+        male_connector_def_positions = {}  # not tensor because we will require labels.
+        female_connector_def_positions = {}  # not tensor because we will require labels.
 
-        for part in b123d_compound.descendants:
+        for part in (
+            b123d_compound.leaves
+        ):  # leaves, not children. children will have compounds.
             part: Part
             assert part.label, (
-                f"Part must have a label. Failed at position {part.position}"
+                f"Part must have a label. Failed at position {part.position}, volume {part.volume}"
             )
             assert "@" in part.label, "Part must annotate type."
             assert part.volume > 0, "Part must have a volume."
 
             part_name, part_type = part.label.split("@", 1)
             # physical state
-            if part.label.endswith("@solid"):
+            if part_type == "solid" or part_type == "fixed_solid":
+                fixed = part_type == "fixed_solid"
                 sim_state.physical_state[env_idx].register_body(
                     name=part.label,
-                    # position=part.position.to_tuple(), # this isn't always true
-                    position=part.center(CenterOf.BOUNDING_BOX).to_tuple(),
-                    rotation=part.location.orientation.to_tuple(),
+                    # position=tuple(part.position), # this isn't always true
+                    position=tuple(part.center(CenterOf.BOUNDING_BOX)),
+                    rotation=tuple(part.global_location.orientation),
+                    fixed=fixed,
                 )
-            elif part.label.endswith(
-                "@fastener"
-            ):  # collect constraints, get labels of bodies,
+            elif part_type == "fastener":  # collect constraints, get labels of bodies,
                 # collect constraints (in build123d named joints)
                 assert "fastener_joint_a" in part.joints, (
                     "Fastener must have a joint a."
@@ -301,11 +315,6 @@ def translate_compound_to_sim_state(
                     joint_b.connected_to.parent if constraint_b_active else None
                 )
 
-                # # collect names of bodies(?)
-                # assert initial_body_a.label and initial_body_a.label, (
-                #     "Constrained parts must be labeled"
-                # )
-
                 fastener = Fastener(
                     initial_body_a=initial_body_a.label
                     if constraint_a_active
@@ -318,29 +327,50 @@ def translate_compound_to_sim_state(
                 sim_state.physical_state[env_idx].register_fastener(fastener)
 
             # FIXME: no electronics implemented???
-            elif part.label.endswith("@liquid"):
+            elif part_type == "liquid":
                 raise NotImplementedError("Liquid is not handled yet.")
-            elif part.label.endswith("@button"):
+            elif part_type == "button":
                 raise NotImplementedError("Buttons are not handled yet.")
-            elif part.label.endswith("@connector"):
+            elif part_type == "connector":
                 # register the solid part of the connector
                 sim_state.physical_state[env_idx].register_body(
                     name=part.label,
-                    # position=part.position.to_tuple(), # this isn't always true
-                    position=part.center(CenterOf.BOUNDING_BOX).to_tuple(),
-                    rotation=part.location.orientation.to_tuple(),
+                    # position=tuple(part.position), # this isn't always true
+                    position=tuple(part.center(CenterOf.BOUNDING_BOX)),
+                    rotation=tuple(part.global_location.orientation),
                 )  # BEWARE OF ROTATION AND POSITION NOT BEING TRANSLATED. (compounds don't translate pos automatically.)
 
                 # get the connector def position
                 connector_def = part_dict[part_name + "@connector_def"]
-                connector_def_position = (
-                    connector_def.children[-1].center(CenterOf.BOUNDING_BOX).to_tuple()
+                connector_def_position = torch.tensor(
+                    tuple(connector_def.center(CenterOf.BOUNDING_BOX))
                 )  # ^beware!!! this must be translated as in children translation.
-                connector_def_positions[part_name] = connector_def_position
+                if part_name.endswith("male"):
+                    male_connector_def_positions[part_name] = connector_def_position
+                elif part_name.endswith("female"):
+                    female_connector_def_positions[part_name] = connector_def_position
+            elif part_type == "connector_def":
+                continue  # connector def is already registered in connectors.
             else:
-                raise NotImplementedError(f"Part type {part.label} not implemented.")
+                raise NotImplementedError(
+                    f"Part type {part_type} not implemented. Raise from part.label: {part.label}"
+                )
+        all_male_connector_def_positions.append(male_connector_def_positions)
+        all_female_connector_def_positions.append(female_connector_def_positions)
 
-        connection_idx = connectors.check_connections(connector_def_positions)
+    # if the last is non-empty all are non-empty...
+    if all_male_connector_def_positions[-1] and all_female_connector_def_positions[-1]:
+        all_male_connector_def_positions = torch.stack(all_male_connector_def_positions)
+        all_female_connector_def_positions = torch.stack(
+            all_female_connector_def_positions
+        )
+        connections = connectors.check_connections(
+            all_male_connector_def_positions, all_female_connector_def_positions
+        )
+        for env_idx, connections in enumerate(connections):
+            for connection_a, connection_b in connections:
+                sim_state.electronics_state[env_idx].connect(connection_a, connection_b)
+
     # TODO I'll do this later.
     # possibly (reasonably) we can encode XYZ and quat of connector def positions into electronics state features.
     # however this won't mean they will be returned in export_graph.

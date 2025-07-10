@@ -54,7 +54,7 @@ ALIGNMENT_PIN_HEIGHT = 8.0  # mm
 SCENE_CENTER = (0, 20 + STAND_PLATE_DEPTH / 2, STAND_PLATE_HEIGHT)
 
 
-def plate_env_bd_geometry(export_geom_gltf: bool, base_dir: Path | None = None) -> Part:
+def plate_env_bd_geometry(export_geom_glb: bool, base_dir: Path | None = None) -> Part:
     with BuildPart() as plate_env:
         # stand plate
         with Locations((0, 0, STAND_PLATE_HEIGHT / 2)):
@@ -99,14 +99,16 @@ def plate_env_bd_geometry(export_geom_gltf: bool, base_dir: Path | None = None) 
     # # on the top of the stand plate
     plate_env_export = scale(plate_env.part, 1.0)  # already in mm
 
-    if export_geom_gltf:
+    if export_geom_glb:
         assert base_dir is not None, (
-            "base_dir must be provided if export_geom_gltf is True"
+            "base_dir must be provided if export_geom_glb is True"
         )
         path = export_path(base_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
-        successful_write = export_gltf(plate_env_export, str(path), unit=Unit.M)
-        assert successful_write, "Failed to export gltf"
+        successful_write = export_gltf(
+            plate_env_export, str(path), unit=Unit.M, binary=True
+        )
+        assert successful_write, "Failed to export glb"
         # print("exported gltf")
 
     # ocp_vscode.show(plate_env.part)

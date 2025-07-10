@@ -11,7 +11,9 @@ from pathlib import Path
 import time
 from genesis.engine.entities import RigidEntity
 from genesis.engine.entities.rigid_entity import RigidJoint, RigidLink
+from repairs_components.geometry.b123d_utils import export_obj
 from repairs_components.geometry.base_env import tooling_stand_plate
+from repairs_components.geometry.connectors.connectors import Connector
 from repairs_components.geometry.fasteners import (
     Fastener,
     get_fastener_params_from_name,
@@ -21,7 +23,7 @@ from repairs_components.logic.tools import screwdriver
 from repairs_components.processing.voxel_export import export_voxel_grid
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
-from build123d import Compound, Pos, export_gltf, export_stl, Unit, CenterOf
+from build123d import Compound, Part, Pos, export_gltf, export_stl, Unit, CenterOf
 from repairs_components.processing.translation import (
     translate_compound_to_sim_state,
     translate_state_to_genesis_scene,
@@ -144,7 +146,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 desired_state_geom_,
                 save_dir=save_path,
                 scene_id=scene_idx,
-                solid_export_format="gltf",
+                solid_export_format="glb",
             )
             mesh_file_names_per_scene.append(mesh_file_names)
 
@@ -214,7 +216,7 @@ def starting_state_geom(
 
 
 def desired_state_geom(
-    env_setup: EnvSetup, task: Task, env_size=(64, 64, 64)
+    env_setup: EnvSetup, task: Task, env_size=(640, 640, 640)
 ) -> Compound:
     """
     Perturb the desired state based on the starting state geom.
@@ -384,28 +386,49 @@ def generate_scene_meshes(base_dir: Path):
     if not tooling_stand_plate.export_path(base_dir).exists():
         print("Tooling stand mesh not found. Generating...")
         tooling_stand_plate.plate_env_bd_geometry(
-            export_geom_gltf=True, base_dir=base_dir
+            export_geom_glb=True, base_dir=base_dir
         )
     screwdriver_stub = screwdriver.Screwdriver("")
-    if not screwdriver_stub.export_path(base_dir=base_dir).exists():
+    export_path = screwdriver_stub.export_path(base_dir=base_dir)
+    if not export_path.exists():
         print("Screwdriver mesh not found. Generating...")
         screwdriver_stub.bd_geometry(export=True, base_dir=base_dir)
         screwdriver_mjcf = screwdriver_stub.get_mjcf(base_dir=base_dir)
-        path = base_dir / "shared/tools/screwdriver.xml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
+        export_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(export_path, "w") as f:
             f.write(screwdriver_mjcf)
 
 
 def persist_meshes_and_mjcf(
-    b123d_compound: Compound, save_dir: Path, scene_id: int, solid_export_format="gltf"
+    b123d_compound: Compound, save_dir: Path, scene_id: int, solid_export_format="glb"
 ):
-    assert solid_export_format in ("gltf", "stl")
-
     mesh_file_names = {}
 
     # flatten the array
-    children = b123d_compound.descendants
+    children = b123d_compound.leaves
+
+    def export_mesh(
+        child: Part,
+        export_path: Path | None = None,
+        solid_export_format=solid_export_format,
+    ):
+        assert solid_export_format in ("glb", "stl", "obj")
+        if export_path is None:
+            export_path = (
+                save_dir / f"scene_{scene_id}" / f"{child.label}.{solid_export_format}"
+            )
+        if solid_export_format == "stl":
+            export_stl(child, file_path=str(export_path))
+        else:
+            export_gltf(
+                child.moved(Pos(-center)),  # recenter if not already.
+                str(export_path),
+                unit=Unit.MM,
+                binary=True,
+            )
+        if solid_export_format == "obj":
+            export_obj(child, export_path)
+        return export_path
 
     # export mesh
     for child in children:
@@ -413,28 +436,33 @@ def persist_meshes_and_mjcf(
         assert "@" in child.label, "Part label must have a type delimiter."
         _part_name, part_type = child.label.split("@", 2)
         center = child.center(CenterOf.BOUNDING_BOX)
-        if part_type == "solid":
-            if solid_export_format == "gltf":
-                mesh_file_name = f"{child.label}.gltf"
-                export_gltf(
-                    child.moved(Pos(-center)),
-                    save_dir / f"scene_{scene_id}" / mesh_file_name,
-                    unit=Unit.MM,
-                )
-            elif solid_export_format == "stl":
-                # fixme: stl does not resize? hmm. (resize units)
-                mesh_file_name = f"{child.label}.stl"
-                export_stl(
-                    child, file_path=save_dir / f"scene_{scene_id}" / mesh_file_name
-                )
-            mesh_file_names[child.label] = mesh_file_name
-
+        if part_type in ("solid", "fixed_solid"):
+            path = export_mesh(child)
+            mesh_file_names[child.label] = str(path)
         # FIXME: deprecate mjcf!
-        if part_type in ("connector", "button", "led", "switch"):
-            connector: Connector = sim_state.electronics_state.components[label]  # type: ignore
-            mjcf = connector.get_mjcf()
-            with open(save_dir / f"scene_{scene_id}" / f"{child.label}.xml", "w") as f:
-                f.write(mjcf)
+        if part_type == "connector":
+            save_path_xml = Connector.save_path_from_name(save_dir, child.label, "xml")
+            save_path_mesh = Connector.save_path_from_name(
+                save_dir, child.label, suffix="obj"
+            )
+            if not save_path_xml.exists() and not save_path_mesh.exists():
+                assert _part_name.endswith("_male") or _part_name.endswith("_female")
+                male = _part_name.endswith("_male")
+                save_path_xml.parent.mkdir(parents=True, exist_ok=True)
+                connector = Connector.from_name(child.label)
+                export_mesh(child, save_path_mesh, "obj")
+                mjcf = connector.get_mjcf(base_dir=save_dir, male=male)
+                with open(save_path_xml, "w") as f:
+                    f.write(mjcf)
+            mesh_file_names[child.label] = str(save_path_xml)
+
+        elif part_type in ("button", "led", "switch"):
+            raise NotImplementedError(
+                "Buttons, LEDs and switches are not implemented yet."
+            )  # TODO!! # and should they be?
+            # leds will not shine because there is no electricity,
+            # buttons will not be pressed because there is no electricity,
+            # making some changes for switches alone is too small...
 
         elif part_type == "fastener":
             fastener_shared_path = get_fastener_save_path_from_name(

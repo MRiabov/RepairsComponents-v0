@@ -1,4 +1,5 @@
 from enum import IntEnum
+from pathlib import Path
 import sys
 import os
 
@@ -22,11 +23,16 @@ from repairs_components.logic.electronics.component import (
 import numpy as np
 import torch
 from abc import ABC, abstractmethod
-from typing import Mapping
+from typing import Literal, Mapping
+import trimesh
 
 
 class Connector(ElectricalComponent):
     _connector_def_size = 0.3  # vis only
+
+    def __init__(self, in_sim_id: int):
+        super().__init__(self.get_name(in_sim_id, None))
+        self.in_sim_id = in_sim_id  # useful for female and male connector namesF
 
     def propagate(self, voltage: float, current: float) -> tuple[float, float]:
         return voltage, current  # pass through.
@@ -36,32 +42,82 @@ class Connector(ElectricalComponent):
         return ElectricalComponentsEnum.CONNECTOR.value
 
     @property
+    @abstractmethod
+    def model_id(self) -> int:
+        """Get the model id of the connector."""
+        raise NotImplementedError
+
+    def get_name(self, in_sim_id: int, male_female_both: bool | None) -> str:
+        """Get name. If male_female_both is None, return compound, name, if True, return name_male, if False, return name_female"""
+        if male_female_both is None:
+            male_or_female = ""
+        else:
+            male_or_female = "_male" if male_female_both else "_female"  # need the "_"
+        return (
+            f"{ConnectorsEnum(self.model_id).name.lower()}_{in_sim_id}{male_or_female}"
+        )
+
+    @property
+    @abstractmethod
+    def connector_pos_relative_to_center_male(self) -> np.ndarray:
+        """Get the position of the connector def relative to the center of the component."""
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def connector_pos_relative_to_center_female(self) -> np.ndarray:
+        """Get the position of the connector def relative to the center of the component."""
+        raise NotImplementedError
+
+    @property
     def connected_at_angle(self) -> tuple[float, float, float]:
+        """Get the angle at which the connector is connected."""
         return (0, 0, 180)
 
     def get_mjcf(
-        self, connector_position: np.ndarray | None = None, density: float = 1000
+        self,
+        base_dir: Path,
+        male: bool,
+        connector_position: np.ndarray | None = None,
+        density: float = 1000,
     ):
-        "This defines a generic mjcf for a connector with a connector position."
+        """This defines a generic mjcf for a connector with a connector position."""
         if connector_position is None:
-            connector_position = self.connector_pos_relative_to_center
+            connector_position = (
+                self.connector_pos_relative_to_center_male
+                if male
+                else self.connector_pos_relative_to_center_female
+            )
         print(
             "warning: exporting electronics as mjcf is deprecated; replace with native genesis controls."
         )
+        name = self.get_name(self.in_sim_id, male)
+        mesh_file_path = str(
+            self.save_path_from_name(base_dir, name, "obj")
+        )  # not the bad code to care of.
+        assert Path(mesh_file_path).exists(), (
+            f"Mesh file {mesh_file_path} does not exist. Expected obj file."
+        )
+        #load mesh, compute mass and inertia.
+        mesh = trimesh.load(mesh_file_path)
+        mesh.density = density
+        mass_properties = mesh.mass_properties
+        mesh_inertia = mass_properties.inertia
+        
+        
         return f"""<mujoco>
         <asset>
-            <mesh name="{self.name}" file="geom_exports/electronics/connectors/{self.name}.gltf"/>
+            <mesh name="{name}" file="{mesh_file_path}"/>
         </asset>
         
         <worldbody>
-            <body name="{self.name}">
-                <geom name="{self.name}_geom" type="mesh" mesh="{self.name}" density="{density}"/>
+            <body name="{name}">
+                <geom name="{name}_geom" type="mesh" mesh="{name}" density="{mesh_mass}"/>
                 
                 <body name="connector_point" pos="{connector_position[0]} {connector_position[1]} {connector_position[2]}">
                     <!-- No inertial, geom, or visual tags = fixed frame -->
                 </body>
             </body>
-            
         </worldbody>
     </mujoco>
     """
@@ -153,16 +209,66 @@ class Connector(ElectricalComponent):
         geom.children[0].color = Color(0.5, 0.5, 0.5, 0.8)
         geom.children[1].color = Color(1, 1, 0, 0.5)
 
+        base_name = self.get_name(self.in_sim_id, male)
         # to indicate typing to the model
-        male_or_female = "male" if male else "female"
-        geom.children[
-            0
-        ].label = f"{self.name}_{male_or_female}@connector"  # should be @connector?
-        geom.children[1].label = f"{self.name}_{male_or_female}@connector_def"
-        # e.g. europlug_{i}_male@connector_def
-        geom.label = f"{self.name}_{male_or_female}_compound"
+        geom.children[0].label = base_name + "@connector"
+        geom.children[1].label = base_name + "@connector_def"
+        geom.label = base_name + "_compound"
 
         return geom
+
+    @staticmethod
+    def from_name(name: str) -> "Connector":
+        """Get the connector from a name."""
+        if "@" in name:
+            assert name.endswith("@connector")
+            name = name[: -len("@connector")]  # remove part type
+        model_id, in_sim_id, male_or_female = name.split("_")
+        assert male_or_female in ["male", "female"], (
+            "Name should end with male or female."
+        )
+        assert model_id in ["europlug", "xt60", "round_laptop"], (
+            "Name should start with europlug, xt60, or round_laptop."
+        )
+        from repairs_components.geometry.connectors.models.europlug import Europlug
+
+        # from repairs_components.geometry.connectors.models.xt60 import XT60
+        # from repairs_components.geometry.connectors.models.round_laptop import RoundLaptop
+        if model_id == "europlug":
+            return Europlug(int(in_sim_id))
+        # elif model_id == "xt60": #TODO
+        #     return XT60(int(in_sim_id), male_or_female == "male")
+        # elif model_id == "round_laptop":
+        #     return RoundLaptop(int(in_sim_id), male_or_female == "male")
+        else:
+            raise ValueError(f"Unknown connector name: {name[0]}")
+
+    @staticmethod
+    def save_path_from_name(base_dir: Path, name: str, suffix: str = "xml"):
+        """Get the connector from a name."""
+        if "@" in name:
+            assert name.endswith("@connector")
+            name = name[: -len("@connector")]  # remove part type
+        connector_type, in_sim_id, male_or_female = name.split("_", 2)
+        assert len(name.split("_", 2)) == 3, (
+            "Name should be of the form <connector_name>_<in_sim_id>_<male_or_female>."
+        )
+        assert male_or_female in ["male", "female"], (
+            "Name should end with male or female."
+        )
+        assert connector_type.upper() in ConnectorsEnum.__members__.keys(), (
+            "Name should start with a valid connector type. Got: " + connector_type
+        )  # note `upper()` because enum is uppercase.
+        assert in_sim_id.isdigit(), "Name should have an integer as the in_sim_id."
+        return (
+            base_dir
+            / "shared"
+            / "connectors"
+            / Path(f"{connector_type}_{in_sim_id}_{male_or_female}.{suffix}")
+        )
+
+    def get_path(self, base_dir: Path, male: bool) -> Path:
+        return self.save_path_from_name(base_dir, self.name(0, male))
 
 
 def check_connections(
@@ -195,9 +301,7 @@ def check_connections(
     female_keys = list(female_connectors.keys())
 
     male_vals = torch.stack(list(male_connectors.values()), dim=1)  # [B, M, 3]
-    female_vals = torch.stack(
-        list(female_connectors.values()), dim=1
-    )  # [B, F, 3]
+    female_vals = torch.stack(list(female_connectors.values()), dim=1)  # [B, F, 3]
 
     D = torch.cdist(male_vals, female_vals, p=2)  # [B, M, F]
     mask = D < connection_threshold

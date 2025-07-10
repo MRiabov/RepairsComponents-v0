@@ -226,12 +226,14 @@ class RepairsEnv(gym.Env):
         for scene_id in range(len(self.env_setup_ids)):
             # NOTE: scene_id is not the same as env_setup_id!
             scene = gs.Scene(
-                sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
+                sim_options=gs.options.SimOptions(dt=self.dt, substeps=2, ),
                 show_viewer=False,
                 vis_options=gs.options.VisOptions(
                     env_separate_rigid=True,
                     shadow=True,
                 ),  # type: ignore
+                rigid_options=gs.options.RigidOptions(max_dynamic_constraints=128),
+                # note^: max_dynamic constraints is 8 by default. 128 is too low too.
                 # show_FPS=False,
             )
 

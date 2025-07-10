@@ -1,5 +1,6 @@
+from pathlib import Path
 from build123d import *
-from repairs_components.geometry.connectors.connectors import Connector
+from repairs_components.geometry.connectors.connectors import Connector, ConnectorsEnum
 import ocp_vscode
 import build123d as bd
 import numpy as np
@@ -18,6 +19,10 @@ pin_len = 19
 
 
 class Europlug(Connector):
+    @property
+    def model_id(self) -> int:
+        return ConnectorsEnum.EUROPLUG.value
+
     def bd_geometry_male(self, moved_to: bd.VectorLike):
         """
         Create a simple IEC plug model.
@@ -88,8 +93,16 @@ class Europlug(Connector):
 
         return self.color_and_label(socket_part.moved(Location(moved_to)), male=False)
 
+    @property
+    def connector_pos_relative_to_center_male(self) -> np.ndarray:
+        return np.array([0, 0, 0])
+
+    @property
+    def connector_pos_relative_to_center_female(self) -> np.ndarray:
+        return np.array([0, 0, 0])
+
 
 if __name__ == "__main__":
     from ocp_vscode import show
 
-    show(Europlug("europlug@connectors").bd_geometry((0, 0, 0), connected=True))
+    show(Europlug(0).bd_geometry((0, 0, 0), connected=True))
