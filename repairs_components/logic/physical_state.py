@@ -374,10 +374,7 @@ class PhysicalState:
 
         # Create diff graph with same nodes as original
         diff_graph = Data()
-        num_nodes = max(
-            self.graph.num_nodes if hasattr(self.graph, "num_nodes") else 0,
-            other.graph.num_nodes if hasattr(other.graph, "num_nodes") else 0,
-        )
+        num_nodes = max(self.graph.num_nodes, other.graph.num_nodes)
 
         # Node features
         diff_graph.position = torch.zeros((num_nodes, 3), device=self.device)
@@ -386,41 +383,29 @@ class PhysicalState:
             num_nodes, dtype=torch.bool, device=self.device
         )
 
-        if "changed_indices" in node_diff and len(node_diff["changed_indices"]) > 0:
-            changed_indices = node_diff["changed_indices"].to(self.device)
-            diff_graph.position[changed_indices] = (
-                node_diff["pos_diff"].to(self.device).unsqueeze(-1)
-            )
-
-            # Create identity quaternions for rotation differences
-            rot_diffs = node_diff["rot_diff"].to(self.device)
-            identity_quats = torch.zeros((len(changed_indices), 4), device=self.device)
-            identity_quats[:, 0] = 1.0  # w=1, x=y=z=0 for identity quaternion
-            diff_graph.quat[changed_indices] = (
-                identity_quats  # Store rotation differences as quaternions
-            )
-
-            diff_graph.node_mask[changed_indices] = True
+        changed_indices = node_diff["changed_indices"].to(self.device)
+        # Store full per-node diff tensors (zeros for unchanged nodes)
+        diff_graph.position = node_diff["pos_diff"].to(self.device)
+        diff_graph.quat = node_diff["quat_diff"].to(self.device)
+        diff_graph.node_mask[changed_indices] = True
 
         # Edge features and mask
-        edge_index = torch.tensor([], dtype=torch.long, device=self.device).reshape(
-            2, 0
-        )
-        edge_attr = torch.tensor([], device=self.device).reshape(
-            0, 3
+        edge_index = torch.empty((2, 0), dtype=torch.long, device=self.device)
+        edge_attr = torch.empty(
+            (0, 3), device=self.device
         )  # [is_added, is_removed, is_changed]
-        edge_mask = torch.tensor([], dtype=torch.bool, device=self.device)
+        edge_mask = torch.empty((0,), dtype=torch.bool, device=self.device)
 
         if edge_diff["added"] or edge_diff["removed"]:
             added_edges = (
                 torch.tensor(edge_diff["added"], device=self.device).t()
                 if edge_diff["added"]
-                else torch.tensor([], device=self.device).long().reshape(2, 0)
+                else torch.empty((2, 0), device=self.device, dtype=torch.long)
             )
             removed_edges = (
                 torch.tensor(edge_diff["removed"], device=self.device).t()
                 if edge_diff["removed"]
-                else torch.tensor([], device=self.device).long().reshape(2, 0)
+                else torch.empty((2, 0), device=self.device, dtype=torch.long)
             )
 
             # Combine all edges
@@ -557,32 +542,67 @@ class PhysicalState:
         return new_state
 
 
-def _quaternion_angle_diff(q1, q2):
+def _quaternion_conjugate(q: torch.Tensor) -> torch.Tensor:
+    """Conjugate of a quaternion (w, x, y, z)."""
+    w, xyz = q[..., :1], q[..., 1:]
+    return torch.cat([w, -xyz], dim=-1)
+
+def _quaternion_multiply(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
+    """Hamilton product of two quaternions.  Inputs (...,4) → output (...,4)."""
+    w1, x1, y1, z1 = q1.unbind(-1)
+    w2, x2, y2, z2 = q2.unbind(-1)
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+    return torch.stack([w, x, y, z], dim=-1)
+
+def _quaternion_delta(q_from: torch.Tensor, q_to: torch.Tensor) -> torch.Tensor:
+    """Returns the quaternion that rotates *q_from* into *q_to* (element-wise)."""
+    return _quaternion_multiply(q_to, _quaternion_conjugate(q_from))
+
+def _quaternion_angle_diff(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
+    """Angular distance between two quaternions, degrees."""
+    dot = torch.sum(q1 * q2, dim=-1).clamp(-1.0, 1.0).abs()
+    angle_rad = 2.0 * torch.acos(dot)
+    return torch.rad2deg(angle_rad)
     # q1, q2: [N, 4]
     dot = torch.sum(q1 * q2, dim=1).clamp(-1.0, 1.0).abs()
     return 2 * torch.acos(dot).rad2deg()
 
 
 def _diff_node_features(
-    data_a: Data, data_b: Data, pos_threshold=3.0, deg_threshold=5.0
+    data_a: Data,
+    data_b: Data,
+    pos_threshold: float = 3.0,
+    deg_threshold: float = 5.0,
 ):
-    assert data_a.position is not None and data_b.position is not None, (
-        "Both graphs must have positions."
+    """Return per-node diffs (static shape) and changed indices/count."""
+    # Position diff
+    pos_raw = data_b.position - data_a.position  # [N, 3]
+    pos_dist = torch.linalg.norm(pos_raw, dim=1)
+    pos_mask = pos_dist > pos_threshold  # [N]
+    pos_diff = torch.zeros_like(pos_raw)
+    pos_diff[pos_mask] = pos_raw[pos_mask]
+
+    # Quaternion diff
+    quat_delta = _quaternion_delta(data_a.quat, data_b.quat)  # [N,4]
+    ang_deg = _quaternion_angle_diff(data_a.quat, data_b.quat)  # [N]
+    rot_mask = ang_deg > deg_threshold  # [N]
+    quat_diff = torch.zeros_like(quat_delta)
+    quat_diff[rot_mask] = quat_delta[rot_mask]
+
+    changed_mask = pos_mask | rot_mask
+    changed_indices = torch.nonzero(changed_mask, as_tuple=False).squeeze(1)
+
+    return (
+        {
+            "changed_indices": changed_indices,
+            "pos_diff": pos_diff,
+            "quat_diff": quat_diff,
+        },
+        int(changed_mask.sum().item()),
     )
-    pos_diff = torch.norm(data_a.position - data_b.position, dim=1)
-    rot_diff = _quaternion_angle_diff(data_a.quat, data_b.quat)
-
-    pos_mask = pos_diff > pos_threshold
-    rot_mask = rot_diff > deg_threshold
-
-    # Collect indices where there are differences
-    changes = torch.nonzero(pos_mask | rot_mask, as_tuple=False).squeeze(dim=0)
-    # Note^ I did not check whether dim=0 or dim=1, maybe debug here. (it was flat squeeze.)
-    return {
-        "changed_indices": changes,
-        "pos_diff": pos_diff[pos_mask],
-        "rot_diff": rot_diff[rot_mask],
-    }, pos_mask.sum().item() + rot_mask.sum().item()
 
 
 def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
