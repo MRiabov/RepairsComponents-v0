@@ -287,7 +287,7 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(  # note: filepath necessary because debug switches it to other repo when running from Repairs-v0.
             file=str(tooling_stand_plate.export_path(base_dir)),
-            scale=1, 
+            scale=1,
             pos=(0, -(640 / 2 + 200 / 2), -200),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
             fixed=True,
@@ -386,15 +386,13 @@ def generate_scene_meshes(base_dir: Path):
         tooling_stand_plate.plate_env_bd_geometry(
             export_geom_glb=True, base_dir=base_dir
         )
-    screwdriver_stub = screwdriver.Screwdriver("")
-    export_path = screwdriver_stub.export_path(base_dir=base_dir)
+    screwdriver_stub = screwdriver.Screwdriver()
+    export_path = screwdriver_stub.export_path(base_dir, "glb")
     if not export_path.exists():
         print("Screwdriver mesh not found. Generating...")
-        screwdriver_stub.bd_geometry(export=True, base_dir=base_dir)
-        screwdriver_mjcf = screwdriver_stub.get_mjcf(base_dir=base_dir)
+        screwdriver_part = screwdriver_stub.bd_geometry()
         export_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(export_path, "w") as f:
-            f.write(screwdriver_mjcf)
+        export_gltf(screwdriver_part, str(export_path), unit=Unit.MM, binary=True)
 
 
 def persist_meshes_and_mjcf(
@@ -438,20 +436,16 @@ def persist_meshes_and_mjcf(
             path = export_mesh(child)
             mesh_file_names[child.label] = str(path)
         if part_type == "connector":
-            save_path_xml = Connector.save_path_from_name(save_dir, child.label, "xml")
             save_path_mesh = Connector.save_path_from_name(
-                save_dir, child.label, suffix="obj"
-            )
-            if not save_path_xml.exists() and not save_path_mesh.exists():
+                save_dir, child.label, suffix="glb"
+            )  # note: mjcf in conwas already deprecated twice. see commit from 10.7 if you need it.
+            if not save_path_mesh.exists():
                 assert _part_name.endswith("_male") or _part_name.endswith("_female")
                 male = _part_name.endswith("_male")
-                save_path_xml.parent.mkdir(parents=True, exist_ok=True)
                 connector = Connector.from_name(child.label)
-                export_mesh(child, save_path_mesh, "obj")
-                mjcf = connector.get_mjcf(base_dir=save_dir, male=male)
-                with open(save_path_xml, "w") as f:
-                    f.write(mjcf)
-            mesh_file_names[child.label] = str(save_path_xml)
+                save_path_mesh.parent.mkdir(parents=True, exist_ok=True)
+                export_mesh(child, save_path_mesh, "glb")
+            mesh_file_names[child.label] = str(save_path_mesh)
 
         elif part_type in ("button", "led", "switch"):
             raise NotImplementedError(
@@ -472,7 +466,7 @@ def persist_meshes_and_mjcf(
                 fastener_mjcf = Fastener(  # constraint and b not noted as unnecessary
                     False, length=fastener_height, diameter=fastener_diameter
                 ).get_mjcf()
-                fastener_shared_path.parent.mkdir(parents=True, exist_ok=True)
+                # fastener_shared_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(fastener_shared_path, "w") as f:
                     f.write(fastener_mjcf)
 

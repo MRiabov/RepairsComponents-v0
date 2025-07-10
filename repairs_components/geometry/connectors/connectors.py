@@ -2,6 +2,7 @@ from enum import IntEnum
 from pathlib import Path
 import sys
 import os
+from typing_extensions import deprecated
 
 from build123d import (
     Axis,
@@ -74,6 +75,9 @@ class Connector(ElectricalComponent):
         """Get the angle at which the connector is connected."""
         return (0, 0, 180)
 
+    @deprecated(
+        "Using MJCF in simulation is deprecated as unnecessary. Use meshes directly instead."
+    )
     def get_mjcf(
         self,
         base_dir: Path,
@@ -208,6 +212,11 @@ class Connector(ElectricalComponent):
         geom.children[0].label = base_name + "@connector"
         geom.children[1].label = base_name + "@connector_def"
         geom.label = base_name + "_compound"
+
+        print(
+            f"{base_name}_connector_collision_detection_position",
+            geom.children[1].center(CenterOf.BOUNDING_BOX),
+        )
 
         return geom
 

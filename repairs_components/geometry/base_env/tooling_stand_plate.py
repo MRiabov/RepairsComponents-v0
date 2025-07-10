@@ -111,7 +111,6 @@ def plate_env_bd_geometry(export_geom_glb: bool, base_dir: Path | None = None) -
         assert successful_write, "Failed to export glb"
         # print("exported gltf")
 
-    # ocp_vscode.show(plate_env.part)
     return plate_env.part
 
 
@@ -232,11 +231,10 @@ def render_and_save(scene: gs.Scene, camera_1: Camera, camera_2: Camera):
 
 
 def export_path(base_dir: Path):
-    return base_dir / "meshes/tooling_stands/tool_stand_plate.gltf"
+    return base_dir / "meshes/tooling_stands/tool_stand_plate.glb"
 
 
-# plate_env_bd_geometry()
-# render_genesis = True
-# if render_genesis:
-#     gs.init(theme="light")
-#     genesis_setup()
+if __name__ == "__main__":
+    from ocp_vscode import show
+
+    show(plate_env_bd_geometry(export_geom_glb=False))

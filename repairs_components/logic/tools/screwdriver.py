@@ -23,7 +23,7 @@ class Screwdriver(Tool):
 
     def get_mjcf(self, base_dir: Path):
         # Get OBJ file
-        obj_path = self.export_path(base_dir, "obj")
+        obj_path = self.export_path(base_dir, "glb")
         return f"""
         <mujoco>
             <asset>
@@ -59,14 +59,10 @@ class Screwdriver(Tool):
                     END_EFFECTOR_ATTACHMENT_HOLE_DIAMETER / 2,
                     END_EFFECTOR_ATTACHMENT_HOLE_DEPTH,
                 )
-        if export:
-            assert base_dir is not None, "base_dir must be provided"
-            # Export gltf and convert to obj because MJCF does not support gltf.
-            obj_path = self.export_path(base_dir, "obj")
-            obj_path.parent.mkdir(parents=True, exist_ok=True)
-            export_obj(auto_screwdriver.part, obj_path, apply_scale=1000)
+        auto_screwdriver.part.label = "screwdriver@control"
+        return auto_screwdriver.part
 
-    def export_path(self, base_dir: Path, file_extension: str = "obj") -> Path:
+    def export_path(self, base_dir: Path, file_extension: str = "glb") -> Path:
         return base_dir / f"shared/tools/screwdriver.{file_extension}"
 
 

@@ -50,9 +50,8 @@ class Fastener(Component):
         self.b_constraint_active = constraint_b_active
         self.name = get_fastener_singleton_name(self.diameter, self.length)
 
-    @deprecated("Using MJCF in simulation is deprecated as unnecessary. Use meshes directly instead.")
     def get_mjcf(self):
-        """Get MJCF of a screw.
+        """Get MJCF of a screw. MJCF is preferred because it is faster and more reliable than meshes.
 
         Args:
             thread_pitch: Distance between threads in mm.
