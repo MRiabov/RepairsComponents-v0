@@ -14,7 +14,6 @@ from genesis.engine.entities import RigidEntity
 import numpy as np
 import torch
 from typing import Mapping
-from typing_extensions import deprecated
 
 
 @dataclass
@@ -60,14 +59,13 @@ class Fastener(Component):
             head_diameter: Diameter of the screw head in mm.
             head_height: Height of the screw head in mm.
         """
-        # units are mm
-        shaft_radius = self.diameter / 2  # mm
-        shaft_length = self.length  # mm
-        head_radius = self.head_diameter / 2  # mm
-        head_height = self.head_height  # mm
+        # MJCF expects meters, Build123d uses mm, so convert mm to m
+        shaft_radius = self.diameter / 2 / 1000
+        shaft_length = self.length / 1000
+        head_radius = self.head_diameter / 2 / 1000
+        head_height = self.head_height / 1000
         # Head base at z=0, head centered at head_height/2, shaft centered at -shaft_length/2
         # Tip body at z=-shaft_length
-        density = 7.8 / 1000  # g/mm3
         return f"""
     <mujoco>
     <worldbody>
@@ -77,17 +75,17 @@ class Fastener(Component):
                   size="{head_radius} {head_height / 2}"
                   pos="0 0 {head_height / 2}"
                   rgba="0.5 0.5 0.5 1"
-                  density="{density}"/>
+                  density="7800"/>
 
             <geom name="{self.name}_shaft" type="cylinder"
                   size="{shaft_radius} {shaft_length / 2}"
                   pos="0 0 {-shaft_length / 2}"
                   rgba="0.8 0.8 0.8 1"
-                  density="{density}"/>
+                  density="7800"/>
 
             <body name="{self.name}_tip" pos="0 0 {-shaft_length}">
                 <!-- Tip is located at the end of the shaft (z=-shaft_length) -->
-                <site name="{self.name}_tip_site" pos="0 0 0" size="1" rgba="1 0 0 1"/>
+                <site name="{self.name}_tip_site" pos="0 0 0" size="0.001" rgba="1 0 0 1"/>
             </body>
         </body>
     </worldbody>

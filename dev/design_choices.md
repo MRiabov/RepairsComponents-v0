@@ -59,5 +59,4 @@ Consequently, the desired position would have the hint as (0,0,0) because it's a
 %% NOTE: put this into tasks. ("add hint encoding to mechanical graph.")
 
 ## Modelling:
-1. Since their export from desired_state_geom, all models should be centered at the origin. It makes downstream work easier.
-2. We simulate (and model) in millimiters. The standard in Genesis is meters, but this poses a problem as some of the meshes we used have matrices of inertia as e-19, which is numerically unstable. Scaling the mesh to MM should ease the issue.
+Since their export from desired_state_geom, all models should be centered at the origin. It makes downstream work easier.

@@ -106,7 +106,7 @@ def plate_env_bd_geometry(export_geom_glb: bool, base_dir: Path | None = None) -
         path = export_path(base_dir)
         path.parent.mkdir(parents=True, exist_ok=True)
         successful_write = export_gltf(
-            plate_env_export, str(path), unit=Unit.MM, binary=True
+            plate_env_export, str(path), unit=Unit.M, binary=True
         )
         assert successful_write, "Failed to export glb"
         # print("exported gltf")

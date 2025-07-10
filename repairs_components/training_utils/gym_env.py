@@ -226,9 +226,7 @@ class RepairsEnv(gym.Env):
         for scene_id in range(len(self.env_setup_ids)):
             # NOTE: scene_id is not the same as env_setup_id!
             scene = gs.Scene(
-                sim_options=gs.options.SimOptions(
-                    dt=self.dt, substeps=2, gravity=(0, 0, -9.81 * 1000)
-                ),  # gravity is *1000 because mm.
+                sim_options=gs.options.SimOptions(dt=self.dt, substeps=2, ),
                 show_viewer=False,
                 vis_options=gs.options.VisOptions(
                     env_separate_rigid=True,
@@ -358,7 +356,7 @@ class RepairsEnv(gym.Env):
                 target_quat=quat,
                 gripper_force=gripper_force,
                 render=True,
-                keypoint_distance=100,  # 10cm as suggested
+                keypoint_distance=0.1,  # 10cm as suggested
                 num_steps_between_keypoints=10,
             )
             print(

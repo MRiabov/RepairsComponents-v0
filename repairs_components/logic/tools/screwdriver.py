@@ -19,7 +19,7 @@ class Screwdriver(Tool):
         raise NotImplementedError
 
     def dist_from_grip_link(self):
-        return 5000  # 5 meters. for debug.
+        return 5  # 5 meters. for debug.
 
     def get_mjcf(self, base_dir: Path):
         # Get OBJ file
@@ -31,7 +31,7 @@ class Screwdriver(Tool):
             </asset>
             <worldbody>
                 <geom type="mesh" mesh="tool_mesh"/>
-                <body name="attachment_link" pos="0 0 300">
+                <body name="attachment_link" pos="0 0 0.3">
                     <joint name="{attachment_link_name}" type="free"/>
                 </body>
             </worldbody>

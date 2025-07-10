@@ -77,24 +77,18 @@ def translate_state_to_genesis_scene(
 
         mesh_or_mjcf_path = str(mesh_file_names[body_name])
 
-        material = gs.materials.Rigid(rho=0.001)  # 1 g/mm^3.
-
         if part_type == "solid" or part_type == "fixed_solid":
             fixed = part_type == "fixed_solid"
-            mesh = gs.morphs.Mesh(file=mesh_or_mjcf_path, fixed=fixed, scale=1000)
-            new_entity = scene.add_entity(mesh, surface=surface, material=material)
+            mesh = gs.morphs.Mesh(file=mesh_or_mjcf_path, fixed=fixed)
+            new_entity = scene.add_entity(mesh, surface=surface)
         elif part_type == "connector":
             # NOTE: links to keep was on UDRF, not on mjcf!!!
-            mesh = gs.morphs.Mesh(
-                file=mesh_or_mjcf_path, scale=1
-            )  # note: already scaled during export.
-            # note: mjcf was deprecated as unnecessary. However I'll need to recompute the connector pos link.
-            new_entity = scene.add_entity(mesh, surface=surface, material=material)
+            mesh = gs.morphs.MJCF(file=mesh_or_mjcf_path)
+            new_entity = scene.add_entity(mesh, surface=surface)
         elif part_type in ("button", "led", "switch"):
             # NOTE: links to keep was on UDRF, not on mjcf!!!
-            mesh = gs.morphs.Mesh(file=mesh_or_mjcf_path, scale=1000)
-            # note: if you ever add, scale=1
-            new_entity = scene.add_entity(mesh, surface=surface, material=material)
+            mesh = gs.morphs.MJCF(file=mesh_or_mjcf_path)
+            new_entity = scene.add_entity(mesh, surface=surface)
         elif part_type == "fastener":
             raise ValueError(
                 "Fasteners should be defined only in edge attributes or free bodies, not in indices."
@@ -107,7 +101,6 @@ def translate_state_to_genesis_scene(
         gs_entities[body_name] = new_entity
 
     singleton_fastener_morphs = {}  # cache to reduce load times.
-    steel = gs.materials.Rigid(rho=7.8e-3)  # g/mm^3
 
     for fastener_id, attached_to in enumerate(
         sim_state.physical_state[0].graph.fasteners_attached_to
@@ -122,13 +115,12 @@ def translate_state_to_genesis_scene(
 
         # mjcf is acceptable for fasteners because it's faster(?)
         if fastener_name not in singleton_fastener_morphs:
-            morph = gs.morphs.MJCF(file=str(fastener_path), scale=1000)
+            morph = gs.morphs.MJCF(file=str(fastener_path))
             # note^ this kind of stuff better be globally cached.
-            # note: could the mjcf cause the ref errors?
             singleton_fastener_morphs[fastener_name] = morph
         else:
             morph = singleton_fastener_morphs[fastener_name]
-        new_entity = scene.add_entity(morph, surface=surface, material=steel)
+        new_entity = scene.add_entity(morph, surface=surface)
         # and how it will be moved later does not matter now
 
         # store fastener entity in gs_entities

@@ -6,9 +6,7 @@ import trimesh
 import os
 
 
-def export_obj(
-    part: Part, obj_path: Path, glb_path: Path | None = None, apply_scale=1
-) -> Path:
+def export_obj(part: Part, obj_path: Path, glb_path: Path | None = None) -> Path:
     """
     Convert a GLB file to OBJ format using trimesh.
 
@@ -28,16 +26,11 @@ def export_obj(
     # Create parent directories if they don't exist
     obj_path.parent.mkdir(parents=True, exist_ok=True)
     glb_path.parent.mkdir(parents=True, exist_ok=True)
-    export_successful = export_gltf(part, str(glb_path), binary=True, unit=Unit.MM)
+    export_successful = export_gltf(part, str(glb_path), binary=True)
     assert export_successful, "Failed to export GLB file"
 
     # Load the GLB file in trimesh and export
     mesh = trimesh.load(glb_path, file_type="glb")
-    # if mesh.volume < 0.001:
-    #     assert mesh.is_watertight, "Mesh is not watertight."
-    #     print(f"Warning: mesh volume is marked as less than 1mm^3. Is this expected? File name: {glb_path.name}")
-    if apply_scale != 1:
-        mesh.apply_scale(apply_scale)
     mesh.export(obj_path, file_type="obj")
 
 

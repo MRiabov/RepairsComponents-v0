@@ -287,8 +287,8 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
     tooling_stand: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(  # note: filepath necessary because debug switches it to other repo when running from Repairs-v0.
             file=str(tooling_stand_plate.export_path(base_dir)),
-            scale=1,
-            pos=(0, -(640 / 2 + 200 / 2), -200),
+            scale=1,  # Use 1.0 scale since we're working in mm # uuh?
+            pos=(0, -(0.64 / 2 + 0.2), -0.2),
             euler=(90, 0, 0),  # Rotate 90 degrees around X axis
             fixed=True,
         ),
@@ -298,16 +298,15 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
     franka: RigidEntity = scene.add_entity(
         gs.morphs.MJCF(
             file="xml/franka_emika_panda/panda.xml",
-            pos=(300, -(640 / 2 + 200 / 2), 300),
-            scale=1000,
+            pos=(0.3, -(0.64 / 2 + 0.2 / 2), 0),
         ),
     )  # franka arm standing on the correct place in the assembly.
 
     # Set up camera with proper position and lookat
     camera_1 = scene.add_camera(
         # pos=(1, 2.5, 3.5),
-        pos=(1000, 2500, 3500),  # Position camera further away and above
-        lookat=(0, 0, 200),  # Look at the center of the working pos
+        pos=(1, 2.5, 3.5),  # Position camera further away and above
+        lookat=(0, 0, 0.2),  # Look at the center of the working pos
         # lookat=(
         #     0.64 / 2,
         #     0.64 / 2 + tooling_stand_plate.STAND_PLATE_DEPTH / 1000,
@@ -317,18 +316,18 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
     )
 
     camera_2 = scene.add_camera(
-        pos=(-2500, 2500, 1500),  # second camera from the other side
-        lookat=(0, 0, 200),  # Look at the center of the working pos
+        pos=(-2.5, 1.5, 1.5),  # second camera from the other side
+        lookat=(0, 0, 0.2),  # Look at the center of the working pos
         res=(256, 256),  # (1024, 1024),
         GUI=False,
     )
-    plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -200)))
+    plane = scene.add_entity(gs.morphs.Plane(pos=(0, 0, -0.2)))
 
     screwdriver_stub = screwdriver.Screwdriver()
     screwdriver_: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(
             file=str(screwdriver_stub.export_path(base_dir)),
-            pos=(-200, -(640 / 2 + 200 / 2), 0),
+            pos=(-0.2, -(0.64 / 2 + 0.2 / 2), 0),
             scale=0.1,
         ),
         surface=gs.surfaces.Plastic(color=(1.0, 0.5, 0.0, 1)),
@@ -337,7 +336,7 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
     # this is a fairly bad solution though.
     screwdriver_grip: RigidEntity = scene.add_entity(
         gs.morphs.Sphere(
-            pos=(-200, -(640 / 2 + 200 / 2), 300), radius=1, collision=False
+            pos=(-0.2, -(0.64 / 2 + 0.2 / 2), 0.3), radius=0.001, collision=False
         )
     )  # type: ignore
 
@@ -353,13 +352,16 @@ def move_entities_to_pos(
     if env_idx is None:
         env_idx = torch.arange(len(starting_sim_state.physical_state))
     # batch collect all positions (mm to meters) across environments
-    all_positions = torch.stack(
-        [
-            torch.tensor(s.graph.position, device=env_idx.device)
-            for s in starting_sim_state.physical_state
-        ],
-        dim=0,
-    )  #  / 1000 # not meters anymore
+    all_positions = (
+        torch.stack(
+            [
+                torch.tensor(s.graph.position, device=env_idx.device)
+                for s in starting_sim_state.physical_state
+            ],
+            dim=0,
+        )
+        / 1000
+    )
 
     # set positions for each entity in batch
     for gs_entity_name, entity_idx in starting_sim_state.physical_state[
@@ -423,7 +425,7 @@ def persist_meshes_and_mjcf(
                 binary=True,
             )
         if solid_export_format == "obj":
-            export_obj(child, export_path, apply_scale=1000)
+            export_obj(child, export_path)
         return export_path
 
     # export mesh
