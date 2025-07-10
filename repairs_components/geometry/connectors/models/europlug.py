@@ -95,11 +95,11 @@ class Europlug(Connector):
 
     @property
     def connector_pos_relative_to_center_male(self) -> np.ndarray:
-        return np.array([0, 0, 0])
+        return np.array([0.0, 0.0, 0.0], dtype=np.float32)
 
     @property
     def connector_pos_relative_to_center_female(self) -> np.ndarray:
-        return np.array([0, 0, 0])
+        return np.array([0.0, 0.0, 0.0], dtype=np.float32)
 
 
 if __name__ == "__main__":

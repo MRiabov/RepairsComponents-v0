@@ -177,6 +177,23 @@ def translate_genesis_to_python(  # translate to sim state, really.
     female_connector_positions: dict[str, torch.Tensor] = {}
     picked_up_tip = torch.full((n_envs, 3), float("nan"), device=device)
 
+    def get_connector_pos(
+        parent_pos: torch.Tensor,
+        parent_quat: torch.Tensor,
+        rel_connector_pos: torch.Tensor,
+    ):
+        return (
+            parent_pos
+            + rel_connector_pos
+            + 2
+            * torch.cross(
+                parent_quat[:, 1:],
+                torch.cross(parent_quat[:, 1:], rel_connector_pos.unsqueeze(0), dim=-1)
+                + parent_quat[:, 0:1] * rel_connector_pos,
+                dim=-1,
+            )
+        )
+
     # loop entities and dispatch by suffix
     for full_name, entity in gs_entities.items():
         part_name, part_type = full_name.split("@")
@@ -184,21 +201,31 @@ def translate_genesis_to_python(  # translate to sim state, really.
             # TODO: I haven't explicitly handled fixed solids, but it may be unnecessary(?)
             hole_pos = get_fastener_hole_positions(entity, device=device)
             fastener_hole_positions[full_name] = hole_pos
-            pos_all = entity.get_pos(env_idx)
-            ang_all = entity.get_ang(env_idx)
+            pos_all = entity.get_pos(env_idx) # fixme: 0,0,0 on pos?
+            quat_all = entity.get_quat(env_idx)
             for i in range(n_envs):
-                sim_state.physical_state[i].register_body(
-                    full_name, pos_all[i], ang_all[i]
+                sim_state.physical_state[i].update_body(
+                    full_name, pos_all[i], quat_all[i]
                 )
             if part_type == "connector":
-                if part_name.endswith("male"):
-                    male_connector_positions[full_name] = torch.tensor(
-                        entity.get_links_pos(env_idx)["connector_point"], device=device
-                    )
-                elif part_name.endswith("female"):
-                    female_connector_positions[full_name] = torch.tensor(
-                        entity.get_links_pos(env_idx)["connector_point"], device=device
-                    )
+                male = part_name.endswith("male")
+                if male:
+                    relative_connector_pos = Connector.from_name(
+                        part_name
+                    ).connector_pos_relative_to_center_male
+                else:
+                    relative_connector_pos = Connector.from_name(
+                        part_name
+                    ).connector_pos_relative_to_center_female
+                scene_connector_pos = get_connector_pos(
+                    pos_all,
+                    quat_all,
+                    torch.tensor(relative_connector_pos, device=device),
+                )
+                if male:
+                    male_connector_positions[full_name] = scene_connector_pos
+                else:
+                    female_connector_positions[full_name] = scene_connector_pos
         elif part_type == "control":
             continue  # skip.
         elif part_type == "fastener":

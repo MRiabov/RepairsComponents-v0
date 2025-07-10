@@ -254,6 +254,20 @@ class PhysicalState:
             dim=0,
         )  # maybe will put this into hint instead as -1s or something.
 
+    def update_body(self, name: str, position: tuple, rotation: tuple):
+        assert name in self.body_indices, f"Body {name} not registered"
+        if self.graph.fixed[self.body_indices[name]]:
+            assert torch.isclose(
+                torch.tensor(position, device=self.device),
+                self.graph.position[self.body_indices[name]],
+                atol=1e-6,
+            ).all(), f"Body {name} is fixed and cannot be moved."
+            return
+
+        idx = self.body_indices[name]
+        self.graph.position[idx] = torch.tensor(position, device=self.device)
+        self.graph.quat[idx] = torch.tensor(rotation, device=self.device)
+
     def register_fastener(self, fastener: Fastener):
         """A fastener method to register fasteners and add all necessary components.
         Handles constraining to bodies and adding to graph."""
@@ -374,7 +388,7 @@ class PhysicalState:
 
         # Create diff graph with same nodes as original
         diff_graph = Data()
-        num_nodes = max(self.graph.num_nodes, other.graph.num_nodes)
+        num_nodes = self.graph.num_nodes
 
         # Node features
         diff_graph.position = torch.zeros((num_nodes, 3), device=self.device)
@@ -547,6 +561,7 @@ def _quaternion_conjugate(q: torch.Tensor) -> torch.Tensor:
     w, xyz = q[..., :1], q[..., 1:]
     return torch.cat([w, -xyz], dim=-1)
 
+
 def _quaternion_multiply(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     """Hamilton product of two quaternions.  Inputs (...,4) → output (...,4)."""
     w1, x1, y1, z1 = q1.unbind(-1)
@@ -557,9 +572,11 @@ def _quaternion_multiply(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
     return torch.stack([w, x, y, z], dim=-1)
 
+
 def _quaternion_delta(q_from: torch.Tensor, q_to: torch.Tensor) -> torch.Tensor:
     """Returns the quaternion that rotates *q_from* into *q_to* (element-wise)."""
     return _quaternion_multiply(q_to, _quaternion_conjugate(q_from))
+
 
 def _quaternion_angle_diff(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     """Angular distance between two quaternions, degrees."""
