@@ -17,8 +17,9 @@ class Task(ABC):
         """Perturb the desired state of the task. Only move in x and y directions, the minimum of Z axis should be kept at 0."""
         # Get the bounding box of the original compound
         bbox = compound.bounding_box()
-        aabb_min = np.array(tuple(bbox.min))
-        aabb_max = np.array(tuple(bbox.max))
+        recentered = compound.moved(Location(-bbox.center()))
+        aabb_min = np.array(tuple(recentered.bounding_box().min))
+        aabb_max = np.array(tuple(recentered.bounding_box().max))
         size = aabb_max - aabb_min
         assert np.all(size < np.array(env_size)), (
             f"Compound is too large for the environment. Size: {size}"
@@ -45,7 +46,7 @@ class Task(ABC):
             [
                 target_xy[0] - aabb_min[0],  # Move to target X
                 target_xy[1] - aabb_min[1],  # Move to target Y
-                -aabb_min[2],  # Move up to make Z-min = 0
+                size[2] / 2,  # move to aabb center of the Z axis for 0
             ]
         )
 
@@ -54,11 +55,10 @@ class Task(ABC):
         # print(f"Moving by offset: {offset}")
 
         # Move the entire compound as a single unit
-        result = compound.located(Location(offset))
-
-        # # Debug: Check the resulting position
-        # result_bbox = result.bounding_box()
-        # print(f"Resulting bbox: min={result_bbox.min}, max={result_bbox.max}")
+        result = recentered.located(Location(offset))  # located as absolute pos.
+        result = result.moved(
+            Pos(0, 0, -result.bounding_box().min.Z)
+        )  # moved to match -Z.
 
         # Verify the result meets our requirements
         result_bbox = result.bounding_box()
@@ -73,7 +73,7 @@ class Task(ABC):
         assert np.allclose(result_max - result_min, size, atol=1e-6), (
             f"Dimensions should be preserved as {size}, got {result_max - result_min}"
         )
-        assert np.all(result_min >= 0), (
+        assert np.all(result_min >= -1e-6), (  # allow for floating point errors
             f"All dimensions should be non-negative, got {result_min}"
         )
         assert np.all(result_max <= env_size), (
@@ -264,8 +264,12 @@ class AssembleTask(Task):
 
         # remove all joints between all parts and recenter (preprocess)
         for component in components:
+            # remove all joints
+            # component.joints = {}
+            # FIXME: unfinished. in fact, it is wrong - it would remove the joints completely.
             for joint in component.joints.values():
                 joint.connected_to = None
+
             # recenter all objects at their AABB center:
             # get current center
             center = np.array(tuple(component.center(CenterOf.BOUNDING_BOX)))
@@ -283,7 +287,8 @@ class AssembleTask(Task):
             if abs(angle) > 1e-6:  # Only rotate if angle is not zero
                 # Create an axis of rotation at the part's center
                 rotation_axis_obj = Axis(
-                    origin=component.center(), direction=rotation_axis
+                    origin=component.center(CenterOf.BOUNDING_BOX),
+                    direction=rotation_axis,
                 )
                 component = component.rotate(
                     rotation_axis_obj, angle * 180 / np.pi
@@ -324,21 +329,30 @@ class AssembleTask(Task):
 
             # this is assuming the part is centered at the origin, which it should be. although not necessarily...
             pos = Pos(x, y, component.bounding_box().size.Z / 2)
-            new_parts.append(component.located(pos))
+
+            #split the op to definitely move correctly.
+            moved_xy = component.located(pos)
+            moved_z = moved_xy.moved(Pos(0, 0, -moved_xy.bounding_box().min.Z))
+            new_parts.append(moved_z)
+            #### debug
+            assert np.isclose(moved_z.bounding_box().min.Z, 0), (
+                f"New component has non-zero minimum Z: {moved_z.bounding_box().min.Z}"
+            )
+            # /debug
 
         # Rebuild compound with new part positions
         new_compound = Compound(children=new_parts)
-        assert np.isclose(new_compound.bounding_box().min.Z, 0), (
+        assert np.isclose(
+            [child.bounding_box().min.Z for child in new_compound.children], 0
+        ).all(), (
             f"New compound has non-zero minimum Z: {new_compound.bounding_box().min.Z}"
         )
         assert (
-            np.array(new_compound.bounding_box().min.to_tuple()) >= safe_env_min
+            np.array(tuple(new_compound.bounding_box().min))+1e-6 >= safe_env_min
         ).all(), (
             f"New compound has minimum below safe environment minimum. AABB: {new_compound.bounding_box()}"
         )
-        assert (
-            np.array(new_compound.bounding_box().max.to_tuple()) <= env_size
-        ).all(), (
+        assert (np.array(tuple(new_compound.bounding_box().max))-1e-6 <= env_size).all(), (
             f"New compound has maximum above environment maximum. AABB: {new_compound.bounding_box()}"
         )
 
