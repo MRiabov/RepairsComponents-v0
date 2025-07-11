@@ -62,8 +62,12 @@ def fastener_hole(radius: float, depth: float, id: int):
     return fastener_hole1, fastener_loc, joint  # TODO - add joint axis?
 
 
-###debug:
+###debug utils:
 
+def get_all_joints(compound: Compound):
+    return [joint.connected_to for c in compound.children for joint in c.joints.values()]
+
+    
 
 def compute_inertial(part: Part, density=1):
     assert part.center(CenterOf.BOUNDING_BOX) == (0, 0, 0), "Part must be centered"

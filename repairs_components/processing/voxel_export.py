@@ -63,6 +63,7 @@ def export_voxel_grid(
     cached=False,
     cache: dict[str, dict[str, Any]] | None = None,
     save: bool = False,
+    scene_id: int | None = None,
     save_path: Path | None = None,
     scene_file_name: str | None = None,
     device: str = "cpu",
@@ -75,6 +76,7 @@ def export_voxel_grid(
         voxel_size: size of each voxel.
         grid_size: target output grid size; result is zero-padded to this shape.
         cached: if True, use and return a cache dict for mesh and voxel data.
+        scene_id: id of the scene. If None, voxel grid will not be saved.
         cache: dict to use for caching mesh and voxel data (optional, only used if cached=True).
 
     Returns:

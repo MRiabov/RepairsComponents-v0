@@ -101,15 +101,17 @@ class EnvSetup(ABC):
                 f"Part type must be one of {('solid', 'fastener', 'connector', 'button', 'led', 'switch', 'connector_def')}. Currently have: {part_type}."
             )
             if part_type == "fastener":
-                assert part.joints["fastener_joint_a"].connected_to is not None, (
-                    "Fastener joint A must be connected."
-                )
-                assert isinstance(part.joints["fastener_joint_a"].connected_to, Part), (
+                assert (
+                    part.joints["fastener_joint_a"].connected_to.parent is not None
+                ), "Fastener joint A must be connected."
+
+                parent = part.joints["fastener_joint_a"].connected_to.parent
+                assert isinstance(parent, Part), (
                     "Fastener joint A must be connected to a part."
                 )
-                assert part.joints["fastener_joint_a"].connected_to.label.endswith(
-                    "@solid"
-                ), "Fastener joint A must be connected to a solid."
+                assert parent.label.endswith(("@solid", "@fixed_solid")), (
+                    f"Fastener joint A must be connected to a solid. Current label: {parent.label}"
+                )
 
             elif part_type == "connector":
                 assert part_name.endswith("male") or part_name.endswith("female"), (

@@ -102,13 +102,12 @@ class Connector(ElectricalComponent):
         assert Path(mesh_file_path).exists(), (
             f"Mesh file {mesh_file_path} does not exist. Expected obj file."
         )
-        #load mesh, compute mass and inertia.
+        # load mesh, compute mass and inertia.
         mesh = trimesh.load(mesh_file_path)
         mesh.density = density
         mass_properties = mesh.mass_properties
         mesh_inertia = mass_properties.inertia
-        
-        
+
         return f"""<mujoco>
         <asset>
             <mesh name="{name}" file="{mesh_file_path}"/>
@@ -219,10 +218,11 @@ class Connector(ElectricalComponent):
         geom.children[1].label = base_name + "@connector_def"
         geom.label = base_name + "_compound"
 
-        print(
-            f"{base_name}_connector_collision_detection_position",
-            geom.children[1].center(CenterOf.BOUNDING_BOX),
-        )
+        # util to print connector collision position
+        # print(
+        #     f"{base_name}_connector_collision_detection_position",
+        #     geom.children[1].center(CenterOf.BOUNDING_BOX),
+        # )
 
         return geom
 

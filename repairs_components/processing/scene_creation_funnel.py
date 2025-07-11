@@ -469,6 +469,7 @@ def persist_meshes_and_mjcf(
                     False, length=fastener_height, diameter=fastener_diameter
                 ).get_mjcf()
                 # fastener_shared_path.parent.mkdir(parents=True, exist_ok=True)
+                fastener_shared_path.parent.mkdir(parents=True, exist_ok=True)
                 with open(fastener_shared_path, "w") as f:
                     f.write(fastener_mjcf)
 

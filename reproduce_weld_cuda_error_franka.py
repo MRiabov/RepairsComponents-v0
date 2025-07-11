@@ -97,7 +97,7 @@ scene.reset()
 attach_tool_to_arm(scene, sphere_tool, franka, torch.arange(3))
 scene.step()
 scene.reset()
-#detach and attach back
+# detach and attach back
 detach_tool_from_arm(scene, sphere_tool, franka, env_idx)
 scene.step()
 scene.reset()

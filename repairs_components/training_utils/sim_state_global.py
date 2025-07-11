@@ -38,10 +38,11 @@ class RepairsSimState(SimState):
         self.physical_state = [PhysicalState() for _ in range(batch_dim)]
         self.fluid_state = [FluidState() for _ in range(batch_dim)]
         self.tool_state = [ToolState() for _ in range(batch_dim)]
+        
 
     def diff(self, other: "RepairsSimState"):  # batched diff.
         assert len(self.electronics_state) == len(other.electronics_state), (
-            "Batch dim mismatch!"
+            "Batch dim mismatch in sim state diff!"
         )
         electronics_diffs = []
         electronics_diff_counts = []

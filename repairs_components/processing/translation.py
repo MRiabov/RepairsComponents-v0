@@ -83,7 +83,7 @@ def translate_state_to_genesis_scene(
             new_entity = scene.add_entity(mesh, surface=surface)
         elif part_type == "connector":
             # NOTE: links to keep was on UDRF, not on mjcf!!!
-            mesh = gs.morphs.MJCF(file=mesh_or_mjcf_path)
+            mesh = gs.morphs.Mesh(file=mesh_or_mjcf_path)
             new_entity = scene.add_entity(mesh, surface=surface)
         elif part_type in ("button", "led", "switch"):
             # NOTE: links to keep was on UDRF, not on mjcf!!!
@@ -193,7 +193,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
             # TODO: I haven't explicitly handled fixed solids, but it may be unnecessary(?)
             hole_pos = get_fastener_hole_positions(entity, device=device)
             fastener_hole_positions[full_name] = hole_pos
-            pos_all = entity.get_pos(env_idx) # fixme: 0,0,0 on pos?
+            pos_all = entity.get_pos(env_idx)  # fixme: 0,0,0 on pos?
             quat_all = entity.get_quat(env_idx)
             for i in range(n_envs):
                 sim_state.physical_state[i].update_body(
@@ -209,10 +209,11 @@ def translate_genesis_to_python(  # translate to sim state, really.
                     relative_connector_pos = Connector.from_name(
                         part_name
                     ).connector_pos_relative_to_center_female
+                relative_connector_pos = relative_connector_pos
                 scene_connector_pos = get_connector_pos(
                     pos_all,
                     quat_all,
-                    torch.tensor(relative_connector_pos, device=device),
+                    torch.tensor(relative_connector_pos, device=device) / 1000,
                 )
                 if male:
                     male_connector_positions[full_name] = scene_connector_pos
@@ -280,9 +281,11 @@ def translate_compound_to_sim_state(
         expected_bounds_min = np.array((0, 0, 0))
         expected_bounds_max = np.array((env_size[0], env_size[1], env_size[2]))
         assert (
-            np.array(tuple(b123d_compound.bounding_box().min)) >= expected_bounds_min
+            np.array(tuple(b123d_compound.bounding_box().min)) + 1e-6
+            >= expected_bounds_min
         ).all() and (
-            np.array(tuple(b123d_compound.bounding_box().max)) <= expected_bounds_max
+            np.array(tuple(b123d_compound.bounding_box().max)) - 1e-6
+            <= expected_bounds_max
         ).all(), (
             f"Compound must be within bounds. Currently have {b123d_compound.bounding_box()}. Expected AABB min: {expected_bounds_min}, max: {expected_bounds_max} "
             f"\nAABBs of all parts: { {p.label: p.bounding_box() for p in b123d_compound.leaves} }"
@@ -412,7 +415,6 @@ def create_constraints_based_on_graph(
     env_idx: torch.Tensor | None = None,
 ):
     """Create fastener (weld) constraints based on graph. Done once in the start."""  # note: in the future could be e.g. bearing constraints. But weld constraints as fasteners for now.
-    return  # debug because something breaks.
     rigid_solver = scene.sim.rigid_solver
     all_base_links = {}
     if env_idx is None:
