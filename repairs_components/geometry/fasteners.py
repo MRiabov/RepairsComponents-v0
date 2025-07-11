@@ -26,21 +26,25 @@ class Fastener(Component):
         initial_body_a: str
         | None = None,  # how will it be constrained in case of hole?
         initial_body_b: str | None = None,
-        thread_pitch: float = 0.5,  # mm
         length: float = 15.0,  # mm
         diameter: float = 5.0,  # mm
+        *,
+        b_depth: float = 5.0,
         head_diameter: float = 7.5,  # mm
         head_height: float = 3.0,  # mm
+        thread_pitch: float = 0.5,  # mm
         screwdriver_name: str = "screwdriver",
     ):
         # assert initial_body_a is not None, "initial_body_a must be provided"
         assert head_diameter > diameter, (
             "head_diameter of a fastener must be greater than diameter"
         )
+        assert b_depth > 0, "b_depth of a fastener must be greater than 0"
         self.initial_body_a = initial_body_a
         self.initial_body_b = initial_body_b
         self.thread_pitch = thread_pitch
         self.length = length
+        self.b_depth = b_depth
         self.diameter = diameter
         self.head_diameter = head_diameter
         self.head_height = head_height
@@ -118,9 +122,28 @@ class Fastener(Component):
                 )
             head.faces().filter_by(Axis.Z).sort_by(Axis.Z).last
 
-            RigidJoint("fastener_joint_a")
-            RigidJoint("fastener_joint_b")
-            RigidJoint("fastener_joint_tip")
+            RigidJoint(
+                "fastener_joint_a",
+                joint_location=shaft.faces()
+                .filter_by(Axis.Z)
+                .sort_by(Axis.Z)
+                .last.center_location,
+            )  # lowest point of head/top of shaft (top of shaft because there were rotation issues)
+            RigidJoint(
+                "fastener_joint_b",
+                joint_location=shaft.faces()
+                .filter_by(Axis.Z)
+                .sort_by(Axis.Z)
+                .last.offset(amount=-self.b_depth)
+                .center_location,
+            )  # lowest point of the head + offset
+            RigidJoint(
+                "fastener_joint_tip",
+                joint_location=fastener.faces()
+                .filter_by(Axis.Z)
+                .sort_by(Axis.Z)
+                .first.center_location,
+            )  # lowest point of the fastener
 
         fastener = fastener.part
         fastener.color = Color(0.58, 0.44, 0.86, 0.8)

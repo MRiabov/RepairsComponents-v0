@@ -6,37 +6,46 @@ from build123d import *
 from repairs_components.geometry.b123d_utils import fastener_hole
 
 
-class TenHoles(EnvSetup):
-    "Put 10 fasteners in 10 holes."
-
-    # note: everything is created in mm.
+class ClampPlates(EnvSetup):
+    "Clamp two plates together with a fastener."
 
     def desired_state_geom(self) -> Compound:
-        with BuildPart() as base_box:
-            Box(200, 200, 200)
+        with BuildPart() as top_plate:
+            Box(30, 20, 10)
+            fillet(  # just a differentiator to see rotation.
+                top_plate.faces().filter_by(Axis.X).sort_by(Axis.X).last.edges(),
+                radius=1,
+            )
+
             joints = []
-            with Locations(base_box.faces().filter_by(Axis.Z).sort_by(Axis.Z).last):
-                grid_locs = GridLocations(15, 0, 10, 1)
+            with Locations(top_plate.faces().filter_by(Axis.Z).sort_by(Axis.Z).last):
+                grid_locs = GridLocations(15, 0, 2, 1)
             for i, loc in enumerate(grid_locs.local_locations):
                 with Locations(loc):
                     _hole, _loc, joint = fastener_hole(radius=3, depth=16, id=i)
                     joints.append(joint)
-            debug__ = ""
+
+        bottom_plate = top_plate.part.moved(Location((0, 0, -5)))
 
         start_fastener, collision_detection_position = Fastener(
-            False, initial_body_a="base_box@fixed_solid"
+            False,
+            initial_body_a="top_plate@fixed_solid",
+            initial_body_b="bottom_plate@fixed_solid",
+            b_depth=10,
         ).bd_geometry()
         fasteners = []
         for i, loc in enumerate(grid_locs.locations):
             moved_fastener = start_fastener.located(loc)
-            # moved_fastener = copy.copy(start_fastener) # for whichever reason puts all fasteners one last hole. 
-            # Probably due to references...
             moved_fastener.joints["fastener_joint_a"].connect_to(joints[i])
+            moved_fastener.joints["fastener_joint_b"].connect_to(
+                bottom_plate.joints[joints[i].label]
+            )
             fasteners.append(moved_fastener)
-        base_box.part.label = "base_box@fixed_solid"
+        top_plate.part.label = "top_plate@fixed_solid"
+        bottom_plate.label = "bottom_plate@fixed_solid"
 
         # don't add start_fastener (it's for copy only)
-        return Compound(children=[base_box.part, *fasteners]).moved(
+        return Compound(children=[top_plate.part, bottom_plate, *fasteners]).moved(
             Location((320, 320, 320))
         )
 
@@ -46,6 +55,6 @@ class TenHoles(EnvSetup):
 
 
 if __name__ == "__main__":
-    env_setup = TenHoles()
+    env_setup = ClampPlates()
     show(env_setup.desired_state_geom())
     env_setup.validate()
