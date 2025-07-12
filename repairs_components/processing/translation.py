@@ -169,23 +169,6 @@ def translate_genesis_to_python(  # translate to sim state, really.
     female_connector_positions: dict[str, torch.Tensor] = {}
     picked_up_tip = torch.full((n_envs, 3), float("nan"), device=device)
 
-    def get_connector_pos(
-        parent_pos: torch.Tensor,
-        parent_quat: torch.Tensor,
-        rel_connector_pos: torch.Tensor,
-    ):
-        return (
-            parent_pos
-            + rel_connector_pos
-            + 2
-            * torch.cross(
-                parent_quat[:, 1:],
-                torch.cross(parent_quat[:, 1:], rel_connector_pos.unsqueeze(0), dim=-1)
-                + parent_quat[:, 0:1] * rel_connector_pos,
-                dim=-1,
-            )
-        )
-
     # loop entities and dispatch by suffix
     for full_name, entity in gs_entities.items():
         part_name, part_type = full_name.split("@")
@@ -313,7 +296,7 @@ def translate_compound_to_sim_state(
                     # position=tuple(part.position), # this isn't always true
                     position=tuple(part.center(CenterOf.BOUNDING_BOX)),
                     rotation=tuple(part.global_location.orientation),
-                    fixed=fixed,
+                    fixed=fixed,  # FIXME: orientation is as euler but I need quat!
                 )
             elif part_type == "fastener":  # collect constraints, get labels of bodies,
                 # collect constraints (in build123d named joints)
@@ -469,7 +452,7 @@ def create_constraints_based_on_graph(
     # the weld constraints just once per pair.
     for (fastener_idx, body_idx), env_ids in connections.items():
         # Deduplicate env_ids to be safe
-        unique_env_ids = sorted(set(env_ids))
+        unique_env_ids = sorted(set(env_ids))  # why sorted?
         rigid_solver.add_weld_constraint(
             torch.tensor(fastener_idx).unsqueeze(0).cuda().contiguous(),
             torch.tensor(body_idx).unsqueeze(0).cuda().contiguous(),
@@ -480,3 +463,22 @@ def create_constraints_based_on_graph(
 
 def reset_constraints(scene: gs.Scene):
     scene.sim.rigid_solver.joints.clear()  # maybe it'll work?
+
+
+def get_connector_pos(
+    parent_pos: torch.Tensor, parent_quat: torch.Tensor, rel_connector_pos: torch.Tensor
+):
+    """
+    Get the position of a connector relative to its parent. Used both in translation from compound to sim state and in screwdriver offset.
+    """
+    return (
+        parent_pos
+        + rel_connector_pos
+        + 2
+        * torch.cross(
+            parent_quat[:, 1:],
+            torch.cross(parent_quat[:, 1:], rel_connector_pos.unsqueeze(0), dim=-1)
+            + parent_quat[:, 0:1] * rel_connector_pos,
+            dim=-1,
+        )
+    )

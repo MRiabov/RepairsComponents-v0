@@ -20,7 +20,6 @@ from repairs_components.processing.scene_creation_funnel import (
 from repairs_components.processing.tasks import Task
 from repairs_components.processing.translation import (
     create_constraints_based_on_graph,
-    reset_constraints,
 )
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
@@ -68,8 +67,6 @@ class RepairsEnv(gym.Env):
         reward_cfg: dict,
         command_cfg: dict,
         num_scenes_per_task: int = 1,
-        # concurrent_scenes: int = 1,
-        use_offline_dataset: bool = False,
     ):
         """Initialize the Repairs environment.
 
@@ -87,7 +84,7 @@ class RepairsEnv(gym.Env):
         # Store basic environment parameters
         self.num_actions = env_cfg["num_actions"]
         self.num_obs = obs_cfg["num_obs"]
-        self.device = gs.device
+        self.device = torch.device("cuda:0")  # can be changed to CPU.
         self.dt = env_cfg.get("dt", 0.02)  # Default to 50Hz if not specified
         self.tasks = tasks
         self.env_setups = env_setups
@@ -210,9 +207,13 @@ class RepairsEnv(gym.Env):
             dtype=torch.int16,
         )
         # self.env_dataloader.populate_async(in_memory)  # is it still necessary?
-        partial_env_configs = self.env_dataloader.get_processed_data(
-            torch.full(
-                (self.concurrent_scenes,), self.per_scene_batch_dim, dtype=torch.int16
+        partial_env_configs: list[ConcurrentSceneData | None] = (  # type: ignore
+            self.env_dataloader.get_processed_data(
+                torch.full(
+                    (self.concurrent_scenes,),
+                    self.per_scene_batch_dim,
+                    dtype=torch.int16,
+                )
             )
         )  # get a batch of configs size prefetch_memory_size
 
@@ -233,6 +234,9 @@ class RepairsEnv(gym.Env):
                     shadow=True,
                 ),  # type: ignore
                 rigid_options=gs.options.RigidOptions(max_dynamic_constraints=128),
+                profiling_options=gs.options.ProfilingOptions(
+                    show_FPS=io_cfg["show_fps"]
+                ),
                 # note^: max_dynamic constraints is 8 by default. 128 is too low too.
                 # show_FPS=False,
             )
@@ -291,7 +295,8 @@ class RepairsEnv(gym.Env):
             for i, rgb_img in enumerate(debug_render):
                 cv2.imwrite(
                     str(
-                        debug_render_dir / f"debug_render_{scene_data.scene_id}_{i}.png"
+                        debug_render_dir
+                        / f"debug_render_{scene_data.scene_id}_cam_{i}_init.png"
                     ),
                     rgb_img,
                 )
@@ -371,6 +376,8 @@ class RepairsEnv(gym.Env):
                 scene_data.gs_entities,
                 scene_data.current_state,
                 scene_data.desired_state,
+                starting_hole_positions,
+                starting_hole_quats,
             )
 
             # Update the scene data with the new state

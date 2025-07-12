@@ -12,8 +12,17 @@ from build123d import *  # noqa: F403
 @dataclass
 class Screwdriver(Tool):
     picked_up_fastener_name: str | None = None
-    picked_up_fastener: bool = False
+    has_picked_up_fastener: bool = False
+    picked_up_fastener_tip_position: torch.Tensor | None = None
     name: str = "screwdriver"  # deprecated
+
+    @staticmethod
+    def tool_connector_pos_relative_to_center():
+        return torch.tensor([0, 0, 0.3])  # 0.3m?
+
+    @staticmethod
+    def fastener_connector_pos_relative_to_center():
+        return torch.tensor([0, 0, -0.2])  # 0.2m?
 
     def step(self, action: torch.Tensor, state: dict):
         raise NotImplementedError
@@ -66,15 +75,41 @@ class Screwdriver(Tool):
         return base_dir / f"shared/tools/screwdriver.{file_extension}"
 
 
-def receive_screw_in_action(actions: torch.Tensor):
+def receive_screw_in_action(
+    actions: torch.Tensor,
+    screw_in_threshold: float = 0.75,
+    screw_out_threshold: float = 0.25,
+):
     assert actions.shape[1] == 10, (
         "Screwdriver action check expects that action has shape [batch, 9]"
     )
     assert actions.ndim == 2, (
         "Screwdriver action check expects that action has shape [batch, action_dim]"
     )
-    screw_in = actions[:, 8]
-    assert screw_in.ndim == 1, (
+    screw_in_action = actions[:, 8]
+    assert screw_in_action.ndim == 1, (
         "Screwdriver action check expects that action has shape [batch]"
     )
-    return screw_in > 0.5
+    screw_in_mask = screw_in_action > screw_in_threshold
+    screw_out_mask = screw_in_action < screw_out_threshold
+    return screw_in_mask, screw_out_mask
+
+
+def receive_fastener_pickup_action(
+    actions: torch.Tensor,
+    pick_up_threshold: float = 0.75,
+    release_threshold: float = 0.25,
+):
+    assert actions.shape[1] == 10, (
+        "Screwdriver action check expects that action has shape [batch, 9]"
+    )
+    assert actions.ndim == 2, (
+        "Screwdriver action check expects that action has shape [batch, action_dim]"
+    )
+    screw_in_action = actions[:, 7]  # note: maybe 7. Maybe not.
+    assert screw_in_action.ndim == 1, (
+        "Screwdriver action check expects that action has shape [batch]"
+    )
+    screw_in_mask = screw_in_action > pick_up_threshold
+    screw_out_mask = screw_in_action < release_threshold
+    return screw_in_mask, screw_out_mask

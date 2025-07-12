@@ -41,6 +41,10 @@ class ConcurrentSceneData:
     "Step count in every scene. I don't think this should be diffed."
     task_ids: torch.IntTensor
     "Task ids in for every scene."
+    starting_hole_positions: dict[str, torch.Tensor]
+    "Starting hole positions for every part."
+    starting_hole_quats: dict[str, torch.Tensor]
+    "Starting hole quats for every part."
 
     # debug
     def __post_init__(self):

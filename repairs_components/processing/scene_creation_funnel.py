@@ -243,17 +243,18 @@ def initialize_and_build_scene(
     )
 
     # initiate cameras and others in genesis scene:
-    first_desired_scene, cameras, franka, screwdriver, screwdriver_grip = (
+    first_desired_scene, cameras, franka, screwdriver, _tooling_stand = (
         add_base_scene_geometry(first_desired_scene, base_dir, batch_dim=batch_dim)
     )
     initial_gs_entities["franka@control"] = franka
     initial_gs_entities["screwdriver@control"] = screwdriver
-    initial_gs_entities["screwdriver_grip@tool_grip"] = screwdriver_grip
+    # initial_gs_entities["screwdriver_grip@tool_grip"] = screwdriver_grip
 
     # build a single scene... but batched
     print(f"Building scene number {scene_id}...")
     start_time = time.time()
     first_desired_scene.build(n_envs=batch_dim)
+
     # scene.rigid_solver.add_weld_constraint(
     #     screwdriver_grip.base_link.idx,
     #     screwdriver.base_link.idx,
@@ -261,6 +262,15 @@ def initialize_and_build_scene(
     # ) # note: fails with cuda error (?). Just constrain directly for now.
 
     print(f"Built scene number {scene_id} in {time.time() - start_time} seconds.")
+
+    screwdriver_aabb = screwdriver.get_AABB()
+    screwdriver_size = screwdriver_aabb[:, 1] - screwdriver_aabb[:, 0]
+    tooling_stand_aabb = _tooling_stand.get_AABB()
+    tooling_stand_size = tooling_stand_aabb[:, 1] - tooling_stand_aabb[:, 0]
+
+    print(
+        f"Debug: screwdriver size: {screwdriver_size}, pos: {screwdriver.get_pos()}, tooling_stand size: {tooling_stand_size}, pos: {_tooling_stand.get_pos()}"
+    )
 
     # ===== Control Parameters =====
     # Set PD control gains (tuned for Franka Emika Panda)
@@ -327,20 +337,24 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
     screwdriver_: RigidEntity = scene.add_entity(
         gs.morphs.Mesh(
             file=str(screwdriver_stub.export_path(base_dir)),
-            pos=(-0.2, -(0.64 / 2 + 0.2 / 2), 0),
-            scale=0.1,
+            pos=(-0.2, -(0.64 / 2 + 0.2 / 2), 0.2),
+            scale=1,
         ),
         surface=gs.surfaces.Plastic(color=(1.0, 0.5, 0.0, 1)),
     )  # TODO set x pos to be more appropriate
     # note: some issues with adding a link... so I will `weld` the attachment 0-volume body to the base link
     # this is a fairly bad solution though.
-    screwdriver_grip: RigidEntity = scene.add_entity(
-        gs.morphs.Sphere(
-            pos=(-0.2, -(0.64 / 2 + 0.2 / 2), 0.3), radius=0.001, collision=False
-        )
-    )  # type: ignore
+    # screwdriver_grip: RigidEntity = scene.add_entity(
+    #     gs.morphs.Sphere(
+    #         pos=(-0.2, -(0.64 / 2 + 0.2 / 2), 0.3), radius=0.001, collision=False
+    #     )
+    # )  # type: ignore
+    # scene.sim.rigid_solver.add_weld_constraint(
+    #     screwdriver_grip.base_link.idx,
+    #     screwdriver_.base_link.idx,
+    # ) # NOTE: screwdriver grip is deprecated because better to just compute fixed frame reference.
 
-    return (scene, [camera_1, camera_2], franka, screwdriver_, screwdriver_grip)
+    return scene, [camera_1, camera_2], franka, screwdriver_, tooling_stand
 
 
 def move_entities_to_pos(

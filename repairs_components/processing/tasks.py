@@ -330,7 +330,7 @@ class AssembleTask(Task):
             # this is assuming the part is centered at the origin, which it should be. although not necessarily...
             pos = Pos(x, y, component.bounding_box().size.Z / 2)
 
-            #split the op to definitely move correctly.
+            # split the op to definitely move correctly.
             moved_xy = component.located(pos)
             moved_z = moved_xy.moved(Pos(0, 0, -moved_xy.bounding_box().min.Z))
             new_parts.append(moved_z)
@@ -348,11 +348,13 @@ class AssembleTask(Task):
             f"New compound has non-zero minimum Z: {new_compound.bounding_box().min.Z}"
         )
         assert (
-            np.array(tuple(new_compound.bounding_box().min))+1e-6 >= safe_env_min
+            np.array(tuple(new_compound.bounding_box().min)) + 1e-6 >= safe_env_min
         ).all(), (
             f"New compound has minimum below safe environment minimum. AABB: {new_compound.bounding_box()}"
         )
-        assert (np.array(tuple(new_compound.bounding_box().max))-1e-6 <= env_size).all(), (
+        assert (
+            np.array(tuple(new_compound.bounding_box().max)) - 1e-6 <= env_size
+        ).all(), (
             f"New compound has maximum above environment maximum. AABB: {new_compound.bounding_box()}"
         )
 

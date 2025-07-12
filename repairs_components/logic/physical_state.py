@@ -41,6 +41,14 @@ class PhysicalState:
     body_indices: dict[str, int] = field(default_factory=dict)
     inverse_indices: dict[int, str] = field(default_factory=dict)
     # fastener_ids: dict[int, str] = field(default_factory=dict) # fixme: I don't remember how, but this is unused.
+    hole_indices_from_name: dict[str, int] = field(default_factory=dict)
+    """Hole indices per part name."""
+    hole_indices_batch: torch.Tensor = field(default_factory=torch.empty)
+    """Hole indices per part in the batch."""
+    hole_positions: torch.Tensor = field(default_factory=torch.empty)
+    """Hole positions per part."""
+    hole_quats: torch.Tensor = field(default_factory=torch.empty)
+    """Hole quats per part."""
 
     # Fastener metadata (shared across batch)
     # fastener: dict[str, Fastener] = field(default_factory=dict)
@@ -219,7 +227,7 @@ class PhysicalState:
         # assert position.shape == (3,) and rotation.shape == (4,) # was a tensor.
         assert len(position) == 3 and len(rotation) == 3, (
             f"Position must be 3D vector, got {position}"
-            f"Rotation must be 4D vector, got {rotation}"
+            f"Rotation must be 3D vector, got {rotation}. Note: transformation to quat already happens in this function."
         )
         from scipy.spatial.transform import Rotation as R
 

@@ -29,7 +29,7 @@ class TenHoles(EnvSetup):
         fasteners = []
         for i, loc in enumerate(grid_locs.locations):
             moved_fastener = start_fastener.located(loc)
-            # moved_fastener = copy.copy(start_fastener) # for whichever reason puts all fasteners one last hole. 
+            # moved_fastener = copy.copy(start_fastener) # for whichever reason puts all fasteners one last hole.
             # Probably due to references...
             moved_fastener.joints["fastener_joint_a"].connect_to(joints[i])
             fasteners.append(moved_fastener)

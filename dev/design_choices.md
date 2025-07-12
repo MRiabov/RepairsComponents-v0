@@ -10,17 +10,19 @@ forgoing strings is good because it allows for less manual code work.
 but. how to connect and disconnect and distinguish? how to encode? #<- encoding is done by graph edge attributes.
 
 Fastener insertion protocol:
-given a fastener that is picked up,
-1. find closest hole
-2. check if the hole is close enough
-3. check if there is twisting movement
-4. insert the fastener - connect the fastener to the body's hole.
+given a fastener that is picked up, and that there is twisting movement
+1. find one closest hole *except not the one it's already connected to* (one per env idx per step) #<-edit
+2. check if the hole is close enough 
+3. insert the fastener - connect the fastener to the body's hole.
+ - insert the fastener: rotate and relocate the fastener into the hole, constrain.
 
 Fastener removal protocol:
-1. get picked up fastener
-2. check if there is twisting movement counterclockwise
-3. remove connection from the body's hole
+given a fastener that is picked up, and that there is twisting movement counterclockwise
+1. remove connection from the body's hole / disconnect the fastener from the body's hole (I pick second option.)
+2. Pick up fastener from the body's hole
+ - deconstrain the fastener from the body, rotate and relocate the fastener into the hand, constrain.
 
+To allow ML to constrain two parts, do not remove the fastener from the screwdriver during screw in, and remove it only when the ML decides to release it. The realistic solution pattern would be then move to one hole -> screw in (snap) -> move to another hole -> screw in too. (However the attachment should not happen twice.)
 
 
 but how to know which fastener is picked up?
