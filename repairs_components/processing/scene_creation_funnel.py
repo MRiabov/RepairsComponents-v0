@@ -127,6 +127,11 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             voxel_grids_initial.append(starting_voxel_grid)
             voxel_grids_desired.append(desired_voxel_grid)
 
+            # starting, as "per part, relative to 0,0,0 position"
+            part_holes_pos, part_holes_quat = get_starting_part_holes(
+                starting_scene_geom_
+            )
+
             # create RepairsSimState for both
             starting_sim_state = translate_compound_to_sim_state([starting_scene_geom_])
             desired_sim_state = translate_compound_to_sim_state([desired_state_geom_])
@@ -183,7 +188,9 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             reward_history=RewardHistory(batch_dim=scene_gen_count),
             step_count=torch.zeros(scene_gen_count, dtype=torch.int),
             task_ids=task_ids,
-        )  # type: ignore # inttensor and tensor.
+            starting_hole_positions=part_holes_pos,
+            starting_hole_quats=part_holes_quat,
+        )  # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
 
         if save:
@@ -489,3 +496,43 @@ def persist_meshes_and_mjcf(
 
             mesh_file_names[child.label] = str(fastener_shared_path)
     return mesh_file_names
+
+
+def get_starting_part_holes(compound: Compound):
+    """Get the starting part holes as "per part, relative to 0,0,0 position"""
+    part_holes_pos: dict[str, torch.Tensor] = {}
+    part_holes_quat: dict[str, torch.Tensor] = {}
+    all_parts = compound.leaves
+    filtered_parts = [
+        part
+        for part in all_parts
+        if part.label.endswith(("@solid", "@fixed_solid", "@connector"))
+    ]
+
+    # not other fasteners.
+    for part in filtered_parts:
+        has_fastener_holes = any(
+            joint.label.startswith("fastener_hole_") for joint in part.joints.values()
+        )
+        if has_fastener_holes:
+            fastener_hole_joints = []
+            i = 0
+            while True:
+                fastener_hole_joint = f"fastener_hole_{i}"
+                if fastener_hole_joint in part.joints:
+                    fastener_hole_joints.append(part.joints[fastener_hole_joint])
+                else:
+                    break
+                i += 1
+            part_holes_pos[part.label] = torch.tensor(
+                [tuple(joint.location.position) for joint in fastener_hole_joints]
+            )
+            from scipy.spatial.transform import Rotation as R
+
+            part_holes_quat[part.label] = torch.tensor(
+                [
+                    R.from_euler("xyz", tuple(joint.location.orientation)).as_quat()
+                    for joint in fastener_hole_joints
+                ]
+            )
+    return part_holes_pos, part_holes_quat

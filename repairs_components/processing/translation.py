@@ -8,8 +8,6 @@ import torch
 from pathlib import Path
 from repairs_components.geometry.connectors import connectors
 from repairs_components.geometry.connectors.connectors import Connector
-from repairs_components.logic.electronics.component import ElectricalComponent
-from repairs_components.processing.textures import get_color_by_type, get_random_texture
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.geometry.fasteners import (
@@ -19,6 +17,7 @@ from repairs_components.geometry.fasteners import (
 )
 from torch_geometric.data import Data
 import numpy as np
+import torch.nn.functional as F
 
 
 def translate_state_to_genesis_scene(
@@ -476,9 +475,31 @@ def get_connector_pos(
         + rel_connector_pos
         + 2
         * torch.cross(
-            parent_quat[:, 1:],
-            torch.cross(parent_quat[:, 1:], rel_connector_pos.unsqueeze(0), dim=-1)
-            + parent_quat[:, 0:1] * rel_connector_pos,
+            parent_quat[..., 1:],
+            torch.cross(parent_quat[..., 1:], rel_connector_pos, dim=-1)
+            + parent_quat[..., 0:1] * rel_connector_pos,
             dim=-1,
         )
     )
+
+
+def quat_multiply(
+    q1: torch.Tensor, q2: torch.Tensor, normalize: bool = True
+) -> torch.Tensor:
+    """Quaternion multiplication, q1 ⊗ q2.
+    Inputs: [..., 4] tensors where each quaternion is [w, x, y, z]
+    """
+    w1, x1, y1, z1 = q1.unbind(-1)
+    w2, x2, y2, z2 = q2.unbind(-1)
+    q = torch.stack(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ],
+        dim=-1,
+    )
+    if normalize:
+        q = F.normalize(q, dim=-1)
+    return q

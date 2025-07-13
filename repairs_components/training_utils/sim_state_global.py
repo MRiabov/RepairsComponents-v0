@@ -206,10 +206,13 @@ def reconstruct_sim_state(
     electronics_indices: dict[str, int],
     mechanical_indices: dict[str, int],
     tool_data: torch.Tensor,  # int tensor of tool ids
+    starting_hole_positions: torch.Tensor,
+    starting_hole_quats: torch.Tensor,
     fluid_data_placeholder: list[dict[str, int]] | None = None,
 ) -> RepairsSimState:
     """Load a single simulation state from graphs and indices (i.e. from the offline dataset)"""
     from repairs_components.training_utils.sim_state_global import RepairsSimState
+    from repairs_sim_step import update_hole_locs
 
     assert fluid_data_placeholder is None, NotImplementedError(
         "Fluid data reconstruction is not implemented."
@@ -231,5 +234,8 @@ def reconstruct_sim_state(
     repairs_sim_state.tool_state = [
         ToolState.rebuild_from_saved(indices) for indices in tool_data
     ]
+    repairs_sim_state = update_hole_locs(
+        repairs_sim_state, starting_hole_positions, starting_hole_quats
+    )
 
     return repairs_sim_state

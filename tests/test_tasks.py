@@ -57,7 +57,7 @@ def debug_perturb_and_vis():
 
     task = AssembleTask()
     compound = create_test_compound()
-    env_size = (64, 64, 64)  # 50cm x 50cm x 50cm environment
+    env_size = (640, 640, 640)  # 50cm x 50cm x 50cm environment
 
     # Run the disassembly
     new_compound = task.perturb_initial_state(compound, env_size)
@@ -80,7 +80,7 @@ def test_perturb_desired_state():
     original_min = np.array(original_bbox.min.to_tuple())
 
     # Perturb the desired state
-    env_size = (64, 64, 64)  # Large enough environment
+    env_size = (640, 640, 640)  # Large enough environment
     result = task.perturb_desired_state(box, env_size)
 
     # Verify the result

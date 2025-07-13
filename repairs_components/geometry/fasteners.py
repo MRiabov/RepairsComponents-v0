@@ -6,7 +6,6 @@ from MuJoCo-based simulations.
 """
 
 from pathlib import Path
-from typing_extensions import deprecated
 from repairs_components.geometry.base import Component
 from build123d import *
 from dataclasses import dataclass
@@ -14,7 +13,6 @@ import genesis as gs
 from genesis.engine.entities import RigidEntity
 import numpy as np
 import torch
-from typing import Mapping
 
 from repairs_components.logic.tools.tool import Tool
 

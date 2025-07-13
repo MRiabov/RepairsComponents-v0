@@ -17,6 +17,7 @@ from repairs_components.training_utils.sim_state_global import (
     get_graph_save_paths,
     reconstruct_sim_state,
 )
+from repairs_sim_step import update_hole_locs
 
 # During the loading of the data we load:
 # 1. Graphs
@@ -131,6 +132,7 @@ class OfflineDataloader:
 
         self.vox_init_dict[scene_id] = torch.load(vox_init_path)
         self.vox_des_dict[scene_id] = torch.load(vox_des_path)
+
         print(
             f"Loaded vox init dict for scene_id {scene_id} with shape: {self.vox_init_dict[scene_id].shape}",
         )
@@ -146,6 +148,15 @@ class OfflineDataloader:
         tool_data_init = torch.load(tool_idx_path_init)
         tool_data_des = torch.load(tool_idx_path_des)
 
+        # holes
+        starting_hole_positions = torch.load(
+            self.data_dir / f"scene_{scene_id}" / "starting_hole_positions.pt"
+        )
+        starting_hole_quats = torch.load(
+            self.data_dir / f"scene_{scene_id}" / "starting_hole_quats.pt"
+        )
+        # TODO update them during load based on pos.
+
         # load RepairsEnvState
         init_sim_state = reconstruct_sim_state(
             elec_graphs_init,
@@ -153,6 +164,8 @@ class OfflineDataloader:
             scene_metadata["electronics_indices"],
             scene_metadata["mechanical_indices"],
             tool_data_init,
+            starting_hole_positions,
+            starting_hole_quats,
         )
         des_sim_state = reconstruct_sim_state(
             elec_graphs_des,
@@ -160,6 +173,8 @@ class OfflineDataloader:
             scene_metadata["electronics_indices"],
             scene_metadata["mechanical_indices"],
             tool_data_des,
+            starting_hole_positions,
+            starting_hole_quats,
         )
 
         batch_dim = init_sim_state.scene_batch_dim
@@ -179,6 +194,8 @@ class OfflineDataloader:
             batch_dim=batch_dim,
             task_ids=torch.zeros(batch_dim, dtype=torch.int32),
             step_count=torch.zeros(batch_dim, dtype=torch.int32),
+            starting_hole_positions=starting_hole_positions,
+            starting_hole_quats=starting_hole_quats,
         )
 
         return sim_state
@@ -282,8 +299,16 @@ def check_if_data_exists(
             voxels_dir / f"vox_init_{scene_id}.pt",
             voxels_dir / f"vox_des_{scene_id}.pt",
         ]
+        # holes
+        holes_dir = data_dir / "holes"
+        holes_files = [
+            holes_dir / f"starting_hole_positions_{scene_id}.pt",
+            holes_dir / f"starting_hole_quats_{scene_id}.pt",
+        ]
         # Check all
-        if not all(file_path.exists() for file_path in graph_files + voxel_files):
+        if not all(
+            file_path.exists() for file_path in graph_files + voxel_files + holes_files
+        ):
             return False
 
         # assert that there is enough data:

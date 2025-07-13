@@ -83,6 +83,10 @@ def save_concurrent_scene_metadata(
 
     # states and voxel grids are already saved.
 
+    # hole - persist tensors
+    torch.save(data.starting_hole_positions, scene_dir / "starting_hole_positions.pt")
+    torch.save(data.starting_hole_quats, scene_dir / "starting_hole_quats.pt")
+
     # save metadata
     metadata = {
         "scene_id": scene_id,

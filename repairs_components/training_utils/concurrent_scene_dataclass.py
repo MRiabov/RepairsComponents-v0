@@ -97,6 +97,10 @@ class ConcurrentSceneData:
         assert self.initial_diff_counts.shape[0] == self.batch_dim, (
             f"initial_diff_counts must have the same batch dimension as batch_dim, but got {self.initial_diff_counts.shape[0]} and {self.batch_dim}"
         )
+        # holes
+        assert self.starting_hole_positions.keys() == self.starting_hole_quats.keys(), (
+            "Starting hole positions and quats must have the same keys."
+        )
         # init state != current state
         # assert self.init_state != self.current_state, (
         #     "init_state must not be equal to current_state. If it is, use `copy.copy` to create a new object."
@@ -117,11 +121,22 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         or set(scene_configs[0].gs_entities.keys()) == set(scene_cfg.gs_entities.keys())
         for scene_cfg in scene_configs
     )
+    assert all(
+        scene_configs[0].starting_hole_positions.keys()
+        == scene_cfg.starting_hole_positions.keys()
+        for scene_cfg in scene_configs
+    )
+    assert all(
+        scene_configs[0].starting_hole_quats.keys()
+        == scene_cfg.starting_hole_quats.keys()
+        for scene_cfg in scene_configs
+    )
 
     # create a single big RewardHistorys
     reward_history = RewardHistory(
         batch_dim=sum([data.batch_dim for data in scene_configs])
     )
+
     for data in scene_configs:  # and just merge it in.
         reward_history.merge_at_idx(data.reward_history, torch.arange(data.batch_dim))
 
@@ -143,6 +158,18 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         "electronics_diff": electronics_diffs,
         "fluid_diff": fluid_diffs,
     }
+    starting_hole_positions = {}
+    starting_hole_quats = {}
+
+    for data in scene_configs:
+        # cat per key
+        for key in data.starting_hole_positions.keys():
+            starting_hole_positions[key] = torch.cat(
+                [data.starting_hole_positions[key] for data in scene_configs], dim=0
+            )
+            starting_hole_quats[key] = torch.cat(
+                [data.starting_hole_quats[key] for data in scene_configs], dim=0
+            )
 
     # Extend tensors and RepairsSimState with items from other scene_configs
 
@@ -169,6 +196,8 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         reward_history=reward_history,
         step_count=torch.zeros(new_batch_dim, dtype=torch.int),
         task_ids=torch.cat([data.task_ids for data in scene_configs], dim=0),
+        starting_hole_positions=starting_hole_positions,
+        starting_hole_quats=starting_hole_quats,
     )
     return new_scene_config
 
@@ -197,7 +226,10 @@ def merge_scene_configs_at_idx(
     assert new_scene_config.batch_dim == reset_mask.int().sum(), (
         "Count of reset configs must be equal to the batch dimension of the incoming configs."
     )
-
+    assert (
+        old_scene_config.starting_hole_positions.keys()
+        == new_scene_config.starting_hole_positions.keys()
+    ), "Starting hole positions must have the same keys."
     if torch.any(reset_mask):
         old_idx = torch.nonzero(reset_mask).squeeze(1)
         new_idx = torch.arange(len(old_idx))
@@ -231,6 +263,8 @@ def merge_scene_configs_at_idx(
             ),
             step_count=old_scene_config.step_count.clone(),
             task_ids=old_scene_config.task_ids.clone(),
+            starting_hole_positions=old_scene_config.starting_hole_positions,
+            starting_hole_quats=old_scene_config.starting_hole_quats,
         )
         # Update vox_init and vox_des for reset states
         merged_scene_config.vox_init = sparse_arr_put(
@@ -259,6 +293,7 @@ def merge_scene_configs_at_idx(
         merged_scene_config.task_ids[old_idx] = new_scene_config.task_ids.to(
             old_scene_config.task_ids.device
         )
+        # holes are unupdated because they are static throughout scene.
     return merged_scene_config
 
 
@@ -332,6 +367,14 @@ def split_scene_config(scene_config: ConcurrentSceneData):
                 reward_history=RewardHistory(batch_dim=1),
                 step_count=scene_config.step_count[i],
                 task_ids=scene_config.task_ids[i : i + 1],
+                starting_hole_positions={
+                    k: scene_config.starting_hole_positions[k][i : i + 1]
+                    for k in scene_config.starting_hole_positions
+                },
+                starting_hole_quats={
+                    k: scene_config.starting_hole_quats[k][i : i + 1]
+                    for k in scene_config.starting_hole_quats
+                },
             )
         )
     return cfg_list

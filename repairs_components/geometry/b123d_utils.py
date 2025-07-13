@@ -74,3 +74,11 @@ def get_all_joints(compound: Compound):
 def compute_inertial(part: Part, density=1):
     assert part.center(CenterOf.BOUNDING_BOX) == (0, 0, 0), "Part must be centered"
     return part.matrix_of_inertia * density
+
+
+# todo: put this everywhere where necessary
+def recenter_part(part: Part):
+    "Return a recentered to origin copy of self."
+    assert isinstance(part, Part), "Part must be a Part object"
+    center = part.center(CenterOf.BOUNDING_BOX)
+    return part.moved(Pos(-center))

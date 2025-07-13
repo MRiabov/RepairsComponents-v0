@@ -29,8 +29,8 @@ class ClampPlates(EnvSetup):
 
         start_fastener, collision_detection_position = Fastener(
             False,
-            initial_body_a="top_plate@fixed_solid",
-            initial_body_b="bottom_plate@fixed_solid",
+            initial_body_a="top_plate@solid",
+            initial_body_b="bottom_plate@solid",
             b_depth=10,
         ).bd_geometry()
         fasteners = []
@@ -41,8 +41,8 @@ class ClampPlates(EnvSetup):
                 bottom_plate.joints[joints[i].label]
             )
             fasteners.append(moved_fastener)
-        top_plate.part.label = "top_plate@fixed_solid"
-        bottom_plate.label = "bottom_plate@fixed_solid"
+        top_plate.part.label = "top_plate@solid"
+        bottom_plate.label = "bottom_plate@solid"
 
         # don't add start_fastener (it's for copy only)
         return Compound(children=[top_plate.part, bottom_plate, *fasteners]).moved(

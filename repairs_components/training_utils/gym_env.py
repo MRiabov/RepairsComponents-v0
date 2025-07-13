@@ -123,6 +123,7 @@ class RepairsEnv(gym.Env):
         debug_render_dir.mkdir(exist_ok=True)
         for scene_id in io_cfg["env_setup_ids"]:
             (base_dir / f"scene_{scene_id}").mkdir(exist_ok=True)
+            (base_dir / f"scene_{scene_id}/holes").mkdir(exist_ok=True)
         use_random_textures = obs_cfg["use_random_textures"]
 
         # save config
@@ -267,6 +268,10 @@ class RepairsEnv(gym.Env):
                 batch_dim=self.per_scene_batch_dim,
                 step_count=torch.zeros(self.per_scene_batch_dim, dtype=torch.int),
                 task_ids=partial_env_configs[scene_id].task_ids,
+                starting_hole_positions=partial_env_configs[
+                    scene_id
+                ].starting_hole_positions,
+                starting_hole_quats=partial_env_configs[scene_id].starting_hole_quats,
             )
 
             # store built scene and data
@@ -376,8 +381,8 @@ class RepairsEnv(gym.Env):
                 scene_data.gs_entities,
                 scene_data.current_state,
                 scene_data.desired_state,
-                starting_hole_positions,
-                starting_hole_quats,
+                scene_data.starting_hole_positions,
+                scene_data.starting_hole_quats,
             )
 
             # Update the scene data with the new state
