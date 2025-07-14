@@ -1,3 +1,4 @@
+from typing_extensions import deprecated
 from build123d import CenterOf, Compound, Part, RevoluteJoint, Unit, Pos
 import genesis as gs
 import tempfile
@@ -123,7 +124,7 @@ def translate_state_to_genesis_scene(
         # and how it will be moved later does not matter now
 
         # store fastener entity in gs_entities
-        gs_entities[f"{fastener_id}@fastener"] = new_entity
+        gs_entities[Fastener.fastener_name_in_simulation(fastener_id)] = new_entity
 
         # NOTE: ^ there probably is sense to store fasteners as fasteners id in gs_entities, not as length+height.
         # there is no need for length+height, but there is value in unique id.
@@ -135,6 +136,8 @@ def translate_genesis_to_python(  # translate to sim state, really.
     scene: gs.Scene,
     gs_entities: dict[str, RigidEntity],
     sim_state: RepairsSimState,
+    starting_hole_positions: dict[str, torch.Tensor],
+    starting_hole_quats: dict[str, torch.Tensor],
     device: torch.device | None = None,
 ):
     """
@@ -166,15 +169,14 @@ def translate_genesis_to_python(  # translate to sim state, really.
     fastener_hole_positions: dict[str, torch.Tensor] = {}
     male_connector_positions: dict[str, torch.Tensor] = {}
     female_connector_positions: dict[str, torch.Tensor] = {}
-    picked_up_tip = torch.full((n_envs, 3), float("nan"), device=device)
 
     # loop entities and dispatch by suffix
     for full_name, entity in gs_entities.items():
         part_name, part_type = full_name.split("@")
         if part_type in ("solid", "fixed_solid", "connector"):
             # TODO: I haven't explicitly handled fixed solids, but it may be unnecessary(?)
-            hole_pos = get_fastener_hole_positions(entity, device=device)
-            fastener_hole_positions[full_name] = hole_pos
+            # hole_pos = get_fastener_hole_positions(entity, device=device)
+            # fastener_hole_positions[full_name] = hole_pos
             pos_all = entity.get_pos(env_idx)  # fixme: 0,0,0 on pos?
             quat_all = entity.get_quat(env_idx)
             for i in range(n_envs):
@@ -191,11 +193,11 @@ def translate_genesis_to_python(  # translate to sim state, really.
                     relative_connector_pos = Connector.from_name(
                         part_name
                     ).connector_pos_relative_to_center_female
-                relative_connector_pos = relative_connector_pos
+                relative_connector_pos = (
+                    torch.tensor(relative_connector_pos, device=device) / 1000
+                )
                 scene_connector_pos = get_connector_pos(
-                    pos_all,
-                    quat_all,
-                    torch.tensor(relative_connector_pos, device=device) / 1000,
+                    pos_all, quat_all, relative_connector_pos.unsqueeze(0)
                 )
                 if male:
                     male_connector_positions[full_name] = scene_connector_pos
@@ -204,45 +206,46 @@ def translate_genesis_to_python(  # translate to sim state, really.
         elif part_type == "control":
             continue  # skip.
         elif part_type == "fastener":
-            # note: it will be more troublesome to handle a non-implemented error in batching, so whatever.
-            # it should be really checked in a separate assertion.
-            mask = torch.tensor(
-                [
-                    isinstance(ts.current_tool, Screwdriver)
-                    and ts.current_tool.picked_up_fastener_name == full_name
-                    for ts in sim_state.tool_state
-                ],
-                dtype=torch.bool,
-                device=device,
-            )
-            if mask.any():
-                link = next(
-                    l for l in entity.links if l.name.endswith("_to_screwdriver")
+            # get fastener pos/quat
+            fastener_pos = torch.tensor(entity.get_pos(env_idx), device=device)
+            fastener_quat = torch.tensor(entity.get_quat(env_idx), device=device)
+            fastener_id = int(full_name.split("@")[0])  # fastener name is "1@fastener"
+            # TODO update sim state!
+            for i in range(n_envs):
+                sim_state.physical_state[i].graph.fasteners_loc[fastener_id] = (
+                    fastener_pos[i]
                 )
-                pos_full = torch.tensor(link.get_pos(env_idx), device=device)
-                picked_up_tip[mask] = pos_full[mask]
+                sim_state.physical_state[i].graph.fasteners_quat[fastener_id] = (
+                    fastener_quat[i]
+                )
 
-    return (
-        sim_state,
-        picked_up_tip,
-        fastener_hole_positions,
-        male_connector_positions,
-        female_connector_positions,
-    )
+        # handle picked up fastener (tip)
+        # fastener_tip_pos
+        for env_id in range(n_envs):
+            if (
+                isinstance(sim_state.tool_state[env_id].current_tool, Screwdriver)
+                and sim_state.tool_state[env_id].current_tool.has_picked_up_fastener
+            ):
+                fastener_name = sim_state.tool_state[
+                    env_id
+                ].current_tool.picked_up_fastener_name
+                assert fastener_name is not None
+                fastener_pos = gs_entities[fastener_name].get_pos(env_id)
+                fastener_quat = gs_entities[fastener_name].get_quat(env_id)
+                # get tip pos
+                tip_pos = get_connector_pos(
+                    fastener_pos,
+                    fastener_quat,
+                    Fastener.get_tip_pos_relative_to_center().unsqueeze(0),
+                )
+                sim_state.tool_state[
+                    env_id
+                ].current_tool.picked_up_tip_position = tip_pos
 
-
-def get_fastener_hole_positions(
-    entity: RigidEntity, device: torch.device | None = None
-):
-    link: RigidLink
-    fastener_hole_positions = {}
-    for link in entity.links:
-        if link.name.endswith("_hole"):  # if fastener hole... (how to get IDs?)
-            fastener_hole_pos = torch.tensor(
-                link.get_pos(), device=device
-            )  # not sure how to get the env.
-            fastener_hole_positions.update({link.name[:-3]: fastener_hole_pos})
-    return fastener_hole_positions
+    sim_state = update_hole_locs(
+        sim_state, starting_hole_positions, starting_hole_quats
+    )  # would be ideal if starting_hole_positions, hole_quats and hole_batch were batched already.
+    return sim_state, male_connector_positions, female_connector_positions
 
 
 def translate_compound_to_sim_state(
@@ -401,6 +404,8 @@ def create_constraints_based_on_graph(
     all_base_links = {}
     if env_idx is None:
         env_idx = torch.arange(env_state.scene_batch_dim)
+    # TODO: assert that number of steps is 0 - it should be only in the start. No API for this in genesis atm.
+
     # all_base_links= np.full(
     #     len(env_state.physical_state[0].body_indices), -1
     # )  # fill with -1
@@ -429,7 +434,9 @@ def create_constraints_based_on_graph(
         # genesis supports constraints on per-scene basis.
 
         for fastener_id, connected_to in enumerate(graph.fasteners_attached_to):
-            fastener_entity = gs_entities[f"{fastener_id}@fastener"]
+            fastener_entity = gs_entities[
+                Fastener.fastener_name_in_simulation(fastener_id)
+            ]
             fastener_base_link_idx = fastener_entity.base_link.idx
 
             # connected_to is a tensor with two elements (body_a, body_b)
@@ -464,11 +471,69 @@ def reset_constraints(scene: gs.Scene):
     scene.sim.rigid_solver.joints.clear()  # maybe it'll work?
 
 
+def update_hole_locs(
+    current_sim_state: RepairsSimState,
+    starting_hole_positions: dict[str, torch.Tensor],
+    starting_hole_quats: dict[str, torch.Tensor],
+):
+    """Update hole locs.
+
+    Args:
+        current_sim_state (RepairsSimState): The current sim state.
+        starting_hole_positions (dict[str, torch.Tensor]): The starting hole positions. [B, num_holes_per_part, 3]
+        starting_hole_quats (dict[str, torch.Tensor]): The starting hole quats. [B, num_holes_per_part, 4]
+
+    Process:
+    1. Stack the starting hole positions and quats into one [B, sum(num_holes_per_part), 3] and [B, sum(num_holes_per_part), 4]
+    2. Repeat the part positions and quats for each hole
+    3. Calculate the hole positions and quats
+    4. Set the hole positions and quats
+    """
+    device = tuple(starting_hole_positions.values())[0].device
+    all_starting_hole_positions = torch.cat(
+        list(starting_hole_positions.values()), dim=0
+    ).to(device)  # [B, sum(num_holes_per_part), 3]
+    all_starting_hole_quats = torch.cat(list(starting_hole_quats.values()), dim=0).to(
+        device
+    )
+    num_holes_per_part = torch.tensor(
+        [v.shape[0] for v in starting_hole_positions.values()], device=device
+    ).to(device)
+    hole_batch = torch.repeat_interleave(
+        torch.arange(len(num_holes_per_part), device=device), num_holes_per_part
+    )
+
+    # will remove when (if) batch RepairsSimStep.
+    part_pos = torch.stack(
+        [phys_state.graph.position for phys_state in current_sim_state.physical_state]
+    ).to(device)  # [B, P, 3]
+    part_quat = torch.stack(
+        [phys_state.graph.quat for phys_state in current_sim_state.physical_state]
+    ).to(device, dtype=torch.float32)  # [B, P, 4]
+
+    part_pos_batch = torch.repeat_interleave(part_pos, num_holes_per_part, dim=1)
+    part_quat_batch = torch.repeat_interleave(part_quat, num_holes_per_part, dim=1)
+
+    # note: not sure get_connector_pos will be usable with batches.
+    hole_pos = get_connector_pos(
+        part_pos_batch, part_quat_batch, all_starting_hole_positions.unsqueeze(0)
+    )
+    hole_quat = quat_multiply(part_quat_batch, all_starting_hole_quats)
+    for i, phys_state in enumerate(current_sim_state.physical_state):
+        phys_state.hole_positions = hole_pos[i]
+        phys_state.hole_quats = hole_quat[i]
+        phys_state.hole_indices_batch = hole_batch[i]
+    return current_sim_state
+
+
 def get_connector_pos(
-    parent_pos: torch.Tensor, parent_quat: torch.Tensor, rel_connector_pos: torch.Tensor
+    parent_pos: torch.Tensor,
+    parent_quat: torch.Tensor,
+    rel_connector_pos: torch.Tensor,
 ):
     """
     Get the position of a connector relative to its parent. Used both in translation from compound to sim state and in screwdriver offset.
+    Note: expects batched inputs of rel_connector_pos, ndim=2.
     """
     return (
         parent_pos
@@ -503,3 +568,26 @@ def quat_multiply(
     if normalize:
         q = F.normalize(q, dim=-1)
     return q
+
+
+def quat_conjugate(q: torch.Tensor) -> torch.Tensor:
+    """Returns the conjugate of a quaternion [w, x, y, z]."""
+    return torch.cat([q[..., :1], -q[..., 1:]], dim=-1)
+
+
+def quat_angle_diff_deg(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
+    """Returns the angle in degrees between rotations represented by q1 and q2."""
+    q1 = F.normalize(q1, dim=-1)
+    q2 = F.normalize(q2, dim=-1)
+
+    q_rel = quat_multiply(quat_conjugate(q1), q2)
+    w = torch.clamp(torch.abs(q_rel[..., 0]), -1.0, 1.0)  # safe acos
+    angle_rad = 2.0 * torch.acos(w)
+    return torch.rad2deg(angle_rad)
+
+
+def are_quats_within_angle(
+    q1: torch.Tensor, q2: torch.Tensor, max_angle_deg: float
+) -> torch.Tensor:
+    """Returns True where angular distance between q1 and q2 is ≤ max_angle_deg."""
+    return quat_angle_diff_deg(q1, q2) <= max_angle_deg

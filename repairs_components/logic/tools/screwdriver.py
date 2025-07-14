@@ -7,17 +7,18 @@ from repairs_components.logic.tools.tool import attachment_link_name
 from pathlib import Path
 import trimesh
 from build123d import *  # noqa: F403
+from repairs_components.logic.tools.tools_state import ToolsEnum
 
 
 @dataclass
 class Screwdriver(Tool):
+    id: int = ToolsEnum.SCREWDRIVER.value
     picked_up_fastener_name: str | None = None
     has_picked_up_fastener: bool = False
     picked_up_fastener_tip_position: torch.Tensor | None = None
-    name: str = "screwdriver"  # deprecated
 
     @staticmethod
-    def tool_connector_pos_relative_to_center():
+    def tool_grip_position():
         return torch.tensor([0, 0, 0.3])  # 0.3m?
 
     @staticmethod
@@ -73,6 +74,12 @@ class Screwdriver(Tool):
 
     def export_path(self, base_dir: Path, file_extension: str = "glb") -> Path:
         return base_dir / f"shared/tools/screwdriver.{file_extension}"
+
+    def on_tool_release(self):
+        self.has_picked_up_fastener = False
+        self.picked_up_fastener_name = None
+        self.picked_up_fastener_tip_position = None
+        
 
 
 def receive_screw_in_action(

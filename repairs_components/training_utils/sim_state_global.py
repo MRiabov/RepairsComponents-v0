@@ -212,7 +212,7 @@ def reconstruct_sim_state(
 ) -> RepairsSimState:
     """Load a single simulation state from graphs and indices (i.e. from the offline dataset)"""
     from repairs_components.training_utils.sim_state_global import RepairsSimState
-    from repairs_sim_step import update_hole_locs
+    from repairs_components.processing.translation import update_hole_locs
 
     assert fluid_data_placeholder is None, NotImplementedError(
         "Fluid data reconstruction is not implemented."

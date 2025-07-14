@@ -9,11 +9,14 @@ from repairs_components.logic.tools.screwdriver import Screwdriver
 @dataclass
 class ToolState(SimState):
     current_tool: Tool = Gripper()
-    current_tool_id: int = ToolsEnum.GRIPPER.value
     all_tools = {  # for convenience only (for now)
         "gripper": Gripper(),
         "screwdriver": Screwdriver(),
     }
+
+    @property
+    def current_tool_id(self):
+        return self.current_tool.id
 
     def diff(self, other: "ToolState") -> tuple[dict[str, np.ndarray], int]:
         """Compute differences in tool state between two states."""
@@ -27,10 +30,10 @@ class ToolState(SimState):
     @staticmethod
     def rebuild_from_saved(current_tool_id: int) -> "ToolState":
         if current_tool_id == ToolsEnum.GRIPPER.value:
-            return ToolState(current_tool=Gripper(), current_tool_id=current_tool_id)
+            return ToolState(current_tool=Gripper())
         elif current_tool_id == ToolsEnum.SCREWDRIVER.value:
             return ToolState(
-                current_tool=Screwdriver(), current_tool_id=current_tool_id
+                current_tool=Screwdriver()
             )
         else:
             raise ValueError(f"Invalid tool id: {current_tool_id}")

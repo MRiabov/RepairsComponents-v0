@@ -49,6 +49,7 @@ def create_data(
             base_dir,
             scene_id,
             mesh_file_name_mapping=mesh_file_names[scene_id],
+            scene_setups=scene_setups,
         )
 
 
@@ -57,6 +58,7 @@ def save_concurrent_scene_metadata(
     base_dir: Path,
     scene_id: int,
     mesh_file_name_mapping: dict[str, str],
+    scene_setups: list[EnvSetup],
     env_idx: list[int] | None = None,
 ):
     """Save a ConcurrentSceneData instance to disk.
@@ -96,6 +98,7 @@ def save_concurrent_scene_metadata(
         "electronics_indices": data.current_state.electronics_state[0].indices,
         "mechanical_indices": data.current_state.physical_state[0].body_indices,
         "count_generated_envs": data.batch_dim,
+        "env_setup_name": scene_setups[scene_id].__class__.__name__,
     }
     with open(scene_dir / "metadata.json", "w") as f:
         json.dump(metadata, f, indent=2)

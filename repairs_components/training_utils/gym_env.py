@@ -170,7 +170,10 @@ class RepairsEnv(gym.Env):
 
         data_gen_start_time = time.time()
         data_already_exists = check_if_data_exists(
-            self.env_setup_ids.tolist(), base_dir, generate_number_of_configs_per_scene
+            self.env_setup_ids.tolist(),
+            base_dir,
+            generate_number_of_configs_per_scene,
+            self.env_setups,
         )
 
         if not data_already_exists or io_cfg["force_recreate_data"]:
@@ -234,7 +237,7 @@ class RepairsEnv(gym.Env):
                     env_separate_rigid=True,
                     shadow=True,
                 ),  # type: ignore
-                rigid_options=gs.options.RigidOptions(max_dynamic_constraints=128),
+                rigid_options=gs.options.RigidOptions(max_dynamic_constraints=256),
                 profiling_options=gs.options.ProfilingOptions(
                     show_FPS=io_cfg["show_fps"]
                 ),
@@ -489,9 +492,9 @@ class RepairsEnv(gym.Env):
                 )
                 continue  # if no reset data was necessary, skip
 
-            # self.concurrent_scenes_data[scene_id].scene.reset(
-            #     envs_idx=reset_env_ids_this_scene
-            # ) #FIXME: commented out, possibly is very bad!
+            self.concurrent_scenes_data[scene_id].scene.reset(
+                envs_idx=reset_env_ids_this_scene
+            )  # FIXME: if commented out, possibly is very bad!
 
             # update the scene
             # Reset robot joint positions to default

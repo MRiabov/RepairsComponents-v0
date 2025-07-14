@@ -75,7 +75,8 @@ def plate_env_bd_geometry(export_geom_glb: bool, base_dir: Path | None = None) -
                 dir=(0, 0, -1),
                 mode=Mode.SUBTRACT,
             )
-            fillet(plate_env.edges(Select.LAST), radius=1)
+            # fillet(plate_env.edges(Select.LAST), radius=1)
+            # note: commented out because it slows down compilation, as I understand.
 
         with Locations(
             stand_plate.faces().sort_by(Axis.Z).last

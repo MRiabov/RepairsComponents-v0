@@ -524,8 +524,11 @@ def get_starting_part_holes(compound: Compound):
                 else:
                     break
                 i += 1
-            part_holes_pos[part.label] = torch.tensor(
-                [tuple(joint.location.position) for joint in fastener_hole_joints]
+            part_holes_pos[part.label] = (
+                torch.tensor(
+                    [tuple(joint.location.position) for joint in fastener_hole_joints]
+                )
+                / 1000  # mm, not m!
             )
             from scipy.spatial.transform import Rotation as R
 

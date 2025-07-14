@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../Repairs-v0"
+		},
+		{
+			"path": "../data/debug_render"
 		}
 	],
 	"settings": {

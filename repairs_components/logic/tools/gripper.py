@@ -1,11 +1,11 @@
 from dataclasses import dataclass
 import numpy as np
-from repairs_components.logic.tools.tool import Tool
+from repairs_components.logic.tools.tool import Tool, ToolsEnum
 
 
 @dataclass
 class Gripper(Tool):
-    name: str = "gripper"
+    id: int = ToolsEnum.GRIPPER.value
     action_shape: int = 2
     active: bool = True
 
@@ -18,5 +18,10 @@ class Gripper(Tool):
             "Unnecessary bd geometry for gripper tool, use MJCF instead."
         )
 
+    @property
     def dist_from_grip_link(self):
+        raise NotImplementedError("Unnecessary for gripper tool.")
+
+    @property
+    def tool_grip_position(self):
         raise NotImplementedError("Unnecessary for gripper tool.")

@@ -12,12 +12,12 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
     merge_concurrent_scene_configs,
     split_scene_config,
 )
+from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.progressive_reward_calc import RewardHistory
 from repairs_components.training_utils.sim_state_global import (
     get_graph_save_paths,
     reconstruct_sim_state,
 )
-from repairs_sim_step import update_hole_locs
 
 # During the loading of the data we load:
 # 1. Graphs
@@ -272,7 +272,10 @@ class OfflineDataloader:
 
 
 def check_if_data_exists(
-    scene_ids: list[int], data_dir: Path, count_envs_per_scene: torch.Tensor
+    scene_ids: list[int],
+    data_dir: Path,
+    count_envs_per_scene: torch.Tensor,
+    env_setups: list[EnvSetup],
 ) -> bool:
     """
     Check if all required data files exist for each scene_id in data_dir.
@@ -300,10 +303,10 @@ def check_if_data_exists(
             voxels_dir / f"vox_des_{scene_id}.pt",
         ]
         # holes
-        holes_dir = data_dir / "holes"
+        holes_dir = data_dir / f"scene_{scene_id}"
         holes_files = [
-            holes_dir / f"starting_hole_positions_{scene_id}.pt",
-            holes_dir / f"starting_hole_quats_{scene_id}.pt",
+            holes_dir / "starting_hole_positions.pt",
+            holes_dir / "starting_hole_quats.pt",
         ]
         # Check all
         if not all(
@@ -324,6 +327,11 @@ def check_if_data_exists(
                 "Note: found at least 3 times more data than requested. This may strain the memory. "
                 "Consider regenerating data with a requested size."
             )
+        if metadata["env_setup_name"] != env_setups[scene_id].__class__.__name__:
+            print(
+                f"Found data for different environment setup than requested. Found {metadata['env_setup_name']}, expected {env_setups[scene_id].__class__.__name__}. Regenerating..."
+            )
+            return False
 
     return True  # TODO it would be ideal to not regenerate data for all environments every time, but it's quick enough (for one-time op)
 

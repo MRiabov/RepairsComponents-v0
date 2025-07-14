@@ -45,10 +45,10 @@ class PhysicalState:
     """Hole indices per part name."""
     hole_indices_batch: torch.Tensor = field(default_factory=torch.empty)
     """Hole indices per part in the batch."""
-    hole_positions: torch.Tensor = field(default_factory=torch.empty)
-    """Hole positions per part."""
-    hole_quats: torch.Tensor = field(default_factory=torch.empty)
-    """Hole quats per part."""
+    hole_positions: torch.Tensor = field(default_factory=torch.empty)  # [H, 3]
+    """Hole positions per part, batched with hole_indices_batch."""
+    hole_quats: torch.Tensor = field(default_factory=torch.empty)  # [H, 4]
+    """Hole quats per part, batched with hole_indices_batch."""
 
     # Fastener metadata (shared across batch)
     # fastener: dict[str, Fastener] = field(default_factory=dict)

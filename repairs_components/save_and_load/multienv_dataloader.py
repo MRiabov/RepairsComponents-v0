@@ -33,6 +33,7 @@ class MultiEnvDataLoader:
         preprocessing_fn: Callable,
         prefetch_memory_size: int = 256,
         max_workers: int = 4,
+        ignore_starvation_message: bool = False,
     ):
         """
         Multi-environment dataloader with selective prefetching.
@@ -47,6 +48,7 @@ class MultiEnvDataLoader:
         self.preprocessing_fn = preprocessing_fn
         self.prefetch_size = prefetch_memory_size
         self.max_workers = max_workers
+        self.ignore_starvation_message = ignore_starvation_message
 
         # Per-environment queues for prefetched data
         self.prefetch_queues: Dict[int, queue.Queue] = {
@@ -120,7 +122,10 @@ class MultiEnvDataLoader:
         # log issues is starvation is over 30%.
         total_insufficient_count = torch.sum(count_insufficient_configs_per_scene)
         total_requested_count = torch.sum(num_configs_to_generate_per_scene)
-        if total_insufficient_count > total_requested_count * 0.3:
+        if (
+            total_insufficient_count > total_requested_count * 0.3
+            and not self.ignore_starvation_message
+        ):
             print(
                 "Warning: experiencing environment count starvation. Insufficient_gen: "
                 + str(total_insufficient_count.item())
@@ -236,6 +241,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         self.tasks_to_generate = tasks_to_generate
         self.offline_dataloader = None
         self.offline_data_dir = offline_data_dir
+        self.ignore_starvation_message = online
 
         # Create preprocessing function that generates or loads batches for scenes
         def online_preprocessing_fn(

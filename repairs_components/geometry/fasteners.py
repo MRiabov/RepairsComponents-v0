@@ -162,163 +162,174 @@ class Fastener(Component):
         return torch.tensor([0, 0, -length])
         # note: fastener head relative to center is a pointless function because 1mm offset or whatnot is insignificant.
 
+    @staticmethod
+    def fastener_name_in_simulation(fastener_id_in_genesis: int):
+        """Return the name of a fastener that is used in the genesis simulation. Note that
+        this is not the name of the fastener in build123d, but the name of the fastener
+        in the genesis simulation."""
+        return f"{fastener_id_in_genesis}@fastener"
+        # the inverse is int(fastener_name.split("@")[0]), it's spinkled throughout the code.
+
 
 def check_fastener_possible_insertion(
     active_fastener_tip_position: torch.Tensor,
-    part_hole_positions: dict[str, torch.Tensor],
-    connection_threshold: float = 0.75,
-    ignore_hole_idx: torch.Tensor | None = None,
+    part_hole_positions: torch.Tensor,
+    part_hole_batch: torch.Tensor,
+    connection_dist_threshold: float = 0.75,
+    connection_angle_threshold: float = 30,  # degrees
+    part_hole_quats: torch.Tensor | None = None,
+    active_fastener_quat: torch.Tensor | None = None,
+    ignore_part_idx: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Args:
     active_fastener_tip_position: [B,3] tensor of tip positions
-    part_hole_positions: dict[str, torch.Tensor] of hole positions - per every part, a tensor of shape [num_holes,3]
+    part_hole_positions: torch.Tensor of hole positions - per every hole, a tensor of shape [num_holes,3]
+    part_hole_quats: torch.Tensor of hole quaternions - per every hole, a tensor of shape [num_holes,4]
+    part_hole_batch: torch.Tensor of hole batch indices - per every hole, it's corresponding part index [num_holes]
     connection_threshold: float
     ignore_hole_idx: torch.Tensor, indices of the hole to ignore (if fastener is already inserted in that hole in that batch, ignore.) [B]
 
-    Batch check: for each env, find first hole within threshold or -1.
+    Batch check: for each env, find first hole within threshold or -1. If part_hole_quats is not None, check that the hole is not rotated too much.
     Returns:
     - Tuple of tensors `(part_idx, hole_idx)`, each of shape `[batch]`, where `-1` indicates no match.`
     """
-    # flatten all holes across parts
-    part_names = list(part_hole_positions.keys())
-    B = active_fastener_tip_position.shape[0]
-    holes_list = []
-    hps = []
-    for val in part_hole_positions.values():
-        pos = val
-        # add batch dim if needed
-        if pos.dim() == active_fastener_tip_position.dim() - 1:
-            pos = pos.unsqueeze(0).expand(B, *pos.shape)
-        holes_list.append(pos)
-        hps.append(pos.shape[1])
-    # concat to [B, total_holes, 3]
-    holes_all = torch.cat(holes_list, dim=1)
-    total_h = holes_all.shape[1]
-    # build part_id map and prefix offsets
-    device = active_fastener_tip_position.device
-    part_id_map = torch.cat(
-        [
-            torch.full((hp,), idx, dtype=torch.long, device=device)
-            for idx, hp in enumerate(hps)
-        ],
-        dim=0,
+    from repairs_components.processing.translation import are_quats_within_angle
+
+    dist = torch.norm(
+        part_hole_positions - active_fastener_tip_position, dim=-1
+    )  # [B,H]
+    # ignore holes that this fastener is already attached to
+    if ignore_part_idx is not None:  # what about in ignore_hole_idx are -1?
+        # because ignore_hole_idx is actually a [B, 2] tensor which will only ever have one
+        # non-negative value, we can say that mask can be aggregated with `any()`.
+        #
+        mask = (ignore_part_idx != -1).any(dim=-1)
+        batch_idx = torch.arange(len(ignore_part_idx), device=ignore_part_idx.device)[
+            mask
+        ]
+        part_idx = ignore_part_idx[mask]
+        dist[batch_idx, part_idx] = float("inf")
+
+    # mask out holes that are not within angle threshold
+    if active_fastener_quat is not None:
+        assert part_hole_quats is not None, (
+            "part_hole_quats must be provided if active_fastener_quat is provided"
+        )
+        angle_mask = are_quats_within_angle(
+            part_hole_quats,
+            active_fastener_quat.unsqueeze(1),
+            connection_angle_threshold,
+        )
+        dist[~angle_mask] = float("inf")
+    # find the closest hole
+    hole_min = torch.min(dist, dim=-1)
+    # if it's close enough, return the hole index
+    close_enough = hole_min.values < connection_dist_threshold  # [B]
+    # if it's not close enough, return -1
+    hole_idx = torch.where(close_enough, hole_min.indices, -1)
+    part_idx = torch.where(
+        hole_idx != -1, part_hole_batch[hole_idx], torch.full_like(hole_idx, -1)
     )
-    prefix = torch.tensor(
-        [0] + list(np.cumsum(hps)[:-1]), dtype=torch.long, device=device
-    )
-    # compute squared distances and mask
-    sq_dist = torch.sum(
-        (holes_all - active_fastener_tip_position.unsqueeze(1)) ** 2, dim=-1
-    )
-    mask = sq_dist < (connection_threshold**2)
-    # optionally ignore a global hole index
-    if (
-        ignore_hole_idx is not None
-        and ignore_hole_idx >= 0
-        and ignore_hole_idx < total_h
-    ):
-        mask[:, ignore_hole_idx] = False
-    any_match = mask.any(dim=1)
-    first_global = mask.float().argmax(dim=1)
-    # derive part and local hole indices
-    part_idx = part_id_map[first_global]
-    hole_idx = first_global - prefix[part_idx]
-    # set -1 where no match
-    part_idx = torch.where(any_match, part_idx, torch.full_like(part_idx, -1))
-    hole_idx = torch.where(any_match, hole_idx, torch.full_like(hole_idx, -1))
+
     return part_idx, hole_idx
 
 
-def activate_fastener_to_hand_connection(
+def activate_fastener_to_screwdriver_connection(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
-    franka_arm: RigidEntity,
-    reposition_to_xyz: torch.Tensor,
-    rotate_to_quat: torch.Tensor,
-    envs_idx: torch.Tensor,
-    tool_state_to_update: list[Tool],
+    screwdriver_entity: RigidEntity,
+    reposition_to_xyz: torch.Tensor,  # [3]
+    env_id: int,
+    tool_state_to_update: Tool,
+    fastener_id: int,
 ):
     # avoid circular import
     from repairs_components.processing.translation import get_connector_pos
+    from repairs_components.logic.tools.screwdriver import Screwdriver
 
-    assert (
-        reposition_to_xyz.shape[0]
-        == rotate_to_quat.shape[0]
-        == envs_idx.shape[0]
-        == len(tool_state_to_update)
-    ), (
-        "Reposition_to, rotate_to_quat, envs_idx, tool_state_to_update must have the same shape"
-    )
-    # TODO: align the fastener to the hand before constraining
+    # ^ note: could be batched, but fastener_entity are not batchable (easily) and it doesn't matter.
     rigid_solver = scene.sim.rigid_solver
-    hand_link = franka_arm.get_link("hand")
-    fastener_head_joint = np.array(fastener_entity.base_link.idx)
-    fastener_entity.set_pos(reposition_to_xyz, envs_idx)
-    fastener_entity.set_quat(rotate_to_quat, envs_idx)
+    screwdriver_link = screwdriver_entity.base_link.idx
+    fastener_head_joint = fastener_entity.base_link.idx
+    # Align the fastener before constraining
+    screwdriver_quat = screwdriver_entity.get_quat(env_id)
+    fastener_entity.set_pos(reposition_to_xyz, env_id)
+    fastener_entity.set_quat(screwdriver_quat, env_id)
     rigid_solver.add_weld_constraint(
-        fastener_head_joint, hand_link, envs_idx
+        fastener_head_joint, screwdriver_link, env_id
     )  # works is genesis's examples.
-    tool_state_to_update[envs_idx].picked_up_fastener_name = fastener_entity.name
-    tool_state_to_update[envs_idx].picked_up_fastener_tip_position = get_connector_pos(
-        fastener_entity.get_pos(envs_idx),
-        fastener_entity.get_quat(envs_idx),
-        Fastener.get_tip_pos_relative_to_center(),
+    assert isinstance(tool_state_to_update, Screwdriver), "Tool must be a Screwdriver"
+    tool_state_to_update.picked_up_fastener_name = Fastener.fastener_name_in_simulation(
+        fastener_id
     )
-    tool_state_to_update[envs_idx].has_picked_up_fastener = True
+    tool_state_to_update.picked_up_fastener_tip_position = get_connector_pos(
+        reposition_to_xyz,  # note that we know the position of fastener already
+        screwdriver_quat,
+        Fastener.get_tip_pos_relative_to_center().unsqueeze(0),
+    )
+    tool_state_to_update.has_picked_up_fastener = True
 
 
-def deactivate_fastener_to_hand_connection(
+def deactivate_fastener_to_screwdriver_connection(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
-    franka_arm: RigidEntity,
-    envs_idx: torch.Tensor,
-    tool_state_to_update: list[Tool],
+    screwdriver_entity: RigidEntity,
+    env_id: int,
+    tool_state_to_update: Tool,
 ):
-    assert envs_idx.shape[0] == len(tool_state_to_update), (
-        "envs_idx and tool_state_to_update must have the same shape"
-    )
+    from repairs_components.logic.tools.screwdriver import Screwdriver
+
     rigid_solver = scene.sim.rigid_solver
-    hand_link = franka_arm.get_link("hand")
-    fastener_head_joint = np.array(fastener_entity.base_link.idx)
+    hand_link = screwdriver_entity.base_link.idx
+    fastener_head_joint = fastener_entity.base_link.idx
     rigid_solver.delete_weld_constraint(
-        fastener_head_joint, hand_link, envs_idx
-    )  # works is genesis's examples.
-    tool_state_to_update[envs_idx].picked_up_fastener_name = None
-    tool_state_to_update[envs_idx].picked_up_fastener_tip_position = None
-    tool_state_to_update[envs_idx].has_picked_up_fastener = False
+        fastener_head_joint, hand_link, [env_id]
+    )  # works in genesis's examples. #[env_id] because it wants a collection.
+    assert isinstance(tool_state_to_update, Screwdriver), "Tool must be a Screwdriver"
+    tool_state_to_update.picked_up_fastener_name = None
+    tool_state_to_update.picked_up_fastener_tip_position = None
+    tool_state_to_update.has_picked_up_fastener = False
 
 
 def activate_part_to_fastener_connection(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
+    hole_pos: torch.Tensor,
+    hole_quat: torch.Tensor,
     part_entity: RigidEntity,
-    hole_link_name: str,
     envs_idx: torch.Tensor,
 ):
-    # TODO: align the fastener to the hole before constraining
+    # TODO: make fastener insertion more smooth.
     rigid_solver = scene.sim.rigid_solver
+    # fastener_pos = fastener_entity.get_pos(envs_idx)
+    # fastener_quat = fastener_entity.get_quat(envs_idx)
     # fastener_head_joint = np.array(fastener_entity.base_link.idx)
-    fastener_head_joint = np.array(fastener_entity.base_joint.idx)
-    other_body_hole_link = np.array(part_entity.get_link(hole_link_name).idx)
+    fastener_joint = fastener_entity.base_link.idx
+    other_body_link = part_entity.base_link.idx
+
+    fastener_entity.set_pos(hole_pos, envs_idx)
+    fastener_entity.set_quat(hole_quat, envs_idx)
+    # not exactly the hole position!!!
+    # how to prevent insertion too deeply?
+
     rigid_solver.add_weld_constraint(
-        fastener_head_joint, other_body_hole_link, envs_idx
-    )  # works is genesis's examples.
+        fastener_joint, other_body_link, envs_idx
+    )  # works in genesis's examples.
 
 
 def deactivate_part_connection(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
     part_entity: RigidEntity,
-    hole_link_name: str,
     envs_idx: torch.Tensor,
 ):
     rigid_solver = scene.sim.rigid_solver
-    fastener_head_joint = np.array(fastener_entity.base_link.idx)
-    other_body_hole_link = np.array(part_entity.get_link(hole_link_name).idx)
+    fastener_head_joint = fastener_entity.base_link.idx
+    other_body_hole_link = part_entity.base_link.idx
     rigid_solver.delete_weld_constraint(
         fastener_head_joint, other_body_hole_link, envs_idx
-    )  # works is genesis's examples.
+    )  # works in genesis's examples.
 
 
 class FastenerHolder(Component):
