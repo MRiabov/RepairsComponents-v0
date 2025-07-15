@@ -186,10 +186,12 @@ def step_pick_up_release_tool(
             current_sim_state.tool_state[env_id].current_tool
             for env_id in env_idx.tolist()
         ]
-        detach_tool_from_arm(scene, screwdriver, franka_hand, env_idx, current_tools)
         for env_id in env_idx.tolist():
             current_sim_state.tool_state[env_id].current_tool = Gripper()
             # detach the screwdriver from the hand
+        detach_tool_from_arm(
+            scene, screwdriver, franka_hand, gs_entities, env_idx, current_tools
+        )
 
     return current_sim_state
 
@@ -255,10 +257,8 @@ def step_screw_in_or_out(
         # FIXME: should not be able to insert fastener with two connections already!
 
         env_ids = has_fastener_and_desired_in.nonzero().squeeze(1)
-        ignore_part_idx = (
-            fastener_connected_to[
-                env_ids, picked_up_fastener_ids[env_ids]
-            ]
+        ignore_part_idx = (  # fastener_already_in_idx
+            fastener_connected_to[env_ids, picked_up_fastener_ids[env_ids]]
             .max(dim=-1)
             .values
         )  # because ignore_hole_idx is a tensor of shape [2], with always values of either [-1, -1], [-1, value], [value, -1],
@@ -287,7 +287,14 @@ def step_screw_in_or_out(
         )  # [B] int or -1
         valid_insert = part_idx >= 0
         if valid_insert.any():
-            for env_id in valid_insert.nonzero(as_tuple=False).squeeze(1).tolist():
+            # FIXME: this never executes! (i've never seen it, at least.)
+            # ^ note: just seen it execute.
+            # but in some cases it threw cuda error?
+            for env_id in env_ids[valid_insert].tolist():
+                hole_pos = physical_state[env_id].hole_positions[
+                    hole_idx[env_id].item()
+                ]
+                hole_quat = physical_state[env_id].hole_quats[hole_idx[env_id].item()]
                 fastener_name = tool_state[env_id].current_tool.picked_up_fastener_name
                 part_id = part_idx[env_id].item()
                 part_name = physical_state[env_id].inverse_body_indices[part_id]
@@ -296,6 +303,8 @@ def step_screw_in_or_out(
                 activate_part_to_fastener_connection(
                     scene,
                     fastener_entity=gs_entities[fastener_name],
+                    hole_pos=hole_pos,
+                    hole_quat=hole_quat,
                     part_entity=gs_entities[part_name],
                     envs_idx=torch.tensor([env_id], device=actions.device),
                 )
@@ -321,7 +330,7 @@ def step_screw_in_or_out(
             ]
             for body_idx in fastener_body_indices:
                 if body_idx != -1:
-                    body_name = physical_state[env_id].inverse_indices[body_idx]
+                    body_name = physical_state[env_id].inverse_indices[body_idx.item()]
                     deactivate_part_connection(
                         scene,
                         fastener_entity=gs_entities[fastener_name],
@@ -368,8 +377,8 @@ def step_fastener_pick_up_release(
     )
     screwdriver_with_fastener_mask = torch.tensor(
         [
-            has and (ts.current_tool.picked_up_fastener_name is not None)
-            for has, ts in zip(screwdriver_picked_up.tolist(), tool_state)
+            w_screwdriver and (ts.current_tool.picked_up_fastener_name is not None)
+            for w_screwdriver, ts in zip(screwdriver_picked_up.tolist(), tool_state)
         ],
         dtype=torch.bool,
         device=actions.device,
@@ -380,6 +389,9 @@ def step_fastener_pick_up_release(
         pick_up_desired_mask & screwdriver_picked_up & ~screwdriver_with_fastener_mask
     )
     release_mask = release_desired_mask & screwdriver_with_fastener_mask
+    assert not (pick_up_mask & release_mask).any(), (
+        "pick up and release can not happen at the same time"
+    )
 
     if pick_up_mask.any():
         desired_pick_up_indices = pick_up_mask.nonzero().squeeze(1)
@@ -430,9 +442,19 @@ def step_fastener_pick_up_release(
                 fastener_id=closest_fastener_id[i].item(),
             )
 
+    ##debug
+    assert all(
+        tool_state[i].current_tool.picked_up_fastener_name is not None
+        for i in screwdriver_with_fastener_mask.nonzero().squeeze(1).tolist()
+    ), (
+        "screwdriver_with_fastener_mask should be true only for those with fastener picked up"
+    )
+    # // # somehow this fails.
+
     if release_mask.any():
         desired_release_indices = release_mask.nonzero().squeeze(1)
-        for i, env_id in enumerate(desired_release_indices.tolist()):
+        for env_id in desired_release_indices.tolist():
+            assert tool_state[env_id].current_tool.picked_up_fastener_name is not None
             fastener_name = tool_state[env_id].current_tool.picked_up_fastener_name
             deactivate_fastener_to_screwdriver_connection(
                 scene,

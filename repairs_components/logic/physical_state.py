@@ -229,6 +229,9 @@ class PhysicalState:
             f"Position must be 3D vector, got {position}"
             f"Rotation must be 3D vector, got {rotation}. Note: transformation to quat already happens in this function."
         )
+        assert (
+            torch.tensor(position).min() >= 0 and torch.tensor(position).max() <= 640
+        ), f"Expected register position to be in [0,640], got {position}"
         from scipy.spatial.transform import Rotation as R
 
         rotation = R.from_euler("xyz", rotation).as_quat()
@@ -243,7 +246,9 @@ class PhysicalState:
         self.graph.position = torch.cat(
             [
                 self.graph.position,
-                torch.tensor(position, device=self.device).unsqueeze(0),
+                compound_pos_to_sim_pos(
+                    torch.tensor(position, device=self.device).unsqueeze(0)
+                ),
             ],
             dim=0,
         )
@@ -272,6 +277,10 @@ class PhysicalState:
 
     def update_body(self, name: str, position: tuple, rotation: tuple):
         assert name in self.body_indices, f"Body {name} not registered"
+        pos_tensor = torch.tensor(position, device=self.device)
+        assert pos_tensor.min() >= -0.32 and pos_tensor.max() <= 0.32, (
+            f"Position {position} out of bounds. Expected [-0.32, 0.32] for update."
+        )
         if self.graph.fixed[self.body_indices[name]]:
             # assert torch.isclose(
             #     torch.tensor(position, device=self.device),
@@ -282,7 +291,7 @@ class PhysicalState:
             return
 
         idx = self.body_indices[name]
-        self.graph.position[idx] = torch.tensor(position, device=self.device)
+        self.graph.position[idx] = pos_tensor
         self.graph.quat[idx] = torch.tensor(rotation, device=self.device)
 
     def register_fastener(self, fastener: Fastener):
@@ -579,6 +588,7 @@ def _quaternion_conjugate(q: torch.Tensor) -> torch.Tensor:
     return torch.cat([w, -xyz], dim=-1)
 
 
+#FIXME: quat_conj, quat_multiply, quat_angle_diff are equally implemented in `translation.py`
 def _quaternion_multiply(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     """Hamilton product of two quaternions.  Inputs (...,4) → output (...,4)."""
     w1, x1, y1, z1 = q1.unbind(-1)
@@ -608,7 +618,7 @@ def _quaternion_angle_diff(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
 def _diff_node_features(
     data_a: Data,
     data_b: Data,
-    pos_threshold: float = 3.0,
+    pos_threshold: float = 5.0 / 1000,
     deg_threshold: float = 5.0,
 ):
     """Return per-node diffs (static shape) and changed indices/count."""
@@ -666,3 +676,11 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
 #         data_b = batch_b.get_example(i)
 #         results[i] = diff(data_a, data_b)[1]
 #     return results
+
+
+def compound_pos_to_sim_pos(compound_pos: torch.Tensor, env_size_mm=(640, 640, 640)):
+    "Pos in compound to pos in sim/sim state"
+    env_size_mm = torch.tensor(env_size_mm, device=compound_pos.device)
+    compound_pos_xy = (compound_pos[:, :2] - env_size_mm[:2] / 2) / 1000
+    compound_pos_z = compound_pos[:, 2] / 1000  # z needs not go lower.
+    return torch.cat([compound_pos_xy, compound_pos_z.unsqueeze(1)], dim=1)

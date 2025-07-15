@@ -25,3 +25,6 @@ class Gripper(Tool):
     @property
     def tool_grip_position(self):
         raise NotImplementedError("Unnecessary for gripper tool.")
+
+    def on_tool_release(self):
+        raise NotImplementedError("Unnecessary for gripper tool.")

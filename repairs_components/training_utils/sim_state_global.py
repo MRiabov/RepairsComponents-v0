@@ -124,8 +124,10 @@ class RepairsSimState(SimState):
         electronics_graphs = [
             self.electronics_state[env_id].graph for env_id in env_idx
         ]
+        mech_batch = Batch.from_data_list(physical_graphs)
+        assert (torch.max(mech_batch.position) < 1).all(), "Saved data is out of bounds"
 
-        torch.save(Batch.from_data_list(physical_graphs), mech_graph_path)
+        torch.save(mech_batch, mech_graph_path)
         torch.save(Batch.from_data_list(electronics_graphs), elec_graph_path)
 
         torch.save(

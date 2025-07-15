@@ -18,7 +18,7 @@
 ~~14. Simulating my small objects on meter scale is not stable (as indicated by Genesis). Need to change settings of Genesis to milimeter including exports.~~ (Reverted)
 15. (related but global) get_pos in translation returned NaN (Done, tested.)
 16. Somehow fixed bodies are getting moved... OR desired state is not updated during reset, which is less likely. 
-17. I'm blocked by Genesis CUDA bug. So I need to make a reproducible example, and then get back to fixing fasteners.
+17. I'm blocked by Genesis CUDA bug. So I need to make a reproducible example, and then get back to fixing fasteners. DONE
 18. does picking up screwdriver actually work? (DONE, tested)
 - debug render the buffer prefill steps, will tell. (DONE, yes, works)
 - Screwdriver must be repositioned to hand position when close enough.
@@ -57,7 +57,7 @@ UNDONE:
 1,3,4,6,7,9,16,(17)
 
 ### Next:
-Run and debug.
+Fix CUDA index error; 
 
 (after):
 (18) - test whether a screwdriver works.
@@ -94,6 +94,8 @@ It turns out the fasteners functionality was commented out, and all fastener fun
 - Part quats are currently stored incorrectly in persist meshes (the recentering does not adjust quats!)
 16. (?) Fasteners are not encoded at translation? I have 0,0,0 for fastener position. (DONE, untested)
 17. There may be a clash between tools when both are within pickup distance.
+- at the moment, picking up only one tool is supported.
+18. (minor) Twisting movement is not prevented/penalized when already inserted on max depth.
 
 
 
@@ -104,6 +106,36 @@ after:
 2. Electronics graphs should be easily disabled in encoding.
 3. (obviously) expand all graph nets to encode positional hints (perhaps even vision and voxels?) <- perhaps encode desired change into vision? It could be a little too troublesome though. But would work?
 %note: will my paper contribute anything meaningful, considering that Nvidia does robotic assembly too? I may need to add electronics testing to make this more interesting.
+
+
+## Electronics repair task list (if will do)
+1. Components are attachable and detachable
+2. More component types are added
+- Motors
+- LEDs
+- Buttons (?)
+- Resistors
+- Switches
+%%^done?
+3. Component visualization
+- Motors visualization (Spin)
+- LEDs visualization (Light)
+- Buttons visualization (Press)
+- Switches visualization (flip)
+- CAD for all the above
+4. Components electronics sim
+5. Multimeter tool
+- Simulation of all electronics above (measure voltage, current, resistance)
+- Being able to add current and/or voltage to a component.
+- Perturb of components connection/disconnection; working/not working.
+6. (ML) encoding of the electronics types (done?)
+- Encoding of wires (not done)
+7. `EnvSetup`s for electronics repair
+8. More robust collision detection for electronics.
+
+
+
+
 
 
 #### (minor) notes:

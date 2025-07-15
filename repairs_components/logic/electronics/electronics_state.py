@@ -125,18 +125,18 @@ class ElectronicsState(SimState):
         )
         # print(f"Exporting graph with {len(self.components)} components.")
         new_graph = Data(
-            x=torch.cat(
+            x=torch.cat(  # was torch.cat... but it resulted in a wrong shape?
                 [
-                    self.graph.max_voltage,
-                    self.graph.max_current,
-                    self.graph.component_type,
-                    self.graph.component_id,
+                    self.graph.max_voltage.unsqueeze(-1),
+                    self.graph.max_current.unsqueeze(-1),
+                    self.graph.component_type.unsqueeze(-1),
+                    self.graph.component_id.unsqueeze(-1),
                 ],
                 dim=-1,
             ),
             num_nodes=len(self.components),
             edge_index=self.graph.edge_index,
-            edge_attr=self.graph.edge_attr,  # e.g. fastener size.
+            edge_attr=self.graph.edge_attr,
         )
         return new_graph
 

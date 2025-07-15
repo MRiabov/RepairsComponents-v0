@@ -32,9 +32,8 @@ how to know which fasteners need connection checks?
 **choice**: edge_index does not exist at all before export, because it does nothing and only complicates handling.
 **choice**: instead, graph global feats store connected/unconnected fasteners. Where both are !=-1, it's an edge.
 
-%%note: found possible bug: twisting movement is not prevented/penalized when already inserted on max depth.
 
-%%shit, how many bugs are left to fix? 
+%%shit, how many bugs are left to fix?
 
 
 ### electronics connectors encoding:
@@ -62,3 +61,6 @@ Consequently, the desired position would have the hint as (0,0,0) because it's a
 
 ## Modelling:
 Since their export from desired_state_geom, all models should be centered at the origin. It makes downstream work easier.
+
+# ML
+ML is done via inverse kinematics and can move in only -0.5< x <0.5, -0.5< y <0.5, 0< z <0.8 ranges.

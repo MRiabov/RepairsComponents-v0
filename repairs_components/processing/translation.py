@@ -210,7 +210,6 @@ def translate_genesis_to_python(  # translate to sim state, really.
             fastener_pos = torch.tensor(entity.get_pos(env_idx), device=device)
             fastener_quat = torch.tensor(entity.get_quat(env_idx), device=device)
             fastener_id = int(full_name.split("@")[0])  # fastener name is "1@fastener"
-            # TODO update sim state!
             for i in range(n_envs):
                 sim_state.physical_state[i].graph.fasteners_loc[fastener_id] = (
                     fastener_pos[i]
@@ -242,9 +241,12 @@ def translate_genesis_to_python(  # translate to sim state, really.
                     env_id
                 ].current_tool.picked_up_tip_position = tip_pos
 
+    # update holes
     sim_state = update_hole_locs(
         sim_state, starting_hole_positions, starting_hole_quats
     )  # would be ideal if starting_hole_positions, hole_quats and hole_batch were batched already.
+    max_pos = sim_state.physical_state[0].graph.position.max()
+    assert max_pos <= 50, f"massive out of bounds, at env_id 0, max_pos {max_pos}"
     return sim_state, male_connector_positions, female_connector_positions
 
 
@@ -389,6 +391,12 @@ def translate_compound_to_sim_state(
     # TODO I'll do this later.
     # possibly (reasonably) we can encode XYZ and quat of connector def positions into electronics state features.
     # however this won't mean they will be returned in export_graph.
+
+    # assert out
+    max_pos = np.array(sim_state.physical_state[0].graph.position.max())
+    assert np.all(np.abs(max_pos) <= (env_size / 2 / 1000)), (
+        f"massive out of bounds, at env_id 0, max_pos {max_pos}"
+    )
 
     return sim_state
 

@@ -393,7 +393,7 @@ class RepairsEnv(gym.Env):
             self.concurrent_scenes_data[scene_id] = scene_data
 
             # Compute reward based on progress toward the goal
-            dones = calculate_done(scene_data)  # note: pretty expensive.
+            dones = total_diff_left == 0  # note: pretty expensive.
             rewards = scene_data.reward_history.calculate_reward_this_timestep(
                 scene_data
             )

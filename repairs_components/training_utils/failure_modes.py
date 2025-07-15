@@ -10,22 +10,25 @@ def out_of_bounds(
     control_entities_max: torch.Tensor | None = torch.tensor([10, 10, 10]),
 ):
     """Check that any genesis entity is out of bounds. Control entites can be further out."""
-    gs_entities_no_control = gs_entities.copy()
+    filtered_gs_entities = gs_entities.copy()
     control_entities = ["franka@control", "screwdriver@control"]
+    # fasteners can be out of bounds too when carried by screwdriver.
+    fastener_entities = [k for k in gs_entities.keys() if k.endswith("fastener")]
+    # NOTE: would be good to have a check that the screwdriver carries them explicitly. Doable through tool state/constraints check.
+    # FIXME: ^ the above is pretty bad (fasteners can roll out and be undetected or whatnot.)
+    expanded_bounds_entities = control_entities + fastener_entities
+
     # "screwdriver_grip@tool_grip",
 
-    for entity in control_entities:
-        del gs_entities_no_control[entity]
+    for entity in expanded_bounds_entities:
+        del filtered_gs_entities[entity]
     parts_aabb = torch.stack(
-        [entity.get_AABB() for entity in gs_entities_no_control.values()], dim=1
+        [entity.get_AABB() for entity in filtered_gs_entities.values()], dim=1
     )  # ^ batch_shape, num_entities, 2, 3
 
     # allow control entities to be further out
     control_aabb = torch.stack(
-        [  # gs_entities["screwdriver_grip@tool_grip"].get_AABB(),
-            gs_entities["franka@control"].get_AABB(),
-            gs_entities["screwdriver@control"].get_AABB(),
-        ],
+        [gs_entities[entity].get_AABB() for entity in expanded_bounds_entities],
         dim=1,
     )  # ^ batch_shape, num_entities, 2, 3
 
