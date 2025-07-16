@@ -6,8 +6,8 @@ def out_of_bounds(
     min: torch.Tensor,
     max: torch.Tensor,
     gs_entities: dict[str, RigidEntity],
-    control_entities_min: torch.Tensor | None = torch.tensor([-10, -10, -0.5]),
-    control_entities_max: torch.Tensor | None = torch.tensor([10, 10, 10]),
+    control_entities_min: torch.Tensor | None = torch.tensor([-2, -2, -0.2]),
+    control_entities_max: torch.Tensor | None = torch.tensor([2, 2, 2]),
 ):
     """Check that any genesis entity is out of bounds. Control entites can be further out."""
     filtered_gs_entities = gs_entities.copy()

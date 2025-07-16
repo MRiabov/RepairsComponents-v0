@@ -64,3 +64,5 @@ Since their export from desired_state_geom, all models should be centered at the
 
 # ML
 ML is done via inverse kinematics and can move in only -0.5< x <0.5, -0.5< y <0.5, 0< z <0.8 ranges.
+
+%% genesis note: quats are in WXYZ convention.

@@ -47,8 +47,8 @@ def attach_tool_to_arm(
     scene: gs.Scene,
     tool_entity: RigidEntity,
     arm_entity: RigidEntity,
-    env_idx: torch.Tensor,
     tool: Tool,
+    env_idx: torch.Tensor | None,
 ):
     from repairs_components.processing.translation import get_connector_pos
     from repairs_components.logic.tools.gripper import Gripper
@@ -57,42 +57,37 @@ def attach_tool_to_arm(
         "Can not attach a gripper - it is always attached."
     )
 
-    device = env_idx.device
     # TODO assertion of similar orientaion and close position. # maybe it should be done via ompl?
-    tool_base_link = torch.tensor(tool_entity.base_link.idx, device=device)
-    arm_hand_link = torch.tensor(arm_entity.get_link("hand").idx, device=device)
+    tool_base_link = tool_entity.base_link.idx
+    arm_hand_link = arm_entity.get_link("hand").idx
+    arm_hand_link_local = arm_entity.get_link("hand").idx_local
 
-    arm_hand_pos = arm_entity.get_pos(envs_idx=env_idx)
-    arm_hand_quat = arm_entity.get_quat(envs_idx=env_idx)
+    # arm_hand_pos = arm_entity.get_pos(envs_idx=env_idx)
+    # arm_hand_quat = arm_entity.get_quat(envs_idx=env_idx)
+    arm_hand_pos = arm_entity.get_links_pos(arm_hand_link_local, env_idx)  # [b,1,3]
+    arm_hand_quat = arm_entity.get_links_quat(arm_hand_link_local, env_idx)  # [b,1,4]
 
     tool_grip_pos = get_connector_pos(
-        arm_hand_pos, arm_hand_quat, -tool.tool_grip_position().unsqueeze(0)
+        arm_hand_pos.squeeze(1),  # [b,3]
+        arm_hand_quat.squeeze(1),  # [b,4]
+        -tool.tool_grip_position().unsqueeze(0),
     )  # minus because from arm to tool.
+
+    # FIXME: the tool is not repositioned to the entity, for whichever reason.
+
+    ### debug, tests.
+    if env_idx is None:
+        tool_grip_pos = tool_grip_pos.squeeze()
+        arm_hand_quat = arm_hand_quat.squeeze()
+
+    ### /debug
 
     # set the tool attachment link to the same position as the arm hand link
     tool_entity.set_pos(tool_grip_pos, env_idx)
     tool_entity.set_quat(arm_hand_quat, env_idx)  #
 
-    # debug
-    assert (
-        not torch.isnan(tool_base_link).any()
-        and tool_base_link >= 0
-        and tool_base_link <= scene.rigid_solver.n_links
-    )
-    assert (
-        not torch.isnan(arm_hand_link).any()
-        and arm_hand_link >= 0
-        and arm_hand_link <= scene.rigid_solver.n_links
-    )
-    assert (
-        not torch.isnan(env_idx).any()
-        and (env_idx >= 0).all()
-        and (env_idx < scene.n_envs).all()
-    )
-
-    scene.sim.rigid_solver.add_weld_constraint(
-        tool_base_link.unsqueeze(0), arm_hand_link.unsqueeze(0), env_idx
-    )
+    scene.sim.rigid_solver.add_weld_constraint(tool_base_link, arm_hand_link, env_idx)
+    # tool_base_link.unsqueeze(0), arm_hand_link.unsqueeze(0), env_idx
 
 
 def detach_tool_from_arm(

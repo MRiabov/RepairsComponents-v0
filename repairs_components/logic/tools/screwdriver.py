@@ -1,13 +1,9 @@
 from dataclasses import dataclass
 
 import torch
-from repairs_components.geometry.b123d_utils import export_obj
-from repairs_components.logic.tools.tool import Tool
-from repairs_components.logic.tools.tool import attachment_link_name
+from repairs_components.logic.tools.tool import Tool, ToolsEnum, attachment_link_name
 from pathlib import Path
-import trimesh
 from build123d import *  # noqa: F403
-from repairs_components.logic.tools.tools_state import ToolsEnum
 
 
 @dataclass
@@ -27,8 +23,9 @@ class Screwdriver(Tool):
 
     def step(self, action: torch.Tensor, state: dict):
         raise NotImplementedError
-
-    def dist_from_grip_link(self):
+    
+    @staticmethod
+    def dist_from_grip_link():
         return 5  # 5 meters. for debug.
 
     def get_mjcf(self, base_dir: Path):
@@ -79,7 +76,6 @@ class Screwdriver(Tool):
         self.has_picked_up_fastener = False
         self.picked_up_fastener_name = None
         self.picked_up_fastener_tip_position = None
-        
 
 
 def receive_screw_in_action(

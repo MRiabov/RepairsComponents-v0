@@ -1,5 +1,6 @@
 # Plan of work for two days:
-1. Translation of electronics and fasteners is not implemented. (WIP)
+
+1. Translation of electronics and fasteners is not implemented. (DONE)
   - Persistence of mjcf singletons is not implemented on electronics; not modular on fasteners too. (DONE)
 2. Electronics collision has distance checks implemented (untested), but it does not have actual "connect" logic implemented. `check_connections` outputs (presumably) correct labels of connectors (connector_defs?), but then we need to `connect` the items manually (DONE, untested.)
 3. Collision detection of electronics during simulation is untested. does it work? (WIP)
@@ -9,19 +10,21 @@
 6. Electronics graph collection can not be disabled although it should be. 
 7. Only one connector type implemented.
 8. Buttons, LEDs, and switches are not implemented.
-9. Fasteners may not constrain two parts properly. (this is blocked by Genesis bug.)
+9. Fasteners may not constrain two parts properly. (untested)
 10. (related) fastener insertion hint (next task)
 11. Europlug connector_pos_relative_to_center_male and female are not implemented. (DONE, tested.)
 12. connector_pos_relative_to_center_male and female are not used properly. Links are most likely gotten by the center of the part (although I think I fixed it?). Possibly, may not work at all (DONE, untested).
-13. Fasteners and electronics rely on MJCF and MJCF does not support links and glb mesh imports. WON'T DO: better to use MJCF and just export to obj. And calculate fixed frames manually.
-- MJCF caused unexpected problems/bugs. It isn't necessary either. Deprecate mjcf and use meshes instead.
+13. ~~Fasteners and electronics rely on MJCF and MJCF does not support links and glb mesh imports. WON'T DO: better to use MJCF and just export to obj. And calculate fixed frames manually.~~
+- MJCF caused unexpected problems/bugs. It isn't necessary either. Deprecate mjcf and use meshes instead. (DONE)
 ~~14. Simulating my small objects on meter scale is not stable (as indicated by Genesis). Need to change settings of Genesis to milimeter including exports.~~ (Reverted)
 15. (related but global) get_pos in translation returned NaN (Done, tested.)
 16. Somehow fixed bodies are getting moved... OR desired state is not updated during reset, which is less likely. 
 17. I'm blocked by Genesis CUDA bug. So I need to make a reproducible example, and then get back to fixing fasteners. DONE
 18. does picking up screwdriver actually work? (DONE, tested)
 - debug render the buffer prefill steps, will tell. (DONE, yes, works)
-- Screwdriver must be repositioned to hand position when close enough.
+- bug: Screwdriver must be repositioned to hand position when picked up.
+  - screwdriver is not repositioned.
+    - **!** it is possible that the screwdriver is not repositioned because the constraint does not use the pos from set_pos.
 
 19. Fastener functionality must be done:
 - Fasteners are currently not picked up. (WIP/done, untested)
@@ -32,21 +35,20 @@
   - I suspect it's impossible to constrain two parts at the same time with collision detection logic. Screw in is happening at one position, the fastener is later snapped into place, released from the screwdriver, and then how is the second part constrained?
   A solution would be to not remove the fastener from the screwdriver, and remove it only when the ML decides to release it. The realistic solution pattern would be then move to one hole -> screw in (snap) -> move to another hole -> screw in too. However the attachment should not happen twice. (untested - will work second part?)
 
-  - When fasteners are constrained, the are constrained how they currently are and not in the hole that they should be. (rel 21) (WIP: activate_fastener_to_hand_connection- done, *activate_part_to_fastener_connection not*.) 
-  - Fasteners constrain parts but do not align them to the hole.
+  - When fasteners are constrained, they are constrained how they currently are and not in the hole that they should be. (rel 21) (WIP: activate_fastener_to_hand_connection- done, *activate_part_to_fastener_connection not*.) (DONE)
+  - Fasteners constrain parts but do not align them to the hole. (DONE)
     - how to avoid extreme, instant snaps?
 - Fastener quat/pos is not updated in tranlsation from genesis. (DONE, untested?)
 - (duplicate) build123d joints are, as I understand not used to create relative hole positions.(done, untested at all)
-- During insertion fasteners should be at least roughly close to a hole - set max angle difference to 30deg.
+- During insertion fasteners should be at least roughly close to a hole - set max angle difference to 30deg. (DONE)
 
-20. Hole positions and quats are not translated from initial state in perturb. (necessary for fastener collision detection&alignment)
-21. Hole positions are not recalculated to allow for collision detection and alignment. (WIP)
+20. Hole positions and quats are not translated from initial state in perturb. (necessary for fastener collision detection&alignment) (DONE)
+21. Hole positions are not recalculated to allow for collision detection and alignment. (DONE)
 - bug found: positions are calculated as global positions, not local to part.
 ~~22. (ML) Fastener pickup/release is not done.~~(duplicate 19a)
 ~~23. Screwdriver grip positions (tool grip and fastener grip) is not updated~~ (done, transiently.)
 - Would be convenient to store grip positions in Screwdriver class, although current approach is fine.
-22. picked_up_fastener_tip_position are irrelevant if a tool or fastener is dropped, however it is still passed to step_screw_in_or_out
-18. (minor?) - there is a major snap of fasteners/parts that hold them when fasteners are inserted.
+24. (minor?) - there is a major snap of fasteners/parts that hold them when fasteners are inserted.
 
 
 
@@ -54,10 +56,18 @@
 # Hearbeat 21.07.25: Publish the "Teaching Robots to Repair" paper.
 
 UNDONE:
-1,3,4,6,7,9,16,(17)
+3,4,6,7,9,16,18b
+untested:
+3,4,9
 
 ### Next:
-Fix CUDA index error; 
+finish the test script for debug of screwdriver not being repositioned to hand position.
+
+<!-- Debug screwdriver not being repositioned to hand position when picked up. (18b) -->
+<!-- >
+Make a test suite using Genesis: create a single scene and run all `repairs_sim_step` on it with assertions. -->
+
+<!-- Fix CUDA index error; do a test for it. -->
 
 (after):
 (18) - test whether a screwdriver works.
@@ -96,7 +106,8 @@ It turns out the fasteners functionality was commented out, and all fastener fun
 17. There may be a clash between tools when both are within pickup distance.
 - at the moment, picking up only one tool is supported.
 18. (minor) Twisting movement is not prevented/penalized when already inserted on max depth.
-
+19. (maybe; major?) instead of `set_pos`, why wouldn't I make IK to this position first? For 10-15, at least we'll get closer. 
+- That would require making extra `scene.step()` calls.
 
 
 and yet I need to fix the perturb instead of electronics and fasteners...
@@ -106,6 +117,7 @@ after:
 2. Electronics graphs should be easily disabled in encoding.
 3. (obviously) expand all graph nets to encode positional hints (perhaps even vision and voxels?) <- perhaps encode desired change into vision? It could be a little too troublesome though. But would work?
 %note: will my paper contribute anything meaningful, considering that Nvidia does robotic assembly too? I may need to add electronics testing to make this more interesting.
+
 
 
 ## Electronics repair task list (if will do)

@@ -1,18 +1,15 @@
 from repairs_components.training_utils.sim_state import SimState
 import numpy as np
-from repairs_components.logic.tools.tool import Tool, ToolsEnum
 from dataclasses import dataclass
 from repairs_components.logic.tools.gripper import Gripper
 from repairs_components.logic.tools.screwdriver import Screwdriver
+from repairs_components.logic.tools.tool import ToolsEnum, Tool
 
 
 @dataclass
-class ToolState(SimState):
+class ToolState(SimState):    
+
     current_tool: Tool = Gripper()
-    all_tools = {  # for convenience only (for now)
-        "gripper": Gripper(),
-        "screwdriver": Screwdriver(),
-    }
 
     @property
     def current_tool_id(self):
@@ -29,11 +26,10 @@ class ToolState(SimState):
 
     @staticmethod
     def rebuild_from_saved(current_tool_id: int) -> "ToolState":
+        
         if current_tool_id == ToolsEnum.GRIPPER.value:
             return ToolState(current_tool=Gripper())
         elif current_tool_id == ToolsEnum.SCREWDRIVER.value:
-            return ToolState(
-                current_tool=Screwdriver()
-            )
+            return ToolState(current_tool=Screwdriver())
         else:
             raise ValueError(f"Invalid tool id: {current_tool_id}")

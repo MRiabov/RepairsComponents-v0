@@ -162,9 +162,7 @@ def step_pick_up_release_tool(
         dist = torch.norm(hand_pos.squeeze(1) - grip_pos.squeeze(1), dim=-1)
         # TODO: not looking for closest tool, but should look for closest only.
         required_dist = torch.tensor(
-            current_sim_state.tool_state[0]
-            .all_tools["screwdriver"]
-            .dist_from_grip_link(),  # note: singular float.
+            Screwdriver.dist_from_grip_link(),  # note: singular float.
             dtype=torch.float,
             device=actions.device,
         )
@@ -177,7 +175,7 @@ def step_pick_up_release_tool(
                 current_sim_state.tool_state[env_id].current_tool = Screwdriver()
                 # attach the screwdriver to the hand
                 # device issues?
-            attach_tool_to_arm(scene, screwdriver, franka_hand, env_idx, Screwdriver())
+            attach_tool_to_arm(scene, screwdriver, franka_hand, Screwdriver(), env_idx)
     if release_tool_mask.any():
         env_idx = release_tool_mask.nonzero().squeeze(1)
         print(f"releasing tool at env_idx: {env_idx.tolist()}")
@@ -286,33 +284,31 @@ def step_screw_in_or_out(
             # note: ignore hole idx could be moved out to get -1s separately but idgaf.
         )  # [B] int or -1
         valid_insert = part_idx >= 0
-        if valid_insert.any():
-            # FIXME: this never executes! (i've never seen it, at least.)
-            # ^ note: just seen it execute.
-            # but in some cases it threw cuda error?
-            for env_id in env_ids[valid_insert].tolist():
-                hole_pos = physical_state[env_id].hole_positions[
-                    hole_idx[env_id].item()
-                ]
-                hole_quat = physical_state[env_id].hole_quats[hole_idx[env_id].item()]
-                fastener_name = tool_state[env_id].current_tool.picked_up_fastener_name
-                part_id = part_idx[env_id].item()
-                part_name = physical_state[env_id].inverse_body_indices[part_id]
-                # note: fasteners that are already connected are ignored in check_fastener_possible_insertion
-                # FIXME: body_idx should be gettable from fastener_hole_positions
-                activate_part_to_fastener_connection(
-                    scene,
-                    fastener_entity=gs_entities[fastener_name],
-                    hole_pos=hole_pos,
-                    hole_quat=hole_quat,
-                    part_entity=gs_entities[part_name],
-                    envs_idx=torch.tensor([env_id], device=actions.device),
-                )
-                # future: assert (prevent) more than two connections.
+        # if valid_insert.any():
+        #     # FIXME: this never executes! (i've never seen it, at least.)
+        #     # ^ note: just seen it execute.
+        #     # but in some cases it threw cuda error?
+        for env_id in env_ids[valid_insert].tolist():
+            hole_pos = physical_state[env_id].hole_positions[hole_idx[env_id].item()]
+            hole_quat = physical_state[env_id].hole_quats[hole_idx[env_id].item()]
+            fastener_name = tool_state[env_id].current_tool.picked_up_fastener_name
+            part_id = part_idx[env_id].item()
+            part_name = physical_state[env_id].inverse_body_indices[part_id]
+            # note: fasteners that are already connected are ignored in check_fastener_possible_insertion
+            # FIXME: body_idx should be gettable from fastener_hole_positions
+            activate_part_to_fastener_connection(
+                scene,
+                fastener_entity=gs_entities[fastener_name],
+                hole_pos=hole_pos,
+                hole_quat=hole_quat,
+                part_entity=gs_entities[part_name],
+                envs_idx=torch.tensor([env_id], device=actions.device),
+            )
+            # future: assert (prevent) more than two connections.
 
-                ##Design choice: don't remove connection after screw in to allow ML to constrain two parts more easily.
+            ##Design choice: don't remove connection after screw in to allow ML to constrain two parts more easily.
 
-                physical_state[env_id].connect(fastener_name, part_name, None)
+            physical_state[env_id].connect(fastener_name, part_name, None)
 
     if has_fastener_and_desired_out.any():
         for env_id in (
