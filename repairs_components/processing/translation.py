@@ -542,6 +542,8 @@ def get_connector_pos(
     """
     Get the position of a connector relative to its parent. Used both in translation from compound to sim state and in screwdriver offset.
     Note: expects batched inputs of rel_connector_pos, ndim=2.
+    Returns:
+        torch.Tensor: The position of the connector relative to its parent. [B, 3]
     """
     # reverse the function because from parent to connector.
     rel_connector_pos = -rel_connector_pos

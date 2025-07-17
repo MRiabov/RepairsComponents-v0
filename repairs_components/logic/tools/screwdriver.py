@@ -14,17 +14,17 @@ class Screwdriver(Tool):
     picked_up_fastener_tip_position: torch.Tensor | None = None
 
     @staticmethod
-    def tool_grip_position():
-        return torch.tensor([0, 0, 0.3])  # 0.3m?
+    def tool_grip_position():  # TODO rename to uppercase and make var.
+        return torch.tensor([0, 0, 0.15])  # 0.3m?
 
-    @staticmethod
+    @staticmethod  # TODO rename to uppercase and make var.
     def fastener_connector_pos_relative_to_center():
         return torch.tensor([0, 0, -0.2])  # 0.2m?
 
     def step(self, action: torch.Tensor, state: dict):
         raise NotImplementedError
-    
-    @staticmethod
+
+    @staticmethod  # TODO rename to uppercase and make var.
     def dist_from_grip_link():
         return 5  # 5 meters. for debug.
 
@@ -38,7 +38,7 @@ class Screwdriver(Tool):
             </asset>
             <worldbody>
                 <geom type="mesh" mesh="tool_mesh"/>
-                <body name="attachment_link" pos="0 0 0.3">
+                <body name="attachment_link" pos="0 0 0.15">
                     <joint name="{attachment_link_name}" type="free"/>
                 </body>
             </worldbody>

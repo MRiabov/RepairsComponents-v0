@@ -175,7 +175,7 @@ def check_fastener_possible_insertion(
     active_fastener_tip_position: torch.Tensor,
     part_hole_positions: torch.Tensor,
     part_hole_batch: torch.Tensor,
-    connection_dist_threshold: float = 0.75,
+    connection_dist_threshold: float = 0.75,  # meters (!)
     connection_angle_threshold: float = 30,  # degrees
     part_hole_quats: torch.Tensor | None = None,
     active_fastener_quat: torch.Tensor | None = None,
@@ -235,14 +235,13 @@ def check_fastener_possible_insertion(
     return part_idx, hole_idx
 
 
-def activate_fastener_to_screwdriver_connection(
+def attach_fastener_to_screwdriver(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
     screwdriver_entity: RigidEntity,
-    reposition_to_xyz: torch.Tensor,  # [3]
-    env_id: int,
     tool_state_to_update: Tool,
     fastener_id: int,
+    env_id: int,
 ):
     # avoid circular import
     from repairs_components.processing.translation import get_connector_pos
@@ -252,31 +251,35 @@ def activate_fastener_to_screwdriver_connection(
     rigid_solver = scene.sim.rigid_solver
     screwdriver_link = screwdriver_entity.base_link.idx
     fastener_head_joint = fastener_entity.base_link.idx
-    # Align the fastener before constraining
+    # compute screwdriver grip position
+    screwdriver_xyz = screwdriver_entity.get_pos(env_id)
     screwdriver_quat = screwdriver_entity.get_quat(env_id)
-    fastener_entity.set_pos(reposition_to_xyz, env_id)
+    screwdriver_grip_xyz = (
+        screwdriver_xyz
+        + Screwdriver.fastener_connector_pos_relative_to_center().unsqueeze(0)
+    )  # ^ `-` because we want the fastener to be at the screwdriver grip position
+    # ^ hmm. The tests pass this way, but is this expected?
+
+    # Align the fastener before constraining
+    fastener_entity.set_pos(screwdriver_grip_xyz, env_id)
     fastener_entity.set_quat(screwdriver_quat, env_id)
     rigid_solver.add_weld_constraint(
         fastener_head_joint, screwdriver_link, env_id
     )  # works is genesis's examples.
     assert isinstance(tool_state_to_update, Screwdriver), "Tool must be a Screwdriver"
+    tool_state_to_update.picked_up_fastener_tip_position = screwdriver_grip_xyz
     tool_state_to_update.picked_up_fastener_name = Fastener.fastener_name_in_simulation(
         fastener_id
-    )
-    tool_state_to_update.picked_up_fastener_tip_position = get_connector_pos(
-        reposition_to_xyz,  # note that we know the position of fastener already
-        screwdriver_quat,
-        Fastener.get_tip_pos_relative_to_center().unsqueeze(0),
     )
     tool_state_to_update.has_picked_up_fastener = True
 
 
-def deactivate_fastener_to_screwdriver_connection(
+def detach_fastener_from_screwdriver(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
     screwdriver_entity: RigidEntity,
-    env_id: int,
     tool_state_to_update: Tool,
+    env_id: int,
 ):
     from repairs_components.logic.tools.screwdriver import Screwdriver
 
@@ -292,7 +295,7 @@ def deactivate_fastener_to_screwdriver_connection(
     tool_state_to_update.has_picked_up_fastener = False
 
 
-def activate_part_to_fastener_connection(
+def attach_fastener_to_part(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
     hole_pos: torch.Tensor,
@@ -310,15 +313,16 @@ def activate_part_to_fastener_connection(
 
     fastener_entity.set_pos(hole_pos, envs_idx)
     fastener_entity.set_quat(hole_quat, envs_idx)
-    # not exactly the hole position!!!
+    # FIXME: not exactly the hole position!!!
     # how to prevent insertion too deeply?
 
     rigid_solver.add_weld_constraint(
         fastener_joint, other_body_link, envs_idx
     )  # works in genesis's examples.
+    # FIXME: rigid weld constraint would make screwing the other part impossible. it should be a circular joint first.
 
 
-def deactivate_part_connection(
+def detach_fastener_from_part(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
     part_entity: RigidEntity,

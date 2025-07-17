@@ -101,6 +101,19 @@ def io_cfg(data_dir, env_setups_two_connectors):
     return io_cfg
 
 
+@pytest.fixture(autouse=True)
+def cleanup_after_test(request, scene_franka_and_two_cubes):
+    yield
+    test_name = request.node.name
+    scene, entities = scene_franka_and_two_cubes
+    scene.visualizer.cameras[0].stop_recording(
+        save_to_filename=f"/workspace/RepairsComponents-v0/video_{test_name}.mp4",
+        fps=60,
+    )
+    scene.reset()
+    scene.visualizer.cameras[0].start_recording()
+
+
 @pytest.fixture
 def env_setups_two_connectors():
     class TwoConnectors(EnvSetup):
@@ -295,3 +308,7 @@ def test_get_connector_pos():
         get_connector_pos(parent_pos, parent_quat, rel_connector_pos),
         torch.tensor([0.5, 0.5, 0.2]),
     ).all()
+
+
+# TODO split this test in 3 test modules: test_translation_genesis_to_python, test_translation_compound_to_sim_state, test_translation_sim_state_to_genesis
+# new tests

@@ -7,11 +7,11 @@ from torch_geometric.data import Data
 from repairs_components.geometry.connectors.connectors import check_connections
 from repairs_components.geometry.fasteners import (
     Fastener,
-    activate_fastener_to_screwdriver_connection,
-    activate_part_to_fastener_connection,
-    deactivate_fastener_to_screwdriver_connection,
+    attach_fastener_to_screwdriver,
+    attach_fastener_to_part,
+    detach_fastener_from_screwdriver,
     check_fastener_possible_insertion,
-    deactivate_part_connection,
+    detach_fastener_from_part,
 )
 from repairs_components.logic.tools import tool
 from repairs_components.logic.tools.gripper import Gripper
@@ -296,7 +296,7 @@ def step_screw_in_or_out(
             part_name = physical_state[env_id].inverse_body_indices[part_id]
             # note: fasteners that are already connected are ignored in check_fastener_possible_insertion
             # FIXME: body_idx should be gettable from fastener_hole_positions
-            activate_part_to_fastener_connection(
+            attach_fastener_to_part(
                 scene,
                 fastener_entity=gs_entities[fastener_name],
                 hole_pos=hole_pos,
@@ -327,7 +327,7 @@ def step_screw_in_or_out(
             for body_idx in fastener_body_indices:
                 if body_idx != -1:
                     body_name = physical_state[env_id].inverse_indices[body_idx.item()]
-                    deactivate_part_connection(
+                    detach_fastener_from_part(
                         scene,
                         fastener_entity=gs_entities[fastener_name],
                         part_entity=gs_entities[body_name],
@@ -340,11 +340,11 @@ def step_screw_in_or_out(
                 Screwdriver.fastener_connector_pos_relative_to_center().unsqueeze(0),
             )
 
-            activate_fastener_to_screwdriver_connection(  # reattach the fastener to hand.
+            attach_fastener_to_screwdriver(  # reattach the fastener to hand.
                 scene,
                 fastener_entity=gs_entities[fastener_name],
                 screwdriver_entity=gs_entities["franka@control"],
-                reposition_to_xyz=screwdriver_grip_pos,
+                screwdriver_grip_xyz=screwdriver_grip_pos,
                 env_id=env_id,
                 tool_state_to_update=tool_state[env_id].current_tool,
                 fastener_id=fastener_id,
@@ -428,11 +428,10 @@ def step_fastener_pick_up_release(
             fastener_name = Fastener.fastener_name_in_simulation(
                 closest_fastener_id[i].item()
             )
-            activate_fastener_to_screwdriver_connection(
+            attach_fastener_to_screwdriver(
                 scene,
                 fastener_entity=gs_entities[fastener_name],
                 screwdriver_entity=gs_entities["franka@control"],
-                reposition_to_xyz=screwdriver_gripper_pos[i],
                 env_id=env_id,
                 tool_state_to_update=tool_state[env_id].current_tool,
                 fastener_id=closest_fastener_id[i].item(),
@@ -452,7 +451,7 @@ def step_fastener_pick_up_release(
         for env_id in desired_release_indices.tolist():
             assert tool_state[env_id].current_tool.picked_up_fastener_name is not None
             fastener_name = tool_state[env_id].current_tool.picked_up_fastener_name
-            deactivate_fastener_to_screwdriver_connection(
+            detach_fastener_from_screwdriver(
                 scene,
                 fastener_entity=gs_entities[fastener_name],
                 screwdriver_entity=gs_entities["franka@control"],

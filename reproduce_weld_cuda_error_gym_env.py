@@ -106,7 +106,7 @@ io_cfg = {
 command_cfg = {
     "min_bounds": [
         *(-0.5, -0.5, 0),  # XYZ position min
-        *(0,0,0,0),  # Quaternion components (w,x,y,z) min
+        *(0, 0, 0, 0),  # Quaternion components (w,x,y,z) min
         *(0.0, 0.0),  # Gripper control min
         0.0,  # tool control min (0.5 denotes pick up tool)
     ],

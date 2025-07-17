@@ -7,8 +7,7 @@ from repairs_components.logic.tools.tool import ToolsEnum, Tool
 
 
 @dataclass
-class ToolState(SimState):    
-
+class ToolState(SimState):
     current_tool: Tool = Gripper()
 
     @property
@@ -26,7 +25,6 @@ class ToolState(SimState):
 
     @staticmethod
     def rebuild_from_saved(current_tool_id: int) -> "ToolState":
-        
         if current_tool_id == ToolsEnum.GRIPPER.value:
             return ToolState(current_tool=Gripper())
         elif current_tool_id == ToolsEnum.SCREWDRIVER.value:

@@ -2,6 +2,7 @@ from genesis.engine.entities.rigid_entity import RigidEntity
 import torch
 import genesis as gs
 from genesis.vis.camera import Camera
+from torch.nn import functional as F
 
 
 def execute_straight_line_trajectory(
@@ -47,6 +48,8 @@ def execute_straight_line_trajectory(
         f"Target quaternion shape must be (num_envs, 4) or (4,). Currently: {target_quat.shape}"
     )
     device = target_pos.device
+    # normalize quat in case it wasn't already
+    target_quat = F.normalize(target_quat, dim=-1, eps=1e-6)
 
     current_end_effector_pos = torch.tensor(franka.get_link("hand").pos, device=device)
     current_end_effector_quat = torch.tensor(

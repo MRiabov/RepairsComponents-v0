@@ -588,7 +588,7 @@ def _quaternion_conjugate(q: torch.Tensor) -> torch.Tensor:
     return torch.cat([w, -xyz], dim=-1)
 
 
-#FIXME: quat_conj, quat_multiply, quat_angle_diff are equally implemented in `translation.py`
+# FIXME: quat_conj, quat_multiply, quat_angle_diff are equally implemented in `translation.py`
 def _quaternion_multiply(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
     """Hamilton product of two quaternions.  Inputs (...,4) → output (...,4)."""
     w1, x1, y1, z1 = q1.unbind(-1)

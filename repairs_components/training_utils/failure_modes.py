@@ -40,7 +40,28 @@ def out_of_bounds(
         | (control_aabb[:, :, 1] > control_entities_max)
     ).any(dim=(-1, -2))
     any_out_of_bounds = parts_out_of_bounds | control_out_of_bounds
+
+    # log
     if any_out_of_bounds.any():
-        print(f"Parts out of bounds: {parts_out_of_bounds}")
-        print(f"Control out of bounds: {control_out_of_bounds}")
+        # Collect out-of-bounds entities per batch
+        filtered_keys = list(filtered_gs_entities.keys())
+        parts_entities_oob: list[list[str] | None] = []
+        control_entities_oob: list[list[str] | None] = []
+        for b in range(parts_out_of_bounds.shape[0]):
+            parts = [
+                filtered_keys[i]
+                for i in parts_out_of_bounds[b].nonzero().flatten().tolist()
+            ]
+            controls = [
+                expanded_bounds_entities[i]
+                for i in control_out_of_bounds[b].nonzero().flatten().tolist()
+            ]
+            parts_entities_oob.append(parts if parts else None)
+            control_entities_oob.append(controls if controls else None)
+        print(
+            f"Parts out of bounds: {parts_out_of_bounds}, entities: {parts_entities_oob}"
+        )
+        print(
+            f"Control out of bounds: {control_out_of_bounds}, entities: {control_entities_oob}"
+        )
     return any_out_of_bounds
