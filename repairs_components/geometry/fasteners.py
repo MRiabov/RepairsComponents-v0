@@ -97,7 +97,7 @@ class Fastener(Component):
     </mujoco>
 """
 
-    def bd_geometry(self) -> tuple[Part, tuple]:
+    def bd_geometry(self) -> Part:
         """Create a build123d geometry for the fastener.
 
         Returns:
@@ -150,12 +150,12 @@ class Fastener(Component):
         fastener.color = Color(0.58, 0.44, 0.86, 0.8)
         fastener.label = self.name
 
-        # set collision detection position at the tip of the fastener
-        fastener_collision_detection_position = tuple(
-            shaft.faces().sort_by(Axis.Z).last.center()
-        )
+        # # set collision detection position at the tip of the fastener
+        # fastener_collision_detection_position = tuple(
+        #     shaft.faces().sort_by(Axis.Z).last.center()
+        # )
 
-        return fastener, fastener_collision_detection_position
+        return fastener
 
     @staticmethod
     def get_tip_pos_relative_to_center(length: float = 15.0 / 1000):
@@ -172,39 +172,45 @@ class Fastener(Component):
 
 
 def check_fastener_possible_insertion(
-    active_fastener_tip_position: torch.Tensor,
-    part_hole_positions: torch.Tensor,
-    part_hole_batch: torch.Tensor,
+    active_fastener_tip_position: torch.Tensor,  # [B,3]
+    part_hole_positions: torch.Tensor,  # [B,num_holes,3]
+    part_hole_batch: torch.Tensor,  # [num_holes] #NOTE: part_hole_batch is static amongst batch!
     connection_dist_threshold: float = 0.75,  # meters (!)
     connection_angle_threshold: float = 30,  # degrees
-    part_hole_quats: torch.Tensor | None = None,
-    active_fastener_quat: torch.Tensor | None = None,
-    ignore_part_idx: torch.Tensor | None = None,
+    part_hole_quats: torch.Tensor | None = None,  # [B,num_holes,4]
+    active_fastener_quat: torch.Tensor | None = None,  # [B,4]
+    ignore_part_idx: torch.Tensor | None = None,  # [B]
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Args:
     active_fastener_tip_position: [B,3] tensor of tip positions
-    part_hole_positions: torch.Tensor of hole positions - per every hole, a tensor of shape [num_holes,3]
-    part_hole_quats: torch.Tensor of hole quaternions - per every hole, a tensor of shape [num_holes,4]
-    part_hole_batch: torch.Tensor of hole batch indices - per every hole, it's corresponding part index [num_holes]
+    part_hole_positions: torch.Tensor of hole positions - per every hole, a tensor of shape [B, num_holes,3]
+    part_hole_quats: torch.Tensor of hole quaternions - per every hole, a tensor of shape [B, num_holes,4]
+    part_hole_batch: torch.Tensor of hole batch indices - per every hole, it's corresponding part index. Static amongst batch. [num_holes]
     connection_threshold: float
-    ignore_hole_idx: torch.Tensor, indices of the hole to ignore (if fastener is already inserted in that hole in that batch, ignore.) [B]
+    ignore_part_idx: torch.Tensor, indices of the part to ignore (if fastener is already inserted in that part in that batch, ignore.) [B]
 
     Batch check: for each env, find first hole within threshold or -1. If part_hole_quats is not None, check that the hole is not rotated too much.
     Returns:
-    - Tuple of tensors `(part_idx, hole_idx)`, each of shape `[batch]`, where `-1` indicates no match.`
+    - Tuple of tensors `(part_idx, hole_idx)`, each of shape `[batch]`, where `-1` indicates no match and value >= 0 indicates the hole index, with its part index.
     """
     from repairs_components.processing.translation import are_quats_within_angle
 
+    assert part_hole_positions.shape[1] == part_hole_batch.shape[0], (
+        "part_hole_positions, part_hole_batch must have the same batch and hole counts"
+    )
+    assert part_hole_batch.ndim == 1, (
+        f"part_hole_batch must be a 1D tensor of shape [H], got {part_hole_batch.shape}"
+    )
     dist = torch.norm(
         part_hole_positions - active_fastener_tip_position, dim=-1
     )  # [B,H]
     # ignore holes that this fastener is already attached to
-    if ignore_part_idx is not None:  # what about in ignore_hole_idx are -1?
-        # because ignore_hole_idx is actually a [B, 2] tensor which will only ever have one
-        # non-negative value, we can say that mask can be aggregated with `any()`.
-        #
-        mask = (ignore_part_idx != -1).any(dim=-1)
+    if ignore_part_idx is not None:
+        assert ignore_part_idx.shape == (part_hole_positions.shape[0],), (
+            "ignore_part_idx must be a 1D tensor of shape [B]"
+        )
+        mask = ignore_part_idx != -1
         batch_idx = torch.arange(len(ignore_part_idx), device=ignore_part_idx.device)[
             mask
         ]
@@ -215,6 +221,9 @@ def check_fastener_possible_insertion(
     if active_fastener_quat is not None:
         assert part_hole_quats is not None, (
             "part_hole_quats must be provided if active_fastener_quat is provided"
+        )
+        assert part_hole_quats.shape[:2] == part_hole_positions.shape[:2], (
+            "part_hole_quats, part_hole_positions must have the same batch and hole counts"
         )
         angle_mask = are_quats_within_angle(
             part_hole_quats,
