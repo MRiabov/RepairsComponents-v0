@@ -219,10 +219,10 @@ class Connector(ElectricalComponent):
         geom.label = base_name + "_compound"
 
         # util to print connector collision position
-        # print(
-        #     f"{base_name}_connector_collision_detection_position",
-        #     geom.children[1].center(CenterOf.BOUNDING_BOX),
-        # )
+        print(
+            f"{base_name}_connector_collision_detection_position",
+            geom.children[1].center(CenterOf.BOUNDING_BOX),
+        )
 
         return geom
 
@@ -306,6 +306,10 @@ def check_connections(
         List of length B (batch size). Each element is a list of (male_name, female_name)
         pairs that are valid connections in that batch.
     """
+    assert len(male_connectors) == len(female_connectors) > 0, (
+        f"Number of male and female connectors must be equal and greater than 0. Got: {len(male_connectors)} and {len(female_connectors)}"
+    )
+
     male_keys = list(male_connectors.keys())
     female_keys = list(female_connectors.keys())
 
@@ -328,21 +332,35 @@ class ConnectorsEnum(IntEnum):
     EUROPLUG = 0
     XT60 = 1
     ROUND_LAPTOP = 2
+    POWERPOLE = 3
+    USB_TYPE_C = 4
+    USB_TYPE_A = 5
+    AMP_SUPERSEAL = 6  # nice connector and easy to model
+    # ETHERNET = 7  # just maybe.
 
     # Note: these kinds of enums are better moved away, but for an unscalable version this is fine.
     @staticmethod
-    def by_id(id: int, name: str) -> Connector:
+    def by_id(id: int, in_sim_id: int) -> Connector:
         # import everything here because of circular dependencies
         # from repairs_components.geometry.connectors.models.xt60 import XT60
 
         from repairs_components.geometry.connectors.models.europlug import Europlug
+        from repairs_components.geometry.connectors.models.powerpole import Powerpole
 
         enum_ = ConnectorsEnum(id)
         if enum_ == ConnectorsEnum.EUROPLUG:
-            return Europlug(name)
+            return Europlug(in_sim_id)
         if enum_ == ConnectorsEnum.XT60:
             raise NotImplementedError
         elif enum_ == ConnectorsEnum.ROUND_LAPTOP:
+            raise NotImplementedError
+        elif enum_ == ConnectorsEnum.POWERPOLE:
+            return Powerpole(in_sim_id)
+        elif enum_ == ConnectorsEnum.USB_TYPE_C:
+            raise NotImplementedError
+        elif enum_ == ConnectorsEnum.USB_TYPE_A:
+            raise NotImplementedError
+        elif enum_ == ConnectorsEnum.AMP_SUPERSEAL:
             raise NotImplementedError
         else:
             raise ValueError(f"Unknown connector id: {id}")

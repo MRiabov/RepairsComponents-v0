@@ -32,3 +32,7 @@ git config --global user.email "maksymriabov2004@gmail.com"
 # to run:
 # uv run /workspace/Repairs-v0/neural_nets/sac_repairs.py
 # note: if pyright or windsurf timeout, check whether default paths were added to pyright ignore.
+
+#run tests:
+# uv run pytest #folder#
+# e.g. uv run pytest /workspace/RepairsComponents-v0/tests/test_tool_genesis.py::test_attach_and_detach_tool_to_arm_with_fastener
