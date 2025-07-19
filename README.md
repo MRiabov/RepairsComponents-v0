@@ -1,18 +1,24 @@
 # RepairsComponents-v0
 
-A modular library of physics-based engineering components for training on repair and maintenance simulations.
+The first library enabling training of robotics on Repair and Maintenance problems - mechanics and electronics included!
 
 ## Overview
 
-Repairs Components is a library designed to provide a toolkit of reusable, physics-based engineering components for training on repair and maintenance simulations. The library is specifically tailored for use with reinforcement learning environments, particularly those built on the Genesis physics engine. 
+Repairs Components is a library designed to enable manufacturing companies to assemble and repair their products using robotics. Simply put - with a few manipulations on your STEP assembly file, this library allows training of a robot to assemble, disassemble and replace parts in your assembly. You can bring your own robot!
 
-## Features
+## Capabilities
 
-- **Fasteners**: 
-  - Fasteners between parts, allowing fastening of parts during simulation
+- **A RL environment to assemble and disasseble mechanical assemblies**: Upload a `.step` assembly file and let Repairs paralel environment do the work for you.
+- **Replace a damaged component**: A common case for maintenance is a damaged component. This RL environment teaches a robot to replace various components under *thousands* of various settings *every second*.
+- **Multiple modes of training** - Our library can be used as a dataset generator for offline reinforcement learning. Simply flip "save" to True (under io_cfg config dict) in RL and video, voxel, and data observation will be persisted to your disk
 
 - **Electronics**: 
-  - Components such as buttons and switches, allowing interaction with the environment; wires, connectors allowing the robots to assemble a given env
+  - Components such as buttons and switches, allowing interaction with the environment; wires, connectors allowing the robots to assemble a given env. _(WIP)_
+ 
+Note: this is a *reinforcement learning environment*. You will need a *reinforcement learning algorithm* and we provide that in [Repairs-v0](https://github.com/MRiabov/Repairs-v0)
+
+> [!WARNING]  
+> Caution: the electronics library is very much in Alpha and active development and could be broken when you see this. Check in a few weeks when we will polish it!
 
 ## Installation
 
