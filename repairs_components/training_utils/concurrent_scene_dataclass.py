@@ -41,10 +41,17 @@ class ConcurrentSceneData:
     "Step count in every scene. I don't think this should be diffed."
     task_ids: torch.IntTensor
     "Task ids in for every scene."
-    starting_hole_positions: dict[str, torch.Tensor]
-    "Starting hole positions for every part."
-    starting_hole_quats: dict[str, torch.Tensor]
-    "Starting hole quats for every part."
+    starting_hole_positions: torch.Tensor
+    """Starting hole positions for every part, batched with part_hole_batch. 
+    Equal over the batch. Shape: (H, 3)"""
+    starting_hole_quats: torch.Tensor
+    """Starting hole quats for every part, batched with part_hole_batch. 
+    Equal over the batch. Shape: (H, 4)"""
+    hole_depth: torch.Tensor
+    """Hole depths for every part. If the hole is blind, value is >0, if through set as -depth.
+    Equal over the batch. Shape: (H)"""
+    part_hole_batch: torch.Tensor
+    "Part index for every hole. Equal over the batch. Shape: (H)"
 
     # debug
     def __post_init__(self):
@@ -98,9 +105,29 @@ class ConcurrentSceneData:
             f"initial_diff_counts must have the same batch dimension as batch_dim, but got {self.initial_diff_counts.shape[0]} and {self.batch_dim}"
         )
         # holes
-        assert self.starting_hole_positions.keys() == self.starting_hole_quats.keys(), (
-            "Starting hole positions and quats must have the same keys."
+        self.hole_count = self.starting_hole_positions.shape[1]
+        assert self.starting_hole_positions.shape == (
+            self.batch_dim,
+            self.hole_count,
+            3,
+        ), (
+            f"Starting hole positions must have shape ({self.batch_dim}, {self.hole_count}, 3), but got {self.starting_hole_positions.shape}"
         )
+        assert self.starting_hole_quats.shape == (
+            self.batch_dim,
+            self.hole_count,
+            4,
+        ), (
+            f"Starting hole quats must have shape ({self.batch_dim}, {self.hole_count}, 4), but got {self.starting_hole_quats.shape}"
+        )
+        assert self.part_hole_batch.shape == (self.hole_count,), (
+            "Part hole batch must have shape (H,)"
+        )
+        assert self.hole_depth.shape == (self.hole_count,), (
+            "Hole depths must have shape (H,)"
+        )
+        assert (self.hole_depth != 0).all(), "Hole depths must not be 0."
+
         # init state != current state
         # assert self.init_state != self.current_state, (
         #     "init_state must not be equal to current_state. If it is, use `copy.copy` to create a new object."
@@ -198,6 +225,8 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         task_ids=torch.cat([data.task_ids for data in scene_configs], dim=0),
         starting_hole_positions=starting_hole_positions,
         starting_hole_quats=starting_hole_quats,
+        hole_depth=scene_configs[0].hole_depth,
+        part_hole_batch=scene_configs[0].part_hole_batch,
     )
     return new_scene_config
 
@@ -265,6 +294,8 @@ def merge_scene_configs_at_idx(
             task_ids=old_scene_config.task_ids.clone(),
             starting_hole_positions=old_scene_config.starting_hole_positions,
             starting_hole_quats=old_scene_config.starting_hole_quats,
+            hole_depth=old_scene_config.hole_depth,
+            part_hole_batch=old_scene_config.part_hole_batch,
         )
         # Update vox_init and vox_des for reset states
         merged_scene_config.vox_init = sparse_arr_put(
@@ -368,13 +399,15 @@ def split_scene_config(scene_config: ConcurrentSceneData):
                 step_count=scene_config.step_count[i],
                 task_ids=scene_config.task_ids[i : i + 1],
                 starting_hole_positions={
-                    k: scene_config.starting_hole_positions[k][i : i + 1]
+                    k: scene_config.starting_hole_positions[k]
                     for k in scene_config.starting_hole_positions
                 },
                 starting_hole_quats={
-                    k: scene_config.starting_hole_quats[k][i : i + 1]
+                    k: scene_config.starting_hole_quats[k]
                     for k in scene_config.starting_hole_quats
                 },
+                hole_depth=scene_config.hole_depth,
+                part_hole_batch=scene_config.part_hole_batch,
             )
         )
     return cfg_list

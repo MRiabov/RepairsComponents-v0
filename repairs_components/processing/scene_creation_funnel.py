@@ -11,7 +11,10 @@ from pathlib import Path
 import time
 from genesis.engine.entities import RigidEntity
 from genesis.engine.entities.rigid_entity import RigidJoint, RigidLink
-from repairs_components.geometry.b123d_utils import export_obj
+from repairs_components.geometry.b123d_utils import (
+    export_obj,
+    fastener_hole_info_from_joint_name,
+)
 from repairs_components.geometry.base_env import tooling_stand_plate
 from repairs_components.geometry.connectors.connectors import Connector
 from repairs_components.geometry.fasteners import (
@@ -20,6 +23,7 @@ from repairs_components.geometry.fasteners import (
     get_fastener_save_path_from_name,
 )
 from repairs_components.logic.tools import screwdriver
+from repairs_components.processing.geom_utils import euler_deg_to_quat_wxyz
 from repairs_components.processing.voxel_export import export_voxel_grid
 from repairs_components.processing.tasks import Task
 from repairs_components.training_utils.env_setup import EnvSetup
@@ -127,14 +131,17 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             voxel_grids_initial.append(starting_voxel_grid)
             voxel_grids_desired.append(desired_voxel_grid)
 
-            # starting, as "per part, relative to 0,0,0 position"
-            part_holes_pos, part_holes_quat = get_starting_part_holes(
-                starting_scene_geom_
-            )
-
             # create RepairsSimState for both
             starting_sim_state = translate_compound_to_sim_state([starting_scene_geom_])
             desired_sim_state = translate_compound_to_sim_state([desired_state_geom_])
+
+            # starting, as "per part, relative to 0,0,0 position"
+            part_holes_pos, part_holes_quat, part_hole_depth, part_hole_batch = (
+                get_starting_part_holes(
+                    starting_scene_geom_,
+                    starting_sim_state.physical_state[0].body_indices,
+                )
+            )
 
             # store states
             starting_sim_states.append(starting_sim_state)
@@ -190,6 +197,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             task_ids=task_ids,
             starting_hole_positions=part_holes_pos,
             starting_hole_quats=part_holes_quat,
+            hole_depth=part_hole_depth,
+            part_hole_batch=part_hole_batch,
         )  # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
 
@@ -498,10 +507,12 @@ def persist_meshes_and_mjcf(
     return mesh_file_names
 
 
-def get_starting_part_holes(compound: Compound):
+def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
     """Get the starting part holes as "per part, relative to 0,0,0 position"""
-    part_holes_pos: dict[str, torch.Tensor] = {}
-    part_holes_quat: dict[str, torch.Tensor] = {}
+    part_holes_pos: torch.Tensor = torch.empty((0, 3))
+    part_holes_quat: torch.Tensor = torch.empty((0, 4))
+    part_hole_depth: torch.Tensor = torch.empty((0,))
+    part_hole_batch: torch.Tensor = torch.empty((0,))
     all_parts = compound.leaves
     filtered_parts = [
         part
@@ -515,27 +526,48 @@ def get_starting_part_holes(compound: Compound):
             joint.label.startswith("fastener_hole_") for joint in part.joints.values()
         )
         if has_fastener_holes:
-            fastener_hole_joints = []
-            i = 0
-            while True:
-                fastener_hole_joint = f"fastener_hole_{i}"
-                if fastener_hole_joint in part.joints:
-                    fastener_hole_joints.append(part.joints[fastener_hole_joint])
-                else:
-                    break
-                i += 1
-            part_holes_pos[part.label] = (
-                torch.tensor(
-                    [tuple(joint.location.position) for joint in fastener_hole_joints]
-                )
-                / 1000  # mm, not m!
-            )
-            from scipy.spatial.transform import Rotation as R
-
-            part_holes_quat[part.label] = torch.tensor(
+            count_fastener_hole_joints = len(
                 [
-                    R.from_euler("xyz", tuple(joint.location.orientation)).as_quat()
-                    for joint in fastener_hole_joints
+                    joint
+                    for joint in part.joints.values()
+                    if joint.label.startswith("fastener_hole_")
                 ]
+            )  # count by filtering
+            fastener_hole_pos = torch.zeros(count_fastener_hole_joints, 3)
+            fastener_hole_quat = torch.zeros(count_fastener_hole_joints, 4)
+            fastener_hole_depths = torch.zeros(count_fastener_hole_joints)
+
+            for joint in part.joints.values():
+                if joint.label.startswith("fastener_hole_"):
+                    id, depth = fastener_hole_info_from_joint_name(joint.label)
+                    assert id < count_fastener_hole_joints, (
+                        "id of joint is out of bounds. "
+                        f"id: {id}, count: {count_fastener_hole_joints}"
+                    )
+                    fastener_hole_pos[id] = (
+                        torch.tensor(tuple(joint.location.position)) / 1000
+                    )
+                    fastener_hole_quat[id] = torch.tensor(
+                        tuple(joint.location.orientation)
+                    )
+                    fastener_hole_depths[id] = depth / 1000
+                    # FIXME: I explicitly don't need depth when I have it, I need it when the hole is through.
+            # note: there could be positional mismatch in id, however I hope this won't be an issue.
+
+            # simply cat it because it's easier.
+            part_holes_pos = torch.cat([part_holes_pos, fastener_hole_pos], dim=0)
+            part_holes_quat = torch.cat([part_holes_quat, fastener_hole_quat], dim=0)
+            part_hole_depth = torch.cat([part_hole_depth, fastener_hole_depths], dim=0)
+            part_hole_batch = torch.cat(
+                [
+                    part_hole_batch,
+                    torch.full(
+                        (count_fastener_hole_joints,),
+                        body_indices[part.label],
+                        dtype=torch.long,
+                    ),
+                ],
+                dim=0,
             )
-    return part_holes_pos, part_holes_quat
+    # TODO sort part_hole_batch, although I don't know if that's necessary.
+    return part_holes_pos, part_holes_quat, part_hole_depth, part_hole_batch

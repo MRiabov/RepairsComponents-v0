@@ -19,7 +19,7 @@ from build123d import Vector
 def fastener_hole(radius: float, depth: float):
     # make a hole
     fastener_hole1 = Hole(radius=radius, depth=depth)
-    fastener_loc = Locations((0, 0, -radius))
+    fastener_loc = Locations((0, 0, -radius))  # why `-radius` though?
     # tuple_pos=[loc.position.to_tuple() for loc in fastener_loc.locations]
 
     return fastener_hole1, fastener_loc

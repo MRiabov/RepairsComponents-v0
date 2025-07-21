@@ -1,3 +1,4 @@
+from typing_extensions import deprecated
 from genesis.engine.entities.rigid_entity import RigidEntity
 import torch
 import genesis as gs
@@ -5,6 +6,7 @@ from genesis.vis.camera import Camera
 from torch.nn import functional as F
 
 
+@deprecated("Batch motion planning was merged in genesis!")
 def execute_straight_line_trajectory(
     franka: RigidEntity,
     scene: gs.Scene,

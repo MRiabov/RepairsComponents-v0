@@ -13,7 +13,7 @@ from repairs_components.geometry.fasteners import (
 )
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import attach_tool_to_arm, detach_tool_from_arm
-from repairs_components.processing.translation import get_connector_pos
+from repairs_components.processing.geom_utils import get_connector_pos
 
 
 @pytest.fixture(scope="module")
@@ -78,7 +78,7 @@ def scene_franka_and_two_cubes():
     entities = {
         "tool_cube": tool_cube,
         "0@fastener": fastener_cube,
-        "franka": franka,
+        "franka@control": franka,
         "end_effector": end_effector,
     }
     return scene, entities
@@ -130,7 +130,7 @@ def move_franka_to_pos(scene, franka, end_effector, pos, camera, fingers_dof):
 
 def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     scene, entities = scene_franka_and_two_cubes
-    franka = entities["franka"]
+    franka = entities["franka@control"]
     tool_cube = entities["tool_cube"]
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
@@ -182,7 +182,7 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
 
 def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     scene, entities = scene_franka_and_two_cubes
-    franka = entities["franka"]
+    franka = entities["franka@control"]
     tool_cube = entities["tool_cube"]
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
@@ -249,7 +249,7 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
     """2-in-1: attach tool, raise the tool, pick up body with a tool, detach tool from arm
     both tool and body should fall to floor."""
     scene, entities = scene_franka_and_two_cubes
-    franka = entities["franka"]
+    franka = entities["franka@control"]
     tool_cube = entities["tool_cube"]
     fastener_cube = entities["0@fastener"]  # note: this is cube geom.
     end_effector = entities["end_effector"]

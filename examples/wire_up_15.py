@@ -34,6 +34,7 @@ class WireUp(EnvSetup):
 
             female_geom.move(rotated_loc)
             male_geom.move(rotated_loc)
+            # I've tested this and I'm quite sure it works, but this feels crazy.
 
             male_geoms.append(male_geom)
             female_geoms.append(female_geom)

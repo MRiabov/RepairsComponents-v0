@@ -6,14 +6,14 @@ import trimesh
 import os
 
 
-def fastener_hole(radius: float, depth: float, id: int):
+def fastener_hole(radius: float, depth: float | None, id: int):
     """
     Create a fastener hole with a specified radius and depth, and optionally attach a revolute joint.
     It creates a collision point with which a prospective fastener can intersect and allows for a joint.
 
     Args:
         radius (float): The radius of the hole in mm.
-        depth (float): The depth of the hole in mm.
+        depth (float | None): The depth of the hole in mm. If None, the hole is through.
         id (int): The unique id of the hole.
 
     Returns:
@@ -21,17 +21,29 @@ def fastener_hole(radius: float, depth: float, id: int):
     """
 
     # make a hole
-    fastener_hole1 = Hole(radius=radius, depth=depth)
-    fastener_loc = Locations(
-        (0, 0, 0)
-    )  # (0, 0, -radius) -radius was a bug I understand.
-    # tuple_pos=[loc.position.to_tuple() for loc in fastener_loc.locations]
-    joint_axis = Axis.Z
+    fastener_hole = Hole(radius=radius, depth=depth)
+    fastener_loc = Locations((0, 0, 0))
+    # (0, 0, -radius) -radius was a bug I understand.
+    if depth is None:
+        depth = fastener_hole.vertices().sort_by(Axis.Z).first.Z
+        depth = -depth  # if "-", it is through
+
     joint = RigidJoint(
-        label=f"fastener_hole_{id}", joint_location=fastener_loc.locations[0]
+        label=f"fastener_hole_{id}#d{depth}", joint_location=fastener_loc.locations[0]
     )
 
-    return fastener_hole1, fastener_loc, joint  # TODO - add joint axis?
+    return fastener_hole, fastener_loc, joint  # TODO - add joint axis?
+
+
+def fastener_hole_joint_name(id: int, depth: float | None):
+    return f"fastener_hole_{id}#d{depth}"
+    # note: new convention: "#" in labels means parameter.
+
+
+def fastener_hole_info_from_joint_name(name: str):
+    id = int(name.split("_")[1].split("#d")[0])
+    depth = float(name.split("#d")[1])
+    return id, depth
 
 
 def export_obj(part: Part, obj_path: Path, glb_path: Path | None = None) -> Path:

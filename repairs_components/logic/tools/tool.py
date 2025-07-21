@@ -15,6 +15,7 @@ class ToolsEnum(Enum):
 
     GRIPPER = 0
     SCREWDRIVER = 1
+    MULTIMETER = 2
 
 
 @dataclass
@@ -47,11 +48,11 @@ class Tool(Component):
 def attach_tool_to_arm(
     scene: gs.Scene,
     tool_entity: RigidEntity,
-    arm_entity: RigidEntity,
+    arm_hand_link: RigidLink,
     tool: Tool,
     env_idx: torch.Tensor,
 ):
-    from repairs_components.processing.translation import get_connector_pos
+    from repairs_components.processing.geom_utils import get_connector_pos
     from repairs_components.logic.tools.gripper import Gripper
 
     assert not isinstance(tool, Gripper), (
@@ -60,7 +61,6 @@ def attach_tool_to_arm(
 
     # TODO assertion of similar orientaion and close position. # maybe it should be done via ompl?
     tool_base_link = tool_entity.base_link.idx
-    arm_hand_link: RigidLink = arm_entity.get_link("hand")
 
     arm_hand_pos = arm_hand_link.get_pos(env_idx)  # [b,1,3]
     arm_hand_quat = arm_hand_link.get_quat(env_idx)  # [b,1,4]
@@ -87,7 +87,7 @@ def attach_tool_to_arm(
 def detach_tool_from_arm(
     scene: gs.Scene,
     tool_entity: RigidEntity,
-    arm: RigidEntity,
+    arm_hand_link: RigidLink,
     gs_entities: dict[str, RigidEntity],
     tool_state_to_update: list[Tool],
     env_idx: torch.Tensor,
@@ -97,7 +97,7 @@ def detach_tool_from_arm(
     # batching is non-trivial on constraint add/remove.
     rigid_solver = scene.sim.rigid_solver
     tool_base_link = tool_entity.base_link.idx
-    arm_hand_link = arm.get_link("hand").idx
+    arm_hand_link = arm_hand_link.idx
     rigid_solver.delete_weld_constraint(tool_base_link, arm_hand_link, env_idx)
     # drop fasteners if present.
     for tool in tool_state_to_update:

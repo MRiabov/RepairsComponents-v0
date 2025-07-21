@@ -3,9 +3,11 @@
 import numpy as np
 from build123d import Box, Sphere, Cylinder, Compound, Pos
 from repairs_components.processing.tasks import AssembleTask
+import pytest
 
 
-def create_test_compound():
+@pytest.fixture
+def bd_test_compound():
     """Create a test compound with various shapes."""
     shapes = [
         Box(10, 20, 5),  # Flat box
@@ -17,14 +19,13 @@ def create_test_compound():
     return Compound(children=shapes)
 
 
-def test_perturb_initial_state():
+def test_perturb_initial_state(bd_test_compound):
     """Test that parts are properly disassembled within bounds."""
     task = AssembleTask()
-    compound = create_test_compound()
     env_size = (640, 640, 640)  # 50cm x 50cm x 50cm environment
 
     # Run the disassembly
-    new_compound = task.perturb_initial_state(compound, env_size)
+    new_compound = task.perturb_initial_state(bd_test_compound, env_size)
 
     assert (
         np.array(new_compound.bounding_box().size.to_tuple()) < np.array(env_size)
@@ -56,11 +57,11 @@ def debug_perturb_and_vis():
     import build123d as bd
 
     task = AssembleTask()
-    compound = create_test_compound()
+    bd_test_compound = bd_test_compound()
     env_size = (640, 640, 640)  # 50cm x 50cm x 50cm environment
 
     # Run the disassembly
-    new_compound = task.perturb_initial_state(compound, env_size)
+    new_compound = task.perturb_initial_state(bd_test_compound, env_size)
     with bd.BuildPart() as vis_bounding_box:
         with bd.Locations((0, 0, env_size[2] / 2)):
             bd.Box(*env_size)
@@ -104,3 +105,5 @@ def test_perturb_desired_state():
 
 if __name__ == "__main__":
     debug_perturb_and_vis()
+
+# TODO: assert that parts don't intersect in AssembleTask.perturb_initial_state()

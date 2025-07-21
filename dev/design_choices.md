@@ -66,3 +66,5 @@ Since their export from desired_state_geom, all models should be centered at the
 ML is done via inverse kinematics and can move in only -0.5< x <0.5, -0.5< y <0.5, 0< z <0.8 ranges.
 
 %% genesis note: quats are in WXYZ convention.
+
+%% note to self: RL is highly sample inefficient. It's stupid to use plain RL when VLAs are available. this is why, when looking for jobs, most people are asking for LLMs or VLMs and not RL.

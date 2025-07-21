@@ -4,7 +4,6 @@ from repairs_components.geometry.fasteners import (
     Fastener,
     check_fastener_possible_insertion,
 )
-from repairs_components.processing.translation import are_quats_within_angle
 
 
 # -----------------------------------------------
@@ -17,7 +16,11 @@ def test_simple_match_within_distance():
     part_hole_batch = torch.tensor([0, 0])  # [H]
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos, part_hole_positions, part_hole_batch, connection_dist_threshold=0.05
+        tip_pos,
+        part_hole_positions,
+        part_hole_batch,
+        connection_dist_threshold=0.05,
+        connection_angle_threshold=torch.full((1,), 30),
     )
     assert hole_idx.shape == part_idx.shape
     assert hole_idx.ndim == 1
@@ -32,7 +35,11 @@ def test_no_hole_within_distance():
     part_hole_batch = torch.tensor([0, 0])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos, part_hole_positions, part_hole_batch, connection_dist_threshold=0.05
+        tip_pos,
+        part_hole_positions,
+        part_hole_batch,
+        connection_dist_threshold=0.05,
+        connection_angle_threshold=torch.full((1,), 30),
     )
     assert hole_idx.shape == part_idx.shape
     assert hole_idx.ndim == 1
@@ -49,7 +56,11 @@ def test_batch():
     hole_batch = torch.tensor([0, 1])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos, part_hole_positions, hole_batch, connection_dist_threshold=0.05
+        tip_pos,
+        part_hole_positions,
+        hole_batch,
+        connection_dist_threshold=0.05,
+        connection_angle_threshold=torch.full((1,), 30),
     )
     assert hole_idx.shape == part_idx.shape
     assert hole_idx.ndim == 1
@@ -70,7 +81,7 @@ def test_orientation_mask_rejects():
         part_hole_positions,
         part_hole_batch,
         connection_dist_threshold=0.05,
-        connection_angle_threshold=30,
+        connection_angle_threshold=torch.full((1,), 30),
         part_hole_quats=hole_quats,
         active_fastener_quat=fast_quat,
     )
@@ -93,7 +104,7 @@ def test_orientation_mask_accepts():
         part_hole_positions,
         part_hole_batch,
         connection_dist_threshold=0.05,
-        connection_angle_threshold=30,
+        connection_angle_threshold=torch.full((1,), 30),
         part_hole_quats=hole_quats,
         active_fastener_quat=fast_quat,
     )
@@ -114,6 +125,7 @@ def test_ignore_part_index_masks():
         part_hole_batch,
         connection_dist_threshold=0.05,
         ignore_part_idx=ignore_part_idx,
+        connection_angle_threshold=torch.full((1,), 30),
     )
     assert hole_idx.shape == part_idx.shape
     assert hole_idx.ndim == 1
@@ -133,6 +145,7 @@ def test_ignore_part_index_does_not_mask():
         part_hole_batch,
         connection_dist_threshold=0.05,
         ignore_part_idx=ignore_part_idx,
+        connection_angle_threshold=torch.full((1,), 30),
     )
     assert hole_idx.tolist() == [0]
     assert part_idx.tolist() == [0]
@@ -149,6 +162,7 @@ def test_distance_tie_selects_first():
         part_hole_positions,
         part_hole_batch,
         connection_dist_threshold=0.05,
+        connection_angle_threshold=torch.full((1,), 30),
     )
     assert hole_idx.tolist() == [0]
     assert part_idx.tolist() == [0]
@@ -167,7 +181,6 @@ def fastener():
         head_diameter=7.5,
         head_height=3.0,
         thread_pitch=0.5,
-        screwdriver_name="screwdriver",
     )
 
 

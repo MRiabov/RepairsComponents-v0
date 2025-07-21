@@ -27,7 +27,7 @@ class ClampPlates(EnvSetup):
 
         bottom_plate = top_plate.part.moved(Location((0, 0, -5)))
 
-        start_fastener, collision_detection_position = Fastener(
+        start_fastener = Fastener(
             False,
             initial_body_a="top_plate@solid",
             initial_body_b="bottom_plate@solid",

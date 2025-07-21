@@ -26,10 +26,10 @@
   - screwdriver is not repositioned.
     - **!** it is possible that the screwdriver is not repositioned because the constraint does not use the pos from set_pos.
 
-19. Fastener functionality must be done:
-- Fasteners are currently not picked up. (WIP/done, untested)
+19. Fastener functionality:
+- Fasteners are currently not picked up. (WIP/done, tested)
 - Fasteners are are incorrectly inserted. (logic is unfinished)
-- Fasteners are not released. (WIP/done, untested.)
+- Fasteners are not released. (WIP/done, tested.)
   - Bug found: when screwdriver was released, fastener it held was not released. (done)
 - Parts are not constrained. (DONE, untested).
   - I suspect it's impossible to constrain two parts at the same time with collision detection logic. Screw in is happening at one position, the fastener is later snapped into place, released from the screwdriver, and then how is the second part constrained?
@@ -41,7 +41,6 @@
 - Fastener quat/pos is not updated in tranlsation from genesis. (DONE, untested?)
 - (duplicate) build123d joints are, as I understand not used to create relative hole positions.(done, untested at all)
 - During insertion fasteners should be at least roughly close to a hole - set max angle difference to 30deg. (DONE)
-
 20. Hole positions and quats are not translated from initial state in perturb. (necessary for fastener collision detection&alignment) (DONE)
 21. Hole positions are not recalculated to allow for collision detection and alignment. (DONE)
 - bug found: positions are calculated as global positions, not local to part.
@@ -49,6 +48,23 @@
 ~~23. Screwdriver grip positions (tool grip and fastener grip) is not updated~~ (done, transiently.)
 - Would be convenient to store grip positions in Screwdriver class, although current approach is fine.
 24. (minor?) - there is a major snap of fasteners/parts that hold them when fasteners are inserted.
+
+## tests:
+### tool_genesis.py
+1. test_attach_tool_to_arm (DONE, untested)
+2. test_detach_tool_from_arm (DONE, untested)
+3. test_attach_and_detach_tool_to_arm_with_fastener (DONE, untested)
+### fasteners.py
+1. attach_fastener_to_screwdriver (WIP)
+2. deactivate_fastener_to_screwdriver_connection
+3. attach_fastener_to_part
+  - test that they could attach two parts.
+4. detach_fastener_from_part
+### connectors
+5. check_connections
+### repairs_sim_step (maybe)
+(all suspicious methods. Not all because too much time to test them.)
+
 
 
 
@@ -61,7 +77,8 @@ untested:
 3,4,9
 
 ### Next:
-finish the test script for debug of screwdriver not being repositioned to hand position.
+Test and debug fasteners attach/detach.
+<!-- note: need to finish testing tool pickup when batched motion planning is fixed in Genesis.-->
 
 <!-- Debug screwdriver not being repositioned to hand position when picked up. (18b) -->
 <!-- >
@@ -92,8 +109,8 @@ It turns out the fasteners functionality was commented out, and all fastener fun
 6. Perturb initial state sometimes puts two parts in overlapping position.
 7. BUG: Perturb definitely currently aligns all parts in one direction.
 8. Optim: voxel export does not take into account shared parts. i.e. europlug_2_male and europlug_3_male are exported to voxel and stl many times even though they are equal parts.
-9. (ML) for whichever reason, feature to fastener encoder fasteners are passed as 8 and not 9. Buffers?
-10. (ML) Quat action is not normalized. Squares of quat values should sum to 1. (0.25^2+0.25^2+0.25^2+0.25^2=1) (not 0.25 but in that range.)
+9. (ML) for whichever reason, feature to fastener encoder fasteners are passed as 8 and not 9. Buffers? (DONE)
+10. (ML) Quat action is not normalized. Squares of quat values should sum to 1. (0.25^2+0.25^2+0.25^2+0.25^2=1) (not 0.25 but in that range.) (DONE)
 11. actions are sampled twice in train loop
 ? - motion planning actions - relative to current pos or absolute? I think the absolute is the standard.
 12. (ML) Hole positions are not encoded.
@@ -108,7 +125,11 @@ It turns out the fasteners functionality was commented out, and all fastener fun
 18. (minor) Twisting movement is not prevented/penalized when already inserted on max depth.
 19. (maybe; major?) instead of `set_pos`, why wouldn't I make IK to this position first? For 10-15, at least we'll get closer. 
 - That would require making extra `scene.step()` calls.
+20. (significant optim) Genesis is much more optimal when stepped through in large batches e.g. 5-10k. During training, set up a batch of 5-10k and step them at once, then split by smaller ML batches and make updates on them in those smaller batches.
+21. Fasteners are 
 
+## other tests:
+1. Assert that after perturb fasteners are oriented(!) as they are expected.
 
 and yet I need to fix the perturb instead of electronics and fasteners...
 
@@ -117,6 +138,8 @@ after:
 2. Electronics graphs should be easily disabled in encoding.
 3. (obviously) expand all graph nets to encode positional hints (perhaps even vision and voxels?) <- perhaps encode desired change into vision? It could be a little too troublesome though. But would work?
 %note: will my paper contribute anything meaningful, considering that Nvidia does robotic assembly too? I may need to add electronics testing to make this more interesting.
+
+
 
 
 
@@ -146,7 +169,10 @@ after:
 8. More robust collision detection for electronics.
 
 
-
+### ideas:
+Interesting, if motion planning and perfect positional informa is fully available, it may be reasonable to teach a model that would simply predict the order of items in which the assembly needs to be assembled, instead of raw actions.
+E.g. in building of a chair, predict that it would be reasonable to move element a to element b in its position.
+Or, better yet, teach a model that would pick two items that need to be joined and join them via motion planning. The rest is, of course, on the programmer.
 
 
 

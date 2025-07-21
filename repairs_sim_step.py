@@ -38,8 +38,11 @@ def step_repairs(
     gs_entities: dict[str, RigidEntity],
     current_sim_state: RepairsSimState,
     desired_state: RepairsSimState,
-    starting_hole_positions: dict[str, torch.Tensor],
-    starting_hole_quats: dict[str, torch.Tensor],
+    starting_hole_positions: torch.Tensor,  # [H, 3]
+    starting_hole_quats: torch.Tensor,  # [H, 4]
+    hole_depth: torch.Tensor,  # [H]
+    part_hole_batch: torch.Tensor,  # [H]
+    # TODO holes are unupdated here yet.
 ):
     """Step repairs sim.
 
@@ -47,20 +50,17 @@ def step_repairs(
     merely collects observations goes into translate"""
     # get values (state) from genesis
     # minor todo: male_connector_positions, female_connector_positions should be set into current_sim_state (because all the other logic does)
-    current_sim_state, male_connector_positions, female_connector_positions = (
-        translate_genesis_to_python(
-            scene,
-            gs_entities,
-            current_sim_state,
-            device=actions.device,
-            starting_hole_positions=starting_hole_positions,
-            starting_hole_quats=starting_hole_quats,
-        )
+    current_sim_state = translate_genesis_to_python(
+        scene,
+        gs_entities,
+        current_sim_state,
+        device=actions.device,
+        starting_hole_positions=starting_hole_positions,
+        starting_hole_quats=starting_hole_quats,
+        part_hole_batch=part_hole_batch,
     )
 
-    current_sim_state = step_electronics(
-        current_sim_state, male_connector_positions, female_connector_positions
-    )
+    current_sim_state = step_electronics(current_sim_state)
 
     # step pick up or release tool
     current_sim_state = step_pick_up_release_tool(
@@ -83,10 +83,7 @@ def step_repairs(
 
     # step screw in or out
     current_sim_state = step_screw_in_or_out(
-        scene,
-        gs_entities,
-        current_sim_state,
-        actions,
+        scene, gs_entities, current_sim_state, actions
     )
     # create_constraints_based_on_graph(current_sim_state, gs_entities, scene)
 
@@ -100,11 +97,20 @@ def step_repairs(
 
 def step_electronics(
     current_sim_state: RepairsSimState,
-    male_connector_positions,
-    female_connector_positions,
 ):
     "Step electronics attachments: compute, clear, and apply if present"
     if current_sim_state.has_electronics:
+        male_connector_positions = {}
+        female_connector_positions = {}
+        for k in current_sim_state.physical_state[0].male_connector_positions.keys():
+            male_connector_positions[k] = current_sim_state.physical_state[
+                0
+            ].male_connector_positions[k]
+            female_connector_positions[k] = current_sim_state.physical_state[
+                0
+            ].female_connector_positions[k]
+        # note that it was already batched. I've reverted now because of better(?) syntax.
+
         electronics_attachments_batch = check_connections(
             male_connector_positions, female_connector_positions
         )
@@ -114,8 +120,6 @@ def step_electronics(
         # apply batch attachments [batch_idx, male_idx, female_idx]
         for b, m, f in electronics_attachments_batch.tolist():
             current_sim_state.electronics_state[b].connect(m, f)
-    else:
-        electronics_attachments_batch = torch.empty((0, 3), dtype=torch.long)
 
     return current_sim_state
 
@@ -146,7 +150,8 @@ def step_pick_up_release_tool(
     release_tool_mask = (~gripper_mask) & release_tool_desired
 
     screwdriver: RigidEntity = gs_entities["screwdriver@control"]
-    franka_hand: RigidEntity = gs_entities["franka@control"]
+    # hand, not arm.
+    franka_hand: RigidLink = gs_entities["franka@control"].get_link("hand")
 
     grip_pos = get_connector_pos(
         screwdriver.get_pos(),
@@ -188,7 +193,7 @@ def step_pick_up_release_tool(
             current_sim_state.tool_state[env_id].current_tool = Gripper()
             # detach the screwdriver from the hand
         detach_tool_from_arm(
-            scene, screwdriver, franka_hand, gs_entities, env_idx, current_tools
+            scene, screwdriver, franka_hand, gs_entities, current_tools, env_idx
         )
 
     return current_sim_state
@@ -252,8 +257,6 @@ def step_screw_in_or_out(
 
     # step screw insertion
     if has_fastener_and_desired_in.any():
-        # FIXME: should not be able to insert fastener with two connections already!
-
         env_ids = has_fastener_and_desired_in.nonzero().squeeze(1)
         ignore_part_idx = (  # fastener_already_in_idx
             fastener_connected_to[env_ids, picked_up_fastener_ids[env_ids]]
@@ -275,19 +278,13 @@ def step_screw_in_or_out(
             part_hole_quats=torch.stack(
                 [physical_state[env_id].hole_quats for env_id in env_ids]
             ),
-            part_hole_batch=torch.stack(
-                [physical_state[env_id].hole_indices_batch for env_id in env_ids]
-            ),
+            part_hole_batch=physical_state[env_ids[0]].hole_indices_batch,
             # as fastener quat is equal to screwdriver quat, we can pass it here
             active_fastener_quat=gs_entities["screwdriver@control"].get_quat(env_ids),
             ignore_part_idx=ignore_part_idx,
             # note: ignore hole idx could be moved out to get -1s separately but idgaf.
         )  # [B] int or -1
         valid_insert = part_idx >= 0
-        # if valid_insert.any():
-        #     # FIXME: this never executes! (i've never seen it, at least.)
-        #     # ^ note: just seen it execute.
-        #     # but in some cases it threw cuda error?
         for env_id in env_ids[valid_insert].tolist():
             hole_pos = physical_state[env_id].hole_positions[hole_idx[env_id].item()]
             hole_quat = physical_state[env_id].hole_quats[hole_idx[env_id].item()]
@@ -302,7 +299,13 @@ def step_screw_in_or_out(
                 hole_pos=hole_pos,
                 hole_quat=hole_quat,
                 part_entity=gs_entities[part_name],
+                hole_depth=physical_state[env_id].through_hole_depth[
+                    hole_idx[env_id].item()
+                ],
                 envs_idx=torch.tensor([env_id], device=actions.device),
+                fastener_length=physical_state[env_id].fasteners_len[
+                    hole_idx[env_id].item()
+                ],
             )
             # future: assert (prevent) more than two connections.
 
@@ -326,7 +329,9 @@ def step_screw_in_or_out(
             ]
             for body_idx in fastener_body_indices:
                 if body_idx != -1:
-                    body_name = physical_state[env_id].inverse_indices[body_idx.item()]
+                    body_name = physical_state[env_id].inverse_body_indices[
+                        body_idx.item()
+                    ]
                     detach_fastener_from_part(
                         scene,
                         fastener_entity=gs_entities[fastener_name],

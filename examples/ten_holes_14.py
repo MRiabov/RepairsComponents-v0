@@ -23,7 +23,7 @@ class TenHoles(EnvSetup):
                     joints.append(joint)
             debug__ = ""
 
-        start_fastener, collision_detection_position = Fastener(
+        start_fastener = Fastener(
             False, initial_body_a="base_box@fixed_solid"
         ).bd_geometry()
         fasteners = []

@@ -15,6 +15,7 @@ import numpy as np
 import torch
 
 from repairs_components.logic.tools.tool import Tool
+from repairs_components.processing.geom_utils import get_connector_pos
 
 
 @dataclass
@@ -34,7 +35,6 @@ class Fastener(Component):
         head_diameter: float = 7.5,  # mm
         head_height: float = 3.0,  # mm
         thread_pitch: float = 0.5,  # mm
-        screwdriver_name: str = "screwdriver",
     ):
         # assert initial_body_a is not None, "initial_body_a must be provided"
         assert head_diameter > diameter, (
@@ -49,7 +49,6 @@ class Fastener(Component):
         self.diameter = diameter
         self.head_diameter = head_diameter
         self.head_height = head_height
-        self.screwdriver_name = screwdriver_name
         # self.a_constraint_active = True # note: a_constraint_active is always True now.
         self.b_constraint_active = constraint_b_active
         self.name = get_fastener_singleton_name(self.diameter, self.length)
@@ -194,10 +193,11 @@ def check_fastener_possible_insertion(
     Returns:
     - Tuple of tensors `(part_idx, hole_idx)`, each of shape `[batch]`, where `-1` indicates no match and value >= 0 indicates the hole index, with its part index.
     """
-    from repairs_components.processing.translation import are_quats_within_angle
+    from repairs_components.processing.geom_utils import are_quats_within_angle
 
     assert part_hole_positions.shape[1] == part_hole_batch.shape[0], (
-        "part_hole_positions, part_hole_batch must have the same batch and hole counts"
+        f"part_hole_positions, part_hole_batch must have the same batch and hole counts.\n"
+        f"part_hole_positions: {part_hole_positions.shape}, part_hole_batch: {part_hole_batch.shape}"
     )
     assert part_hole_batch.ndim == 1, (
         f"part_hole_batch must be a 1D tensor of shape [H], got {part_hole_batch.shape}"
@@ -208,7 +208,7 @@ def check_fastener_possible_insertion(
     # ignore holes that this fastener is already attached to
     if ignore_part_idx is not None:
         assert ignore_part_idx.shape == (part_hole_positions.shape[0],), (
-            "ignore_part_idx must be a 1D tensor of shape [B]"
+            f"ignore_part_idx must be a 1D tensor of shape [B], got {ignore_part_idx.shape}"
         )
         mask = ignore_part_idx != -1
         batch_idx = torch.arange(len(ignore_part_idx), device=ignore_part_idx.device)[
@@ -253,7 +253,6 @@ def attach_fastener_to_screwdriver(
     env_id: int,
 ):
     # avoid circular import
-    from repairs_components.processing.translation import get_connector_pos
     from repairs_components.logic.tools.screwdriver import Screwdriver
 
     # ^ note: could be batched, but fastener_entity are not batchable (easily) and it doesn't matter.
@@ -309,9 +308,13 @@ def attach_fastener_to_part(
     fastener_entity: RigidEntity,
     hole_pos: torch.Tensor,
     hole_quat: torch.Tensor,
+    hole_depth: torch.Tensor,
     part_entity: RigidEntity,
+    fastener_length: torch.Tensor,
     envs_idx: torch.Tensor,
 ):
+    """Note: hole pos is absolute to world frame because it is expected to be recalculated already
+    We also need to adjust for hole depth."""
     # TODO: make fastener insertion more smooth.
     rigid_solver = scene.sim.rigid_solver
     # fastener_pos = fastener_entity.get_pos(envs_idx)
@@ -320,7 +323,11 @@ def attach_fastener_to_part(
     fastener_joint = fastener_entity.base_link.idx
     other_body_link = part_entity.base_link.idx
 
-    fastener_entity.set_pos(hole_pos, envs_idx)
+    fastener_pos = recalculate_fastener_pos_with_offset_to_hole(
+        hole_pos, hole_quat, hole_depth, fastener_length, envs_idx
+    )  # TODO untested, may be buggy.
+
+    fastener_entity.set_pos(fastener_pos, envs_idx)
     fastener_entity.set_quat(hole_quat, envs_idx)
     # FIXME: not exactly the hole position!!!
     # how to prevent insertion too deeply?
@@ -404,3 +411,26 @@ def get_singleton_fastener_save_path(
 def get_fastener_save_path_from_name(name: str, base_dir: Path) -> Path:
     """Return the save path for a fastener singleton based on its name."""
     return base_dir / "shared" / "fasteners" / (name + ".xml")
+
+
+if __name__ == "__main__":
+    show(Fastener(constraint_b_active=True).bd_geometry())
+
+
+def recalculate_fastener_pos_with_offset_to_hole(
+    hole_pos: torch.Tensor,  # [B, 3]
+    hole_quat: torch.Tensor,  # [B, 4]
+    hole_depth: torch.Tensor,  # [B]
+    fastener_length: torch.Tensor,  # [B]
+    envs_idx: torch.Tensor,
+):
+    through_hole = hole_depth < 0
+    fastener_pos_with_body_a = hole_pos
+    fastener_pos_with_body_b = get_connector_pos(
+        hole_pos, hole_quat, -hole_depth + fastener_length
+    )
+    fastener_pos = torch.where(
+        through_hole, fastener_pos_with_body_b, fastener_pos_with_body_a
+    )
+
+    return fastener_pos

@@ -24,21 +24,21 @@ def test_physical_state_diff_basic():
 
     # Register some bodies in both states
     state1.register_body(
-        "body1", position=torch.tensor([0, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
+        "body1", position=torch.tensor([0, 0, 0]), rotation=torch.tensor([0, 0, 0, 1])
     )
     state1.register_body(
-        "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
+        "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([0, 0, 0, 1])
     )
     state1.connect_fastener_to_one_body("conn1", "body1", "body2")
 
     state2.register_body(
-        "body1", position=torch.tensor([0.1, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
+        "body1", position=torch.tensor([0.1, 0, 0]), rotation=torch.tensor([0, 0, 0, 1])
     )  # Slightly moved
     state2.register_body(
-        "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
+        "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([0, 0, 0, 1])
     )
     state2.register_body(
-        "body3", position=torch.tensor([0, 1, 0]), rotation=torch.tensor([1, 0, 0, 0])
+        "body3", position=torch.tensor([0, 1, 0]), rotation=torch.tensor([0, 0, 0, 1])
     )  # New body
     state2.connect_fastener_to_one_body("conn1", "body1", "body2")
     state2.connect_fastener_to_one_body("conn2", "body2", "body3")  # New connection
@@ -115,19 +115,19 @@ def test_physical_state_no_changes():
     """Test PhysicalState diff with identical states."""
     state1 = PhysicalState()
     state1.register_body(
-        "body1", position=torch.tensor([0, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
+        "body1", position=torch.tensor([0, 0, 0]), rotation=torch.tensor([0, 0, 0, 1])
     )
     state1.register_body(
-        "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
+        "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([0, 0, 0, 1])
     )
     state1.connect_fastener_to_one_body("conn1", "body1", "body2")
 
     state2 = PhysicalState()
     state2.register_body(
-        "body1", position=torch.tensor([0, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
+        "body1", position=torch.tensor([0, 0, 0]), rotation=torch.tensor([0, 0, 0, 1])
     )
     state2.register_body(
-        "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([1, 0, 0, 0])
+        "body2", position=torch.tensor([1, 0, 0]), rotation=torch.tensor([0, 0, 0, 1])
     )
     state2.connect_fastener_to_one_body("conn1", "body1", "body2")
 

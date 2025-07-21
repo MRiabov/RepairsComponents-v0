@@ -14,7 +14,10 @@
 		"python.languageServer": "None",
 		"editor.defaultFormatter": "charliermarsh.ruff",
 		"makefile.configureOnOpen": false,
-		"windsurfPyright.analysis.typeCheckingMode": "basic"
+		"windsurfPyright.analysis.typeCheckingMode": "basic",
+		"python.testing.pytestEnabled": true,
+		"python.testing.unittestEnabled": false,
+		"python.testing.pytestArgs": ["--tb=classic"],
 	},
 	"launch": {
 		"version": "0.2.0",

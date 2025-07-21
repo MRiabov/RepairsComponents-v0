@@ -275,6 +275,8 @@ class RepairsEnv(gym.Env):
                     scene_id
                 ].starting_hole_positions,
                 starting_hole_quats=partial_env_configs[scene_id].starting_hole_quats,
+                hole_depth=partial_env_configs[scene_id].hole_depth,
+                part_hole_batch=partial_env_configs[scene_id].part_hole_batch,
             )
 
             # store built scene and data

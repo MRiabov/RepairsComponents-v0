@@ -10,10 +10,12 @@ Provides diff methods:
 diff(): combines both into {'fasteners', 'bodies'} with total change count
 """
 
+from typing_extensions import deprecated
 import torch
 from repairs_components.geometry.fasteners import Fastener
 from torch_geometric.data import Data
 from dataclasses import dataclass, field
+from repairs_components.processing.geom_utils import sanitize_quaternion
 
 
 @dataclass
@@ -32,14 +34,15 @@ class PhysicalState:
     Graph features:
     - position
     - quat
-    - free_fasteners_loc
-    - free_fasteners_quat
-    - free_fasteners_attached_to
+    - fasteners_loc
+    - fasteners_quat
+    - fasteners_attached_to
+    - fastener_b_insertion_depth
     """  # this is kind of unnecessary... again.
     # TODO encode mass, and possibly velocity.
 
     body_indices: dict[str, int] = field(default_factory=dict)
-    inverse_indices: dict[int, str] = field(default_factory=dict)
+    inverse_body_indices: dict[int, str] = field(default_factory=dict)
     # fastener_ids: dict[int, str] = field(default_factory=dict) # fixme: I don't remember how, but this is unused.
     hole_indices_from_name: dict[str, int] = field(default_factory=dict)
     """Hole indices per part name."""
@@ -49,10 +52,21 @@ class PhysicalState:
     """Hole positions per part, batched with hole_indices_batch."""
     hole_quats: torch.Tensor = field(default_factory=torch.empty)  # [H, 4]
     """Hole quats per part, batched with hole_indices_batch."""
+    through_hole_depth: torch.Tensor = field(default_factory=torch.empty)  # [H]
+    """Through hole depth per part, batched with hole_indices_batch. 
+    Used when the hole is through and we need to know the next position after which to connect it.
+    When the hole is not through, it is -1."""
+
+    male_connector_positions: dict[str, torch.Tensor] = field(default_factory=dict)
+    """Male connector positions per part."""
+    female_connector_positions: dict[str, torch.Tensor] = field(default_factory=dict)
+    """Female connector positions per part."""
+
+    
 
     # Fastener metadata (shared across batch)
     # fastener: dict[str, Fastener] = field(default_factory=dict)
-    "When the fastener is inserted only into one body, it is stored here. Otherwise, it is -1."
+    # "When the fastener is inserted only into one body, it is stored here. Otherwise, it is -1."
     # ^ self.fastener deprecated? graph stores everything.
 
     # # Free fasteners - not attached to two parts, but to one or none
@@ -134,10 +148,10 @@ class PhysicalState:
 
             if indices is None:
                 self.body_indices = {}
-                self.inverse_indices = {}
+                self.inverse_body_indices = {}
             else:
                 self.body_indices = indices
-                self.inverse_indices = {v: k for k, v in indices.items()}
+                self.inverse_body_indices = {v: k for k, v in indices.items()}
             # self.fastener = {}
         else:
             assert indices is not None, "Indices must be provided if graph is not None"
@@ -146,7 +160,7 @@ class PhysicalState:
             # )
             self.graph = graph
             self.body_indices = indices
-            self.inverse_indices = {v: k for k, v in indices.items()}
+            self.inverse_body_indices = {v: k for k, v in indices.items()}
             self.device = device
             # self.fastener = {}
 
@@ -221,24 +235,42 @@ class PhysicalState:
         return graph
 
     def register_body(
-        self, name: str, position: tuple, rotation: tuple, fixed: bool = False
+        self,
+        name: str,
+        position: tuple,
+        rotation: tuple,
+        fixed: bool = False,
+        rot_as_quat: bool = False,  # mostly for convenience in testing
+        _register_during_init: bool = True,  # mostly for tests...
     ):
         assert name not in self.body_indices, f"Body {name} already registered"
         # assert position.shape == (3,) and rotation.shape == (4,) # was a tensor.
-        assert len(position) == 3 and len(rotation) == 3, (
-            f"Position must be 3D vector, got {position}"
+        assert len(position) == 3, (
+            f"Position must be 3D vector, got {position} "
             f"Rotation must be 3D vector, got {rotation}. Note: transformation to quat already happens in this function."
         )
-        assert (
-            torch.tensor(position).min() >= 0 and torch.tensor(position).max() <= 640
-        ), f"Expected register position to be in [0,640], got {position}"
-        from scipy.spatial.transform import Rotation as R
-
-        rotation = R.from_euler("xyz", rotation).as_quat()
+        if _register_during_init:
+            max_bounds = torch.tensor([640, 640, 640], device=self.device)
+            min_bounds = torch.tensor([0, 0, 0], device=self.device)
+        else:
+            max_bounds = torch.tensor([0.32, 0.32, 0.64], device=self.device)
+            min_bounds = torch.tensor([-0.32, -0.32, 0.0], device=self.device)
+        assert (torch.tensor(position, device=self.device) >= min_bounds).all() and (
+            torch.tensor(position, device=self.device) <= max_bounds
+        ).all(), (
+            f"Expected register position to be in [{min_bounds.tolist()}, {max_bounds.tolist()}], got {list(position)}"
+        )
+        if not rot_as_quat:
+            assert len(rotation) == 3, (
+                f"Rotation must be 3D vector, got {rotation}. If you want to pass a quaternion, set rot_as_quat to True."
+            )
+            rotation = euler_deg_to_quat_wxyz(torch.tensor(rotation))
+        else:
+            sanitize_quaternion(rotation)
 
         idx = len(self.body_indices)
         self.body_indices[name] = idx
-        self.inverse_indices[idx] = name
+        self.inverse_body_indices[idx] = name
 
         # Ensure all graph tensors are on the correct device before concatenation
         self.graph = self.graph.to(self.device)
@@ -278,7 +310,11 @@ class PhysicalState:
     def update_body(self, name: str, position: tuple, rotation: tuple):
         assert name in self.body_indices, f"Body {name} not registered"
         pos_tensor = torch.tensor(position, device=self.device)
-        assert pos_tensor.min() >= -0.32 and pos_tensor.max() <= 0.32, (
+        assert (
+            pos_tensor >= torch.tensor([-0.32, -0.32, 0.0]).to(self.device)
+        ).all() and (
+            pos_tensor <= torch.tensor([0.32, 0.32, 0.64]).to(self.device)
+        ).all(), (
             f"Position {position} out of bounds. Expected [-0.32, 0.32] for update."
         )
         if self.graph.fixed[self.body_indices[name]]:
@@ -541,17 +577,19 @@ class PhysicalState:
 
         return "\n".join(lines)
 
-    def check_if_fastener_inserted(self, body_id: int, fastener_id: int) -> bool:
-        """Check if a body (body_id) is still connected to a fastener (fastener_id)."""
-        edge_index = self.graph.edge_index
-        # No edges means no connection
-        if edge_index.numel() == 0:
-            return False
-        src, dst = edge_index
-        # Check for edge in either direction
-        connected_direct = ((src == body_id) & (dst == fastener_id)).any()
-        connected_reverse = ((src == fastener_id) & (dst == body_id)).any()
-        return bool(connected_direct or connected_reverse)
+    # @deprecated("Warning: this is an incorrect implementation. Should not be used.")
+    # def check_if_fastener_inserted(self, body_id: int, fastener_id: int) -> bool:
+    #     """Check if a body (body_id) is still connected to a fastener (fastener_id)."""
+    #     edge_index = self.graph.edge_index
+    #     # No edges means no connection
+    #     if edge_index.numel() == 0:
+    #         return False
+    #     src, dst = edge_index
+    #     # Check for edge in either direction
+    #     connected_direct = ((src == body_id) & (dst == fastener_id)).any()
+    #     connected_reverse = ((src == fastener_id) & (dst == body_id)).any()
+    #     return bool(connected_direct or connected_reverse)
+    # TODO: this should be refactored to "are two parts connected" which is what it does.
 
     def check_if_part_placed(self, part_id: int, data_a: Data, data_b: Data) -> bool:
         """Check if a part (part_id) is in its desired position (within thresholds)."""

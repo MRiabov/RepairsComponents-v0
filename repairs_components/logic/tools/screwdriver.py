@@ -84,7 +84,7 @@ def receive_screw_in_action(
     screw_out_threshold: float = 0.25,
 ):
     assert actions.shape[1] == 10, (
-        "Screwdriver action check expects that action has shape [batch, 9]"
+        "Screwdriver action check expects that action has shape [batch, 10]"
     )
     assert actions.ndim == 2, (
         "Screwdriver action check expects that action has shape [batch, action_dim]"
@@ -104,7 +104,7 @@ def receive_fastener_pickup_action(
     release_threshold: float = 0.25,
 ):
     assert actions.shape[1] == 10, (
-        "Screwdriver action check expects that action has shape [batch, 9]"
+        "Screwdriver action check expects that action has shape [batch, 10]"
     )
     assert actions.ndim == 2, (
         "Screwdriver action check expects that action has shape [batch, action_dim]"

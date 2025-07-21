@@ -19,6 +19,14 @@ from repairs_components.geometry.fasteners import (
 from torch_geometric.data import Data
 import numpy as np
 import torch.nn.functional as F
+from repairs_components.processing.geom_utils import (
+    get_connector_pos,
+    quat_multiply,
+    quat_conjugate,
+    quat_angle_diff_deg,
+    are_quats_within_angle,
+    sanitize_quaternion,
+)
 
 
 def translate_state_to_genesis_scene(
@@ -136,8 +144,9 @@ def translate_genesis_to_python(  # translate to sim state, really.
     scene: gs.Scene,
     gs_entities: dict[str, RigidEntity],
     sim_state: RepairsSimState,
-    starting_hole_positions: dict[str, torch.Tensor],
-    starting_hole_quats: dict[str, torch.Tensor],
+    starting_hole_positions: torch.Tensor,  # [H, 3]
+    starting_hole_quats: torch.Tensor,  # [H, 4]
+    part_hole_batch: torch.Tensor,  # [H]
     device: torch.device | None = None,
 ):
     """
@@ -164,11 +173,6 @@ def translate_genesis_to_python(  # translate to sim state, really.
         )
         for ts in sim_state.tool_state
     ), "picked_up_fastener_name must end with @fastener"
-
-    # prepare outputs
-    fastener_hole_positions: dict[str, torch.Tensor] = {}
-    male_connector_positions: dict[str, torch.Tensor] = {}
-    female_connector_positions: dict[str, torch.Tensor] = {}
 
     # loop entities and dispatch by suffix
     for full_name, entity in gs_entities.items():
@@ -199,10 +203,15 @@ def translate_genesis_to_python(  # translate to sim state, really.
                 scene_connector_pos = get_connector_pos(
                     pos_all, quat_all, relative_connector_pos.unsqueeze(0)
                 )
+            for i in range(n_envs):
                 if male:
-                    male_connector_positions[full_name] = scene_connector_pos
+                    sim_state.physical_state[i].male_connector_positions[full_name] = (
+                        scene_connector_pos[i]
+                    )
                 else:
-                    female_connector_positions[full_name] = scene_connector_pos
+                    sim_state.physical_state[i].female_connector_positions[
+                        full_name
+                    ] = scene_connector_pos[i]
         elif part_type == "control":
             continue  # skip.
         elif part_type == "fastener":
@@ -243,11 +252,11 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     # update holes
     sim_state = update_hole_locs(
-        sim_state, starting_hole_positions, starting_hole_quats
+        sim_state, starting_hole_positions, starting_hole_quats, part_hole_batch
     )  # would be ideal if starting_hole_positions, hole_quats and hole_batch were batched already.
     max_pos = sim_state.physical_state[0].graph.position.max()
     assert max_pos <= 50, f"massive out of bounds, at env_id 0, max_pos {max_pos}"
-    return sim_state, male_connector_positions, female_connector_positions
+    return sim_state
 
 
 def translate_compound_to_sim_state(
@@ -453,7 +462,7 @@ def create_constraints_based_on_graph(
                     # Fastener not attached to anything in this position
                     continue
 
-                body_name = env_state.physical_state[env_id].inverse_indices[
+                body_name = env_state.physical_state[env_id].inverse_body_indices[
                     body_id.item()
                 ]
                 body_base_link_idx = all_base_links[body_name]
@@ -481,15 +490,17 @@ def reset_constraints(scene: gs.Scene):
 
 def update_hole_locs(
     current_sim_state: RepairsSimState,
-    starting_hole_positions: dict[str, torch.Tensor],
-    starting_hole_quats: dict[str, torch.Tensor],
+    starting_hole_positions: torch.Tensor,  # [H, 3]
+    starting_hole_quats: torch.Tensor,  # [H, 4]
+    part_hole_batch: torch.Tensor,  # [H]
 ):
     """Update hole locs.
 
     Args:
         current_sim_state (RepairsSimState): The current sim state.
-        starting_hole_positions (dict[str, torch.Tensor]): The starting hole positions. [B, num_holes_per_part, 3]
-        starting_hole_quats (dict[str, torch.Tensor]): The starting hole quats. [B, num_holes_per_part, 4]
+        starting_hole_positions (torch.Tensor): The starting hole positions. [H, 3]
+        starting_hole_quats (torch.Tensor): The starting hole quats. [H, 4]
+        part_hole_batch (torch.Tensor): The part hole batch. [H]
 
     Process:
     1. Stack the starting hole positions and quats into one [B, sum(num_holes_per_part), 3] and [B, sum(num_holes_per_part), 4]
@@ -497,19 +508,7 @@ def update_hole_locs(
     3. Calculate the hole positions and quats
     4. Set the hole positions and quats
     """
-    device = tuple(starting_hole_positions.values())[0].device
-    all_starting_hole_positions = torch.cat(
-        list(starting_hole_positions.values()), dim=0
-    ).to(device)  # [B, sum(num_holes_per_part), 3]
-    all_starting_hole_quats = torch.cat(list(starting_hole_quats.values()), dim=0).to(
-        device
-    )
-    num_holes_per_part = torch.tensor(
-        [v.shape[0] for v in starting_hole_positions.values()], device=device
-    ).to(device)
-    hole_batch = torch.repeat_interleave(
-        torch.arange(len(num_holes_per_part), device=device), num_holes_per_part
-    )
+    device = starting_hole_positions.device
 
     # will remove when (if) batch RepairsSimStep.
     part_pos = torch.stack(
@@ -519,87 +518,16 @@ def update_hole_locs(
         [phys_state.graph.quat for phys_state in current_sim_state.physical_state]
     ).to(device, dtype=torch.float32)  # [B, P, 4]
 
-    part_pos_batch = torch.repeat_interleave(part_pos, num_holes_per_part, dim=1)
-    part_quat_batch = torch.repeat_interleave(part_quat, num_holes_per_part, dim=1)
+    # duplicate values by batch
+    part_pos_batched = part_pos[:, part_hole_batch]
+    part_quat_batched = part_quat[:, part_hole_batch]
 
     # note: not sure get_connector_pos will be usable with batches.
     hole_pos = get_connector_pos(
-        part_pos_batch, part_quat_batch, all_starting_hole_positions.unsqueeze(0)
+        part_pos_batched, part_quat_batched, starting_hole_positions.unsqueeze(0)
     )
-    hole_quat = quat_multiply(part_quat_batch, all_starting_hole_quats)
+    hole_quat = quat_multiply(part_quat_batched, starting_hole_quats)
     for i, phys_state in enumerate(current_sim_state.physical_state):
         phys_state.hole_positions = hole_pos[i]
         phys_state.hole_quats = hole_quat[i]
-        phys_state.hole_indices_batch = hole_batch[i]
     return current_sim_state
-
-
-def get_connector_pos(
-    parent_pos: torch.Tensor,
-    parent_quat: torch.Tensor,
-    rel_connector_pos: torch.Tensor,
-):
-    """
-    Get the position of a connector relative to its parent. Used both in translation from compound to sim state and in screwdriver offset.
-    Note: expects batched inputs of rel_connector_pos, ndim=2.
-    Returns:
-        torch.Tensor: The position of the connector relative to its parent. [B, 3]
-    """
-    # reverse the function because from parent to connector.
-    rel_connector_pos = -rel_connector_pos
-    return (
-        parent_pos
-        + rel_connector_pos
-        + 2
-        * torch.cross(
-            parent_quat[..., 1:],
-            torch.cross(parent_quat[..., 1:], rel_connector_pos, dim=-1)
-            + parent_quat[..., 0:1] * rel_connector_pos,
-            dim=-1,
-        )
-    )
-
-
-def quat_multiply(
-    q1: torch.Tensor, q2: torch.Tensor, normalize: bool = True
-) -> torch.Tensor:
-    """Quaternion multiplication, q1 ⊗ q2.
-    Inputs: [..., 4] tensors where each quaternion is [w, x, y, z]
-    """
-    w1, x1, y1, z1 = q1.unbind(-1)
-    w2, x2, y2, z2 = q2.unbind(-1)
-    q = torch.stack(
-        [
-            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-        ],
-        dim=-1,
-    )
-    if normalize:
-        q = F.normalize(q, dim=-1)
-    return q
-
-
-def quat_conjugate(q: torch.Tensor) -> torch.Tensor:
-    """Returns the conjugate of a quaternion [w, x, y, z]."""
-    return torch.cat([q[..., :1], -q[..., 1:]], dim=-1)
-
-
-def quat_angle_diff_deg(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
-    """Returns the angle in degrees between rotations represented by q1 and q2."""
-    q1 = F.normalize(q1, dim=-1)
-    q2 = F.normalize(q2, dim=-1)
-
-    q_rel = quat_multiply(quat_conjugate(q1), q2)
-    w = torch.clamp(torch.abs(q_rel[..., 0]), -1.0, 1.0)  # safe acos
-    angle_rad = 2.0 * torch.acos(w)
-    return torch.rad2deg(angle_rad)
-
-
-def are_quats_within_angle(
-    q1: torch.Tensor, q2: torch.Tensor, max_angle_deg: float
-) -> torch.Tensor:
-    """Returns True where angular distance between q1 and q2 is ≤ max_angle_deg."""
-    return quat_angle_diff_deg(q1, q2) <= max_angle_deg
