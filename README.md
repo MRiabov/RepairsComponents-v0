@@ -17,8 +17,7 @@ Repairs Components is a library designed to enable manufacturing companies to as
 - **Replace a damaged component**: A common case for maintenance is a damaged component. This RL environment teaches a robot to replace various components under *millions* of different settings.
 - **Disassemble your product** - for e.g. recyling/repair tasks, a disassembly mode was created. 
 - **Offline dataset generation** - All of the above can be used as a offline reinforcement learning dataset generator for Vision Transformers or standard offline RL. Simply flip "save" to True (under io_cfg config dict) and video, voxel, and graph observations will be persisted to your disk.
-- **Electronics**: 
-  - Components such as buttons and switches, allowing interaction with the environment; wires, connectors allowing the robots to assemble a given env. _(Work in progress)_
+- **Electronics**: Components such as buttons and switches, allowing interaction with the environment; wires, standard connectors (e.g. XT-60/USB-A/USB-C) allowing the robots to assemble a given assembly. _(Work in progress)_
  
 Note: this is a *reinforcement learning environment*. You will need a *reinforcement learning algorithm* and we provide that in [Repairs-v0](https://github.com/MRiabov/Repairs-v0). You should also try using [Vision-Language-Action models](https://arxiv.org/abs/2406.09246).
 
@@ -47,7 +46,7 @@ uv pip install git+https://github.com/mit-han-lab/torchsparse --no-build-isolati
 And run via `/workspace/.venv/bin/python /workspace/Repairs-v0/neural_nets/sac_repairs_torch.py` (adjusting for your venv path)
 
 ## Roadmap 🛣️
-1. Add welding
-2. Add realistic wires and their constraints
+1. Add welding.
+2. Add realistic wires and their constraints.
 3. Add more electronics components, and support assembly of electromechanical (motor) assemblies.
 4. Add softbody support (e.g. for automotive hoses).
