@@ -17,12 +17,13 @@ Repairs Components is a library designed to enable manufacturing companies to as
 - **Replace a damaged component**: A common case for maintenance is a damaged component. This RL environment teaches a robot to replace various components under *millions* of different settings.
 - **Disassemble your product** - for e.g. recyling/repair tasks, a disassembly mode was created. 
 - **Offline dataset generation** - All of the above can be used as a offline reinforcement learning dataset generator for Vision Transformers or standard offline RL. Simply flip "save" to True (under io_cfg config dict) and video, voxel, and graph observations will be persisted to your disk.
-- **Electronics**: Components such as buttons and switches, allowing interaction with the environment; wires, standard connectors (e.g. XT-60/USB-A/USB-C) allowing the robots to assemble a given assembly. _(Work in progress)_
- 
-Note: this is a *reinforcement learning environment*. You will need a *reinforcement learning algorithm* and we provide that in [Repairs-v0](https://github.com/MRiabov/Repairs-v0). You should also try using [Vision-Language-Action models](https://arxiv.org/abs/2406.09246).
+- **Electronics**: Components such as buttons and switches, allowing interaction with the environment; wires, standard connectors (e.g. XT-60/USB-A/USB-C) allowing the robots to assemble a given assembly _(Work in progress)_. 
+
+> [!NOTE]
+> This is a *reinforcement learning environment*. You will need a *reinforcement learning algorithm* and we provide that in [Repairs-v0](https://github.com/MRiabov/Repairs-v0). You should also try using [Vision-Language-Action models](https://arxiv.org/abs/2406.09246).
 
 > [!WARNING]  
-> Caution: the electronics library is very much in Alpha and active development and could be broken when you see this. Check in a few weeks when we will polish it!
+> The electronics library is very much in Alpha and active development and could be broken when you see this. Check in a few weeks when we will polish it!
 
 ## Installation 🛠️
 
