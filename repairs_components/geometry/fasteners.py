@@ -6,6 +6,8 @@ from MuJoCo-based simulations.
 """
 
 from pathlib import Path
+
+from ocp_vscode import show
 from repairs_components.geometry.base import Component
 from build123d import *
 from dataclasses import dataclass
@@ -310,6 +312,8 @@ def attach_fastener_to_part(
     hole_quat: torch.Tensor,
     hole_depth: torch.Tensor,
     part_entity: RigidEntity,
+    hole_is_through: torch.Tensor,
+    top_hole_depth: torch.Tensor,
     fastener_length: torch.Tensor,
     envs_idx: torch.Tensor,
 ):
@@ -323,8 +327,13 @@ def attach_fastener_to_part(
     fastener_joint = fastener_entity.base_link.idx
     other_body_link = part_entity.base_link.idx
 
+    # TODO: This needs to be updated to pass proper hole_is_through and top_hole_depth values
+    # For now, assuming blind holes with no partial insertion
+    hole_is_through = torch.zeros_like(hole_depth, dtype=torch.bool)  # Assume blind holes
+    top_hole_depth = torch.zeros_like(hole_depth)  # No partial insertion
+    
     fastener_pos = recalculate_fastener_pos_with_offset_to_hole(
-        hole_pos, hole_quat, hole_depth, fastener_length, envs_idx
+        hole_pos, hole_quat, hole_depth, hole_is_through, fastener_length, top_hole_depth
     )  # TODO untested, may be buggy.
 
     fastener_entity.set_pos(fastener_pos, envs_idx)
@@ -413,24 +422,70 @@ def get_fastener_save_path_from_name(name: str, base_dir: Path) -> Path:
     return base_dir / "shared" / "fasteners" / (name + ".xml")
 
 
-if __name__ == "__main__":
-    show(Fastener(constraint_b_active=True).bd_geometry())
-
 
 def recalculate_fastener_pos_with_offset_to_hole(
     hole_pos: torch.Tensor,  # [B, 3]
     hole_quat: torch.Tensor,  # [B, 4]
-    hole_depth: torch.Tensor,  # [B]
+    hole_depth: torch.Tensor,  # [B] - always positive
+    hole_is_through: torch.Tensor,  # [B] - boolean mask
     fastener_length: torch.Tensor,  # [B]
-    envs_idx: torch.Tensor,
+    top_hole_depth: torch.Tensor,  # [B] # zero or positive
 ):
-    through_hole = hole_depth < 0
-    fastener_pos_with_body_a = hole_pos
-    fastener_pos_with_body_b = get_connector_pos(
-        hole_pos, hole_quat, -hole_depth + fastener_length
-    )
-    fastener_pos = torch.where(
-        through_hole, fastener_pos_with_body_b, fastener_pos_with_body_a
-    )
+    """Handle three cases:
+    1. Attaching a free fastener to a through hole, so connect the top of the fastener
+    at the top of the hole
+    2. Attaching a free fastener to a non-through (blind) hole, so connect the bottom
+    of the fastener at the bottom of the hole
+    3. Attaching a fastener partially inserted into a through hole, so top_hole_depth
+    is not None, so connect the bottom (B) hole to the center of the fastener.
+    - in the third case, depth of insertion into B hole is equal to fastener_length - top_hole_depth
+      - so the formula is simply (hole_pos+top_hole_depth)@quat.
+    - in the third case, the hole_pos, hole_quat and hole_depth are params of a bottom hole.
+    - in the third case, the fastener inserted into a blind hole can not be connected nowhere else.
+    """
+    assert hole_depth >= 0, "Hole depth must be positive."
+    assert top_hole_depth >= 0, "top_hole_depth must be positive."
+
+    through_hole = hole_is_through
+    has_partial_insertion = top_hole_depth > 0
+
+    # Start with hole_pos for all cases
+    fastener_pos = hole_pos.clone()
+
+    # Case 1: Through hole without partial insertion - fastener_pos = hole_pos (no offset)
+    # This is already handled by starting with hole_pos.clone()
+
+    # Case 2: Blind hole without partial insertion - offset by (fastener_length - hole_depth)
+    blind_hole_no_partial = ~through_hole & ~has_partial_insertion
+    if blind_hole_no_partial.any():
+        # For blind holes, we need to offset the fastener position
+        # The offset should be applied in the hole's coordinate system (using quaternion)
+        offset = torch.zeros_like(hole_pos)
+        offset[blind_hole_no_partial, 2] = (fastener_length - hole_depth)[blind_hole_no_partial]
+        
+        # Apply quaternion transformation using get_connector_pos
+        transformed_pos = get_connector_pos(
+            hole_pos[blind_hole_no_partial],
+            hole_quat[blind_hole_no_partial],
+            offset[blind_hole_no_partial],
+        )
+        fastener_pos[blind_hole_no_partial] = transformed_pos
+
+    # Case 3: Partial insertion - offset by top_hole_depth (applies to both through and blind holes)
+    if has_partial_insertion.any():
+        # For partial insertion, offset by the depth the fastener is already inserted
+        offset = torch.zeros_like(hole_pos)
+        offset[has_partial_insertion, 2] = top_hole_depth[has_partial_insertion]
+        
+        # Apply quaternion transformation using get_connector_pos
+        transformed_pos = get_connector_pos(
+            hole_pos[has_partial_insertion],
+            hole_quat[has_partial_insertion],
+            offset[has_partial_insertion],
+        )
+        fastener_pos[has_partial_insertion] = transformed_pos
 
     return fastener_pos
+
+if __name__ == "__main__":
+    show(Fastener(constraint_b_active=True).bd_geometry())

@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 import numpy as np
 from build123d import Compound, Part
 
+from repairs_components.geometry.b123d_utils import filtered_intersection_check
 from repairs_components.geometry.base_env.tooling_stand_plate import render_and_save
 
 
@@ -51,26 +52,7 @@ class EnvSetup(ABC):
         ), f"All children must have labels. Currently have: {geom.children}"
         # remove connector defs from intersection check
 
-        any_intersect, parts, intersect_volume = (
-            geom_intersect_check.do_children_intersect()
-        )
-
-        # Check if there's any intersection that's not just between connector_defs
-        has_invalid_intersection = any_intersect and not all(
-            any(
-                child.label.endswith("connector_def")
-                and np.isclose(intersect_volume, child.volume)
-                for child in part.children
-            )
-            if part.children
-            else False
-            for part in parts
-        )
-
-        assert not has_invalid_intersection, (
-            f"Non-connector parts intersect. Intersecting parts: {[(part.label, part.volume) for part in parts]}. "
-            f"Intersecting volume: {intersect_volume}."
-        )
+        filtered_intersection_check(geom_intersect_check, assertion=True)
 
         # check bounding box
         aabb = geom.bounding_box()

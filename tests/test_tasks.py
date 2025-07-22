@@ -2,6 +2,7 @@
 
 import numpy as np
 from build123d import Box, Sphere, Cylinder, Compound, Pos
+from repairs_components.geometry.b123d_utils import filtered_intersection_check
 from repairs_components.processing.tasks import AssembleTask
 import pytest
 
@@ -30,6 +31,7 @@ def test_perturb_initial_state(bd_test_compound):
     assert (
         np.array(new_compound.bounding_box().size.to_tuple()) < np.array(env_size)
     ).all(), "Parts are not within bounds."
+    filtered_intersection_check(new_compound, assertion=True)
 
 
 def test_stable_orientation():

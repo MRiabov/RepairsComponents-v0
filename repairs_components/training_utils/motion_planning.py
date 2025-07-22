@@ -103,11 +103,48 @@ def execute_straight_line_trajectory(
             cameras = scene.visualizer.cameras
             for camera in cameras:
                 camera.render()
-    if not render:
-        # dev note: not doing this has resulted in an opaque OpenGL error.
-        scene.visualizer.update(force=True, auto=True)
 
     # print(franka.get_links_pos()[:, 7])  # hand.
+
+def execute_planned_path(
+    franka: RigidEntity,
+    scene: gs.Scene,
+    target_hand_pos: torch.Tensor,
+    target_hand_quat: torch.Tensor,
+    gripper_force: torch.Tensor,
+    render: bool,
+    keypoint_distance=0.1,
+    num_steps_between_keypoints=10,
+):
+    hand = franka.get_link("hand")
+    # move to pre-grasp pose
+    qpos = franka.inverse_kinematics(
+        link=hand,
+        pos=target_hand_pos,
+        quat=target_hand_quat,
+    )
+    # gripper open pos
+    qpos[-2:] = gripper_force
+    path = franka.plan_path(qpos_goal=qpos, num_waypoints=100)
+    # 1s duration
+    # execute the planned path
+    for waypoint in path:
+        franka.control_dofs_position(waypoint)
+        scene.step(update_visualizer=render, refresh_visualizer=render)
+        if render:
+            cameras = scene.visualizer.cameras
+            for camera in cameras:
+                camera.render()
+
+    #dry run not added (?)
+    
+    if render:
+        cameras = scene.visualizer.cameras
+        for camera in cameras:
+            camera.stop_recording(
+                save_to_filename="test_tool_genesis_bug_repro.mp4",
+            )
+
 
 
 # attempt to convert to ti kernel (failed - ti kernels don't support python/torch operations.)

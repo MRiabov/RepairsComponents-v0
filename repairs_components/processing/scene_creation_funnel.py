@@ -136,11 +136,15 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             desired_sim_state = translate_compound_to_sim_state([desired_state_geom_])
 
             # starting, as "per part, relative to 0,0,0 position"
-            part_holes_pos, part_holes_quat, part_hole_depth, part_hole_batch = (
-                get_starting_part_holes(
-                    starting_scene_geom_,
-                    starting_sim_state.physical_state[0].body_indices,
-                )
+            (
+                part_holes_pos,
+                part_holes_quat,
+                part_hole_depth,
+                part_hole_batch,
+                hole_is_through,
+            ) = get_starting_part_holes(
+                starting_scene_geom_,
+                starting_sim_state.physical_state[0].body_indices,
             )
 
             # store states
@@ -199,6 +203,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             starting_hole_quats=part_holes_quat,
             hole_depth=part_hole_depth,
             part_hole_batch=part_hole_batch,
+            hole_is_through=hole_is_through,
         )  # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
 
@@ -512,6 +517,7 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
     part_holes_pos: torch.Tensor = torch.empty((0, 3))
     part_holes_quat: torch.Tensor = torch.empty((0, 4))
     part_hole_depth: torch.Tensor = torch.empty((0,))
+    part_hole_is_through: torch.Tensor = torch.empty((0,), dtype=torch.bool)
     part_hole_batch: torch.Tensor = torch.empty((0,))
     all_parts = compound.leaves
     filtered_parts = [
@@ -536,10 +542,15 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
             fastener_hole_pos = torch.zeros(count_fastener_hole_joints, 3)
             fastener_hole_quat = torch.zeros(count_fastener_hole_joints, 4)
             fastener_hole_depths = torch.zeros(count_fastener_hole_joints)
+            fastener_hole_is_through = torch.zeros(
+                count_fastener_hole_joints, dtype=torch.bool
+            )
 
             for joint in part.joints.values():
                 if joint.label.startswith("fastener_hole_"):
-                    id, depth = fastener_hole_info_from_joint_name(joint.label)
+                    id, depth, is_through = fastener_hole_info_from_joint_name(
+                        joint.label
+                    )
                     assert id < count_fastener_hole_joints, (
                         "id of joint is out of bounds. "
                         f"id: {id}, count: {count_fastener_hole_joints}"
@@ -552,12 +563,16 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
                     )
                     fastener_hole_depths[id] = depth / 1000
                     # FIXME: I explicitly don't need depth when I have it, I need it when the hole is through.
+                    fastener_hole_is_through[id] = is_through
             # note: there could be positional mismatch in id, however I hope this won't be an issue.
 
             # simply cat it because it's easier.
             part_holes_pos = torch.cat([part_holes_pos, fastener_hole_pos], dim=0)
             part_holes_quat = torch.cat([part_holes_quat, fastener_hole_quat], dim=0)
             part_hole_depth = torch.cat([part_hole_depth, fastener_hole_depths], dim=0)
+            part_hole_is_through = torch.cat(
+                [part_hole_is_through, fastener_hole_is_through], dim=0
+            )
             part_hole_batch = torch.cat(
                 [
                     part_hole_batch,
@@ -570,4 +585,10 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
                 dim=0,
             )
     # TODO sort part_hole_batch, although I don't know if that's necessary.
-    return part_holes_pos, part_holes_quat, part_hole_depth, part_hole_batch
+    return (
+        part_holes_pos,
+        part_holes_quat,
+        part_hole_depth,
+        part_hole_is_through,
+        part_hole_batch,
+    )

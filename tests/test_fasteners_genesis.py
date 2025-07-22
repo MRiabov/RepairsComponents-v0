@@ -255,6 +255,9 @@ def test_attach_and_detach_fastener_to_part(
         hole_quat=torch.tensor(hole_quat),
         envs_idx=torch.tensor([0]),
         hole_depth=torch.tensor([0.04]),  # note: this is a stub.
+        hole_is_through=torch.tensor([False]),
+        top_hole_depth=torch.tensor([0.04]), # FIXME: stubs!!!
+        fastener_length=torch.tensor([0.04]),
     )
     assert torch.isclose(entities["0@fastener"].get_pos(0), hole_pos).all(), (
         "Fastener cube should be attached to part at hole position"
@@ -360,6 +363,8 @@ def test_attach_and_detach_fastener_to_two_parts(
         hole_pos=hole_pos2,
         hole_quat=torch.tensor([0, 0, 0, 1]),
         hole_depth=through_hole_depth_2,
+        hole_is_through=torch.tensor([True]),
+        
     )  # fastener moves to hole_pos_2 with the first part...
     assert torch.isclose(fastener.get_pos(0), hole_pos2).all(), (
         "Fastener should be at hole_pos2"

@@ -13,8 +13,6 @@ def get_connector_pos(
     Returns:
         torch.Tensor: The position of the connector relative to its parent. [B, 3]
     """
-    # reverse the function because from parent to connector.
-    rel_connector_pos = -rel_connector_pos
     return (
         parent_pos
         + rel_connector_pos

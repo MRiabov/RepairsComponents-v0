@@ -37,9 +37,10 @@ class PhysicalState:
     - fasteners_loc
     - fasteners_quat
     - fasteners_attached_to
-    - fastener_b_insertion_depth
+    - fasteners_inserted_into_holes
     """  # this is kind of unnecessary... again.
     # TODO encode mass, and possibly velocity.
+    # note: fasteners_inserted_into_holes is not meant to be exported. for internal ref in screw in logic only.
 
     body_indices: dict[str, int] = field(default_factory=dict)
     inverse_body_indices: dict[int, str] = field(default_factory=dict)
@@ -52,10 +53,6 @@ class PhysicalState:
     """Hole positions per part, batched with hole_indices_batch."""
     hole_quats: torch.Tensor = field(default_factory=torch.empty)  # [H, 4]
     """Hole quats per part, batched with hole_indices_batch."""
-    through_hole_depth: torch.Tensor = field(default_factory=torch.empty)  # [H]
-    """Through hole depth per part, batched with hole_indices_batch. 
-    Used when the hole is through and we need to know the next position after which to connect it.
-    When the hole is not through, it is -1."""
 
     male_connector_positions: dict[str, torch.Tensor] = field(default_factory=dict)
     """Male connector positions per part."""
@@ -135,6 +132,9 @@ class PhysicalState:
             self.graph.fasteners_attached_to = torch.empty(
                 (0, 2), dtype=torch.int16, device=self.device
             )  # to which 2 bodies attached. -1 if not attached.
+            self.graph.fasteners_inserted_into_holes = torch.empty(
+                (0, 2), dtype=torch.int16, device=self.device
+            )  # to which 2 holes inserted. -1 if not inserted. # equal in shape and -1 to fasteners_attached_to
 
             # note: free_fasteners_id does not go into graph, it is only used for
             # fastener_id_to_name mapping.

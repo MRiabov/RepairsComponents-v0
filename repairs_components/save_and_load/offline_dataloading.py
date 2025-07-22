@@ -159,6 +159,9 @@ class OfflineDataloader:
         part_hole_batch = torch.load(
             self.data_dir / f"scene_{scene_id}" / "part_hole_batch.pt"
         )
+        hole_is_through = torch.load(
+            self.data_dir / f"scene_{scene_id}" / "hole_is_through.pt"
+        )
         # TODO update them during load based on pos.
 
         # load RepairsEnvState
@@ -202,6 +205,7 @@ class OfflineDataloader:
             starting_hole_quats=starting_hole_quats,
             hole_depth=hole_depth,
             part_hole_batch=part_hole_batch,
+            hole_is_through=hole_is_through,
         )
 
         return sim_state

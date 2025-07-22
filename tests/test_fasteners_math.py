@@ -3,6 +3,7 @@ import pytest
 from repairs_components.geometry.fasteners import (
     Fastener,
     check_fastener_possible_insertion,
+    recalculate_fastener_pos_with_offset_to_hole,
 )
 
 
@@ -197,3 +198,145 @@ def test_tip_is_in_correct_place(fastener, bd_geometry):
     assert (fastener.get_tip_pos_relative_to_center()[:2] == 0).all()
     assert fastener.get_tip_pos_relative_to_center()[2] == -fastener.length / 1000
     # note: this is a kind of pointless test because fastener_joint_tip is not called anywhere, but let it be.
+
+
+# ----------------------------------------------------------
+# === recalculate_fastener_pos_with_offset_to_hole tests ===
+# ----------------------------------------------------------
+
+
+def test_recalculate_fastener_pos_with_offset_to_hole_through_hole_returns_equal_pos():
+    hole_pos = torch.tensor([[0.0, 0.0, 0.0]])
+    hole_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    hole_depth = torch.tensor([5.0])
+    hole_is_through = torch.tensor([True])
+    fastener_length = torch.tensor([15.0])
+    top_hole_depth = torch.tensor([0.0])
+    fastener_pos = recalculate_fastener_pos_with_offset_to_hole(
+        hole_pos,
+        hole_quat,
+        hole_depth,
+        hole_is_through,
+        fastener_length,
+        top_hole_depth,
+    )
+    assert torch.isclose(fastener_pos, hole_pos).all(), (
+        "fastener_pos (base joint pos) should be equal to hole_pos"
+    )
+
+
+def test_recalculate_fastener_pos_with_offset_to_hole_blind_hole_returns_offset_pos():
+    hole_pos = torch.tensor([[0.0, 0.0, 0.0]])
+    hole_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    hole_depth = torch.tensor([5.0])
+    hole_is_through = torch.tensor([False])
+    fastener_length = torch.tensor([15.0])
+    top_hole_depth = torch.tensor([0.0])
+    fastener_pos = recalculate_fastener_pos_with_offset_to_hole(
+        hole_pos,
+        hole_quat,
+        hole_depth,
+        hole_is_through,
+        fastener_length,
+        top_hole_depth,
+    )
+    # With identity quaternion, get_connector_pos applies no rotation, just addition
+    # So [0, 0, 10] becomes [0, 0, 10] and is added to hole_pos
+    expected_offset = fastener_length[0] - hole_depth[0]  # get_connector_pos no longer negates
+    assert torch.isclose(
+        fastener_pos,
+        hole_pos + torch.tensor([0.0, 0.0, expected_offset]),
+    ).all(), (
+        "fastener_pos should be hole_pos + (fastener_length - hole_depth)"
+    )
+
+
+def test_recalculate_fastener_pos_with_offset_to_hole_partial_insertion_returns_offset_pos():
+    hole_pos = torch.tensor([[0.0, 0.0, 0.0]])
+    hole_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    hole_depth = torch.tensor([5.0])
+    fastener_length = torch.tensor([15.0])
+    top_hole_depth = torch.tensor([10.0])
+    # blind hole
+    hole_is_through = torch.tensor([False])
+    fastener_pos_blind = recalculate_fastener_pos_with_offset_to_hole(
+        hole_pos,
+        hole_quat,
+        hole_depth,
+        hole_is_through,
+        fastener_length,
+        top_hole_depth,
+    )
+    # With identity quaternion, get_connector_pos applies no rotation, just addition
+    expected_offset = top_hole_depth[0]  # get_connector_pos no longer negates
+    assert torch.isclose(
+        fastener_pos_blind, hole_pos + torch.tensor([0.0, 0.0, expected_offset])
+    ).all(), "fastener_pos should be hole_pos + top_hole_depth"
+    # through hole (should be equal.)
+    hole_is_through = torch.tensor([True])
+    fastener_pos_through = recalculate_fastener_pos_with_offset_to_hole(
+        hole_pos,
+        hole_quat,
+        hole_depth,
+        hole_is_through,
+        fastener_length,
+        top_hole_depth,
+    )
+    # Through hole with partial insertion should also use get_connector_pos
+    expected_offset = top_hole_depth[0]  # get_connector_pos no longer negates
+    assert torch.isclose(
+        fastener_pos_through,
+        hole_pos + torch.tensor([0.0, 0.0, expected_offset]),
+    ).all(), (
+        "fastener_pos should be hole_pos + top_hole_depth (same as blind case)"
+    )
+
+
+def test_recalculate_fastener_pos_with_offset_to_hole_with_quaternion():
+    """Test all three cases with non-identity quaternion to ensure get_connector_pos is applied correctly."""
+    # Use a 90-degree rotation around Y axis: [cos(45°), 0, sin(45°), 0]
+    hole_quat = torch.tensor([[0.7071, 0.0, 0.7071, 0.0]])  # 90° rotation around Y
+    hole_pos = torch.tensor([[1.0, 2.0, 3.0]])
+    hole_depth = torch.tensor([5.0])
+    fastener_length = torch.tensor([15.0])
+    
+    # Case 1: Through hole without partial insertion - should return hole_pos (no offset)
+    hole_is_through = torch.tensor([True])
+    top_hole_depth = torch.tensor([0.0])
+    fastener_pos_through = recalculate_fastener_pos_with_offset_to_hole(
+        hole_pos, hole_quat, hole_depth, hole_is_through, fastener_length, top_hole_depth
+    )
+    assert torch.isclose(fastener_pos_through, hole_pos).all(), (
+        "Through hole without partial insertion should return hole_pos exactly"
+    )
+    
+    # Case 2: Blind hole without partial insertion - should apply quaternion transformation
+    hole_is_through = torch.tensor([False])
+    top_hole_depth = torch.tensor([0.0])
+    fastener_pos_blind = recalculate_fastener_pos_with_offset_to_hole(
+        hole_pos, hole_quat, hole_depth, hole_is_through, fastener_length, top_hole_depth
+    )
+    # Expected: get_connector_pos(hole_pos, hole_quat, [0, 0, fastener_length - hole_depth])
+    # get_connector_pos no longer negates input: [0, 0, 10] stays [0, 0, 10]
+    # Then applies 90° Y rotation: [0, 0, 10] -> [10, 0, 0] (Z becomes X)
+    # Then adds to hole_pos: [1, 2, 3] + [10, 0, 0] = [11, 2, 3]
+    expected_blind = torch.tensor([[11.0, 2.0, 3.0]])
+    assert torch.isclose(fastener_pos_blind, expected_blind, atol=1e-3).all(), (
+        f"Blind hole should apply quaternion transformation. Got {fastener_pos_blind}, expected {expected_blind}"
+    )
+    
+    # Case 3: Partial insertion (through hole) - should apply quaternion transformation
+    hole_is_through = torch.tensor([True])
+    top_hole_depth = torch.tensor([7.0])
+    fastener_pos_partial = recalculate_fastener_pos_with_offset_to_hole(
+        hole_pos, hole_quat, hole_depth, hole_is_through, fastener_length, top_hole_depth
+    )
+    # Expected: get_connector_pos(hole_pos, hole_quat, [0, 0, top_hole_depth])
+    # get_connector_pos no longer negates input: [0, 0, 7] stays [0, 0, 7]
+    # Then applies 90° Y rotation: [0, 0, 7] -> [7, 0, 0] (Z becomes X)
+    # Then adds to hole_pos: [1, 2, 3] + [7, 0, 0] = [8, 2, 3]
+    expected_partial = torch.tensor([[8.0, 2.0, 3.0]])
+    assert torch.isclose(fastener_pos_partial, expected_partial, atol=1e-3).all(), (
+        f"Partial insertion should apply quaternion transformation. Got {fastener_pos_partial}, expected {expected_partial}"
+    )
+

@@ -4,6 +4,7 @@ import ocp_vscode
 from pathlib import Path
 import trimesh
 import os
+import numpy as np
 
 
 def fastener_hole(radius: float, depth: float | None, id: int):
@@ -24,26 +25,36 @@ def fastener_hole(radius: float, depth: float | None, id: int):
     fastener_hole = Hole(radius=radius, depth=depth)
     fastener_loc = Locations((0, 0, 0))
     # (0, 0, -radius) -radius was a bug I understand.
+    is_through = depth is None
     if depth is None:
         depth = fastener_hole.vertices().sort_by(Axis.Z).first.Z
-        depth = -depth  # if "-", it is through
+        #TODO: check if this is absolute or relative.
+    else:
+        assert depth > 0, "Depth must be positive."
 
     joint = RigidJoint(
-        label=f"fastener_hole_{id}#d{depth}", joint_location=fastener_loc.locations[0]
+        label=fastener_hole_joint_name(id, depth, is_through),
+        joint_location=fastener_loc.locations[0],
     )
 
     return fastener_hole, fastener_loc, joint  # TODO - add joint axis?
 
 
-def fastener_hole_joint_name(id: int, depth: float | None):
-    return f"fastener_hole_{id}#d{depth}"
-    # note: new convention: "#" in labels means parameter.
+def fastener_hole_joint_name(id: int, depth: float, is_through: bool):
+    assert depth is not None and depth > 0, "Depth must be a positive float."
+    hole_type = "through" if is_through else "blind"
+    return f"fastener_hole_{id}#{depth}#{hole_type}"
+    # note: new convention: "#" in labels means parameter. param.
 
 
 def fastener_hole_info_from_joint_name(name: str):
-    id = int(name.split("_")[1].split("#d")[0])
-    depth = float(name.split("#d")[1])
-    return id, depth
+    parts = name.split("#")
+    id = int(parts[0].split("_")[1])
+    depth_str, hole_type = parts[1], parts[2]
+    depth = float(depth_str)
+    assert hole_type in ("through", "blind"), f"Invalid hole type: {hole_type}"
+    is_through = hole_type == "through"
+    return id, depth, is_through
 
 
 def export_obj(part: Part, obj_path: Path, glb_path: Path | None = None) -> Path:
@@ -94,3 +105,26 @@ def recenter_part(part: Part):
     assert isinstance(part, Part), "Part must be a Part object"
     center = part.center(CenterOf.BOUNDING_BOX)
     return part.moved(Pos(-center))
+
+
+def filtered_intersection_check(
+    compound: Compound, filter_labels=("connector_def",), assertion=True
+):
+    any_intersect, parts, intersect_volume = compound.do_children_intersect()
+    # Check if there's any intersection that's not just between connector_defs
+    has_invalid_intersection = any_intersect and not all(
+        any(
+            child.label.endswith(filter_labels)
+            and np.isclose(intersect_volume, child.volume)
+            for child in part.children
+        )
+        if part.children
+        else False
+        for part in parts
+    )
+    if assertion:
+        assert not has_invalid_intersection, (
+            f"Non-connector parts intersect. Intersecting parts: {[(part.label, part.volume) for part in parts]}. "
+            f"Intersecting volume: {intersect_volume}."
+        )
+    return has_invalid_intersection, parts, intersect_volume

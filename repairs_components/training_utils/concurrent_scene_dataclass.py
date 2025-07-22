@@ -41,6 +41,8 @@ class ConcurrentSceneData:
     "Step count in every scene. I don't think this should be diffed."
     task_ids: torch.IntTensor
     "Task ids in for every scene."
+
+    # holes
     starting_hole_positions: torch.Tensor
     """Starting hole positions for every part, batched with part_hole_batch. 
     Equal over the batch. Shape: (H, 3)"""
@@ -48,7 +50,10 @@ class ConcurrentSceneData:
     """Starting hole quats for every part, batched with part_hole_batch. 
     Equal over the batch. Shape: (H, 4)"""
     hole_depth: torch.Tensor
-    """Hole depths for every part. If the hole is blind, value is >0, if through set as -depth.
+    """Hole depths for every part.
+    Equal over the batch. Shape: (H)"""
+    hole_is_through: torch.Tensor
+    """Boolean mask indicating whether each hole is through (True) or blind (False).
     Equal over the batch. Shape: (H)"""
     part_hole_batch: torch.Tensor
     "Part index for every hole. Equal over the batch. Shape: (H)"
@@ -126,7 +131,10 @@ class ConcurrentSceneData:
         assert self.hole_depth.shape == (self.hole_count,), (
             "Hole depths must have shape (H,)"
         )
-        assert (self.hole_depth != 0).all(), "Hole depths must not be 0."
+        assert (self.hole_depth > 0).all(), "Hole depths must be positive."
+        assert self.hole_is_through.shape == (self.hole_count,), (
+            "Hole is through must have shape (H,)"
+        )
 
         # init state != current state
         # assert self.init_state != self.current_state, (
@@ -227,6 +235,7 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         starting_hole_quats=starting_hole_quats,
         hole_depth=scene_configs[0].hole_depth,
         part_hole_batch=scene_configs[0].part_hole_batch,
+        hole_is_through=scene_configs[0].hole_is_through,
     )
     return new_scene_config
 
@@ -296,6 +305,7 @@ def merge_scene_configs_at_idx(
             starting_hole_quats=old_scene_config.starting_hole_quats,
             hole_depth=old_scene_config.hole_depth,
             part_hole_batch=old_scene_config.part_hole_batch,
+            hole_is_through=old_scene_config.hole_is_through,
         )
         # Update vox_init and vox_des for reset states
         merged_scene_config.vox_init = sparse_arr_put(
@@ -398,16 +408,12 @@ def split_scene_config(scene_config: ConcurrentSceneData):
                 reward_history=RewardHistory(batch_dim=1),
                 step_count=scene_config.step_count[i],
                 task_ids=scene_config.task_ids[i : i + 1],
-                starting_hole_positions={
-                    k: scene_config.starting_hole_positions[k]
-                    for k in scene_config.starting_hole_positions
-                },
-                starting_hole_quats={
-                    k: scene_config.starting_hole_quats[k]
-                    for k in scene_config.starting_hole_quats
-                },
+                #holes are uniform throughout the batch
+                starting_hole_positions=scene_config.starting_hole_positions,
+                starting_hole_quats=scene_config.starting_hole_quats,
                 hole_depth=scene_config.hole_depth,
                 part_hole_batch=scene_config.part_hole_batch,
+                hole_is_through=scene_config.hole_is_through,
             )
         )
     return cfg_list
