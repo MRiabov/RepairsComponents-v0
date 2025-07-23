@@ -2,7 +2,7 @@ import concurrent.futures
 import pytest
 import torch
 
-from repairs_components.training_utils.multienv_dataloader import (
+from repairs_components.save_and_load.multienv_dataloader import (
     MultiEnvDataLoader,
     merge_concurrent_scene_configs as real_merge,
 )
@@ -11,7 +11,7 @@ from repairs_components.training_utils.multienv_dataloader import (
 # Monkeypatch merge_concurrent_scene_configs to identity for predictable outputs
 @pytest.fixture(autouse=True)
 def patch_merge(monkeypatch):
-    import repairs_components.training_utils.multienv_dataloader as mdl
+    import repairs_components.save_and_load.multienv_dataloader as mdl
 
     monkeypatch.setattr(mdl, "merge_concurrent_scene_configs", lambda x: x)
 

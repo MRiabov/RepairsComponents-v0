@@ -303,28 +303,37 @@ def step_screw_in_or_out(
         )  # [B] int or -1
         valid_insert = part_idx >= 0
         for env_id in env_ids[valid_insert].tolist():
-            hole_pos = physical_state[env_id].hole_positions[hole_idx[env_id].item()]
-            hole_quat = physical_state[env_id].hole_quats[hole_idx[env_id].item()]
+            hole_id = hole_idx[env_id]
+            # when fastener is already inserted to a hole, we need to pass the hole's (top hole's) depth to the function
+            already_inserted_hole_id = fastener_connected_to_hole[env_id].max(-1).values
+            hole_pos = physical_state[env_id].hole_positions[hole_id]
+            hole_quat = physical_state[env_id].hole_quats[hole_id]
             fastener_name = tool_state[env_id].current_tool.picked_up_fastener_name
-            part_id = part_idx[env_id].item()
+            fastener_id = int(fastener_name.split("@")[0])
+            part_id = part_idx[env_id]
             part_name = physical_state[env_id].inverse_body_indices[part_id]
             # note: fasteners that are already connected are ignored in check_fastener_possible_insertion
             # FIXME: body_idx should be gettable from fastener_hole_positions
             attach_fastener_to_part(
                 scene,
                 fastener_entity=gs_entities[fastener_name],
-                hole_pos=hole_pos,
-                hole_quat=hole_quat,
-                hole_depth=physical_state[env_id].hole_depths[hole_idx[env_id].item()],
-                hole_is_through=physical_state[env_id].hole_is_through[
-                    hole_idx[env_id].item()
+                inserted_into_hole_pos=hole_pos,
+                inserted_into_hole_quat=hole_quat,
+                inserted_to_hole_depth=physical_state[env_id].hole_depths[hole_id],
+                inserted_into_hole_is_through=physical_state[env_id].hole_is_through[
+                    hole_id
                 ],
-                part_entity=gs_entities[part_name],
-                already_inserted_into_hole_id=fastener_connected_to_hole[env_id],
-                fastener_length=physical_state[env_id].fasteners_len[
-                    hole_idx[env_id].item()
+                inserted_into_part_entity=gs_entities[part_name],
+                fastener_length=physical_state[env_id].graph.fasteners_length[
+                    fastener_id
                 ],
-                envs_idx=torch.tensor([env_id], device=actions.device),
+                top_hole_depths=physical_state[env_id].hole_depths[
+                    already_inserted_hole_id
+                ],
+                top_hole_is_through=physical_state[env_id].hole_is_through[
+                    already_inserted_hole_id
+                ],
+                envs_idx=torch.tensor([env_id]),
             )
             # future: assert (prevent) more than two connections.
 

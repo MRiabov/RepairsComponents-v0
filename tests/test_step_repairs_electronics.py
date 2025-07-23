@@ -56,8 +56,8 @@ def scene_with_two_connectors(init_gs):
     camera.start_recording()
 
     entities = {
-        "europlug_0_male@control": connector_europlug_male,
-        "europlug_0_female@control": connector_europlug_female,
+        "europlug_0_male@connector": connector_europlug_male,
+        "europlug_0_female@connector": connector_europlug_female,
     }
     repairs_sim_state = RepairsSimState(1)
     europlug_male = Europlug(0)

@@ -1,6 +1,7 @@
 import torch
 from repairs_components.geometry.connectors.connectors import check_connections
 
+#TODO rename to "test_connectors_math"
 
 # ---------------------------
 # === check_connections() ===

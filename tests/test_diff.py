@@ -6,11 +6,8 @@ from typing import Dict, List, Any, Tuple
 # Import the original implementations
 from repairs_components.logic.physical_state import PhysicalState
 from repairs_components.logic.electronics.electronics_state import ElectronicsState
-from repairs_components.logic.electronics.components import (
+from repairs_components.logic.electronics.component import (
     Component,
-    Battery,
-    Resistor,
-    Wire,
 )
 
 # note: AI-generated. Was not actually run.

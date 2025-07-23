@@ -308,38 +308,53 @@ def detach_fastener_from_screwdriver(
 def attach_fastener_to_part(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
-    hole_pos: torch.Tensor,
-    hole_quat: torch.Tensor,
-    hole_depth: torch.Tensor,
-    part_entity: RigidEntity,
-    hole_is_through: torch.Tensor,
+    inserted_into_hole_pos: torch.Tensor,
+    inserted_into_hole_quat: torch.Tensor,
+    inserted_to_hole_depth: torch.Tensor,
+    inserted_into_part_entity: RigidEntity,
+    inserted_into_hole_is_through: torch.Tensor,
+    top_hole_is_through: torch.Tensor,  # only for assertion.
+    already_inserted_into_one_hole: torch.Tensor,
     top_hole_depth: torch.Tensor,
     fastener_length: torch.Tensor,
     envs_idx: torch.Tensor,
 ):
     """Note: hole pos is absolute to world frame because it is expected to be recalculated already
-    We also need to adjust for hole depth."""
+    We also need to adjust for hole depth.
+
+    Note: all arguments that are passed are passed in filtered. So equal to env_idx.shape[0] in batch shape."""
+    assert (top_hole_is_through[already_inserted_into_one_hole]).all(), (
+        "Where already inserted, must be inserted into a through hole (can't insert when the top hole is blind)."
+    )
+    assert (already_inserted_into_one_hole == (top_hole_depth > 0)).all(), (
+        "Where marked as uninserted, top hole depth must be 0, and where inserted, >0"
+    )
+    assert fastener_length > 0, "Fastener length must be positive."
+    assert inserted_to_hole_depth > 0, "Inserted to hole depth must be positive."
+
     # TODO: make fastener insertion more smooth.
     rigid_solver = scene.sim.rigid_solver
     # fastener_pos = fastener_entity.get_pos(envs_idx)
     # fastener_quat = fastener_entity.get_quat(envs_idx)
     # fastener_head_joint = np.array(fastener_entity.base_link.idx)
     fastener_joint = fastener_entity.base_link.idx
-    other_body_link = part_entity.base_link.idx
+    other_body_link = inserted_into_part_entity.base_link.idx
 
     # TODO: This needs to be updated to pass proper hole_is_through and top_hole_depth values
     # For now, assuming blind holes with no partial insertion
-    hole_is_through = torch.zeros_like(hole_depth, dtype=torch.bool)  # Assume blind holes
-    top_hole_depth = torch.zeros_like(hole_depth)  # No partial insertion
-    
+    # top_hole_depth = torch.zeros_like(hole_depth)  # No partial insertion
+
     fastener_pos = recalculate_fastener_pos_with_offset_to_hole(
-        hole_pos, hole_quat, hole_depth, hole_is_through, fastener_length, top_hole_depth
-    )  # TODO untested, may be buggy.
+        inserted_into_hole_pos,
+        inserted_into_hole_quat,
+        inserted_to_hole_depth,
+        inserted_into_hole_is_through,
+        fastener_length,
+        top_hole_depth,
+    )
 
     fastener_entity.set_pos(fastener_pos, envs_idx)
-    fastener_entity.set_quat(hole_quat, envs_idx)
-    # FIXME: not exactly the hole position!!!
-    # how to prevent insertion too deeply?
+    fastener_entity.set_quat(inserted_into_hole_quat, envs_idx)
 
     rigid_solver.add_weld_constraint(
         fastener_joint, other_body_link, envs_idx
@@ -422,7 +437,6 @@ def get_fastener_save_path_from_name(name: str, base_dir: Path) -> Path:
     return base_dir / "shared" / "fasteners" / (name + ".xml")
 
 
-
 def recalculate_fastener_pos_with_offset_to_hole(
     hole_pos: torch.Tensor,  # [B, 3]
     hole_quat: torch.Tensor,  # [B, 4]
@@ -444,7 +458,10 @@ def recalculate_fastener_pos_with_offset_to_hole(
     - in the third case, the fastener inserted into a blind hole can not be connected nowhere else.
     """
     assert hole_depth >= 0, "Hole depth must be positive."
-    assert top_hole_depth >= 0, "top_hole_depth must be positive."
+    assert top_hole_depth >= 0, "top_hole_depth must be positive or zero."
+    assert fastener_length > top_hole_depth, (
+        "fastener_length must be greater than top_hole_depth."
+    )
 
     through_hole = hole_is_through
     has_partial_insertion = top_hole_depth > 0
@@ -461,8 +478,10 @@ def recalculate_fastener_pos_with_offset_to_hole(
         # For blind holes, we need to offset the fastener position
         # The offset should be applied in the hole's coordinate system (using quaternion)
         offset = torch.zeros_like(hole_pos)
-        offset[blind_hole_no_partial, 2] = (fastener_length - hole_depth)[blind_hole_no_partial]
-        
+        offset[blind_hole_no_partial, 2] = (fastener_length - hole_depth)[
+            blind_hole_no_partial
+        ]
+
         # Apply quaternion transformation using get_connector_pos
         transformed_pos = get_connector_pos(
             hole_pos[blind_hole_no_partial],
@@ -476,7 +495,7 @@ def recalculate_fastener_pos_with_offset_to_hole(
         # For partial insertion, offset by the depth the fastener is already inserted
         offset = torch.zeros_like(hole_pos)
         offset[has_partial_insertion, 2] = top_hole_depth[has_partial_insertion]
-        
+
         # Apply quaternion transformation using get_connector_pos
         transformed_pos = get_connector_pos(
             hole_pos[has_partial_insertion],
@@ -486,6 +505,7 @@ def recalculate_fastener_pos_with_offset_to_hole(
         fastener_pos[has_partial_insertion] = transformed_pos
 
     return fastener_pos
+
 
 if __name__ == "__main__":
     show(Fastener(constraint_b_active=True).bd_geometry())
