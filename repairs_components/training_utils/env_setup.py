@@ -96,7 +96,7 @@ class EnvSetup(ABC):
                 )
 
             elif part_type == "connector":
-                assert part_name.endswith("male") or part_name.endswith("female"), (
+                assert part_name.endswith(("_male", "_female")), (
                     "Expected connector to end with male or female strings."
                 )
         # if linked_groups are specified, validate.

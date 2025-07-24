@@ -18,7 +18,9 @@ from repairs_components.geometry.connectors.models.europlug import Europlug
 def scene_with_entities():
     """Create a real Genesis scene with various entity types."""
     if not gs._initialized:
-        gs.init(logging_level="warning")
+        gs.init(
+            logging_level="error"
+        )  # note: logging_level="error" to not spam console.
 
     scene = gs.Scene(
         sim_options=gs.options.SimOptions(dt=0.01),
@@ -83,8 +85,9 @@ def scene_with_entities():
     sim_state = RepairsSimState(1)
     sim_state.tool_state[0].current_tool = Screwdriver(
         picked_up_fastener_name="0@fastener",
-        picked_up_fastener_tip_position=torch.tensor([1.0, 2.0, 3.0]),
-        has_picked_up_fastener=True,
+        picked_up_fastener_tip_position=torch.tensor([-1.0, -1.0, -1.0]),
+        # ^ note: the expected is 0,0,0, so this is predictably incorrect.
+        # it is expected to change.
     )
 
     sim_state.electronics_state[0].register(Europlug(0))
@@ -129,7 +132,7 @@ def scene_with_entities():
     return scene, entities, sim_state
 
 
-@pytest.fixture  # note: LLM-generated
+@pytest.fixture
 def sample_hole_data():
     """Sample hole data for testing."""
     starting_hole_positions = torch.tensor(
@@ -154,7 +157,7 @@ def sample_hole_data():
         == part_hole_batch.shape[0]
         == starting_hole_quats.shape[0]
         == 4
-    ), "Expected a batch of holes of shape 4."
+    ), "Expected a batch of holes of shape 4."  # just in case.
     return starting_hole_positions, starting_hole_quats, part_hole_batch
 
 
@@ -179,6 +182,7 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
         starting_hole_positions=starting_hole_positions,
         starting_hole_quats=starting_hole_quats,
         part_hole_batch=part_hole_batch,
+        device=starting_hole_positions.device,
     )
 
     # test solid bodies translated (pos and quat)
@@ -270,41 +274,54 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
         entities[female_name].get_pos(0),
         entities[female_name].get_quat(0),
         f_connector_pos_untranslated.unsqueeze(0),
-    ).squeeze(0)
+    )
     assert torch.allclose(connector_def_actual_f, connector_def_expected_f)
 
     # holes should be updated relative to bodies:
-    holes_actual = sim_state.physical_state[0].holes_positions
+    holes_actual = sim_state.physical_state[0].hole_positions
     part_pos_batched = torch.stack(
         [  # note: as hole batch!
             entities["part_1@solid"].get_pos(0),  # 0
             entities["part_1@solid"].get_pos(0),  # 0
             entities["part_2@solid"].get_pos(0),  # 1
             entities["part_2@solid"].get_pos(0),  # 1
-        ]
+        ],
+        dim=1,
     )
-    holes_expected = get_connector_pos(
-        part_pos_batched,
-        entities["part_1@solid"].get_quat(0),
-        starting_hole_positions,
-    )
-    assert torch.allclose(holes_actual, holes_expected)
-    # quats of holes should be updated.
-    holes_actual_quats = sim_state.physical_state[0].holes_quats
-    part_quats_batched = torch.stack(
+    part_quat_batched = torch.stack(
         [
             entities["part_1@solid"].get_quat(0),
             entities["part_1@solid"].get_quat(0),
             entities["part_2@solid"].get_quat(0),
             entities["part_2@solid"].get_quat(0),
-        ]
+        ],
+        dim=1,
     )
-    holes_quats_batched = quat_multiply(starting_hole_quats, part_quats_batched)
-    assert torch.allclose(holes_actual_quats, holes_quats_batched)
+    holes_expected = get_connector_pos(
+        part_pos_batched,
+        part_quat_batched,
+        starting_hole_positions.unsqueeze(0),
+    )
+    assert torch.allclose(holes_actual, holes_expected)
+    # quats of holes should be updated.
+    holes_actual_quats = sim_state.physical_state[0].hole_quats
+    holes_quats_expected = quat_multiply(starting_hole_quats, part_quat_batched)
+    assert torch.allclose(holes_actual_quats, holes_quats_expected)
 
     # fastener tip should be updated.
-    fastener_tip_actual = sim_state.physical_state[0].fastener_tip_positions
-    fastener_tip_expected = entities["0@fastener"].get_pos(0).squeeze(0)
+    assert isinstance(sim_state.tool_state[0].current_tool, Screwdriver), (
+        "The tool shouldn't have changed during execution. Got "
+        + str(type(sim_state.tool_state[0].current_tool))
+    )
+    fastener_tip_actual = sim_state.tool_state[
+        0
+    ].current_tool.picked_up_fastener_tip_position
+    tip_relative_to_center = Fastener.get_tip_pos_relative_to_center().unsqueeze(0)
+    fastener_tip_expected = get_connector_pos(
+        entities["0@fastener"].get_pos(0),
+        entities["0@fastener"].get_quat(0),
+        tip_relative_to_center,
+    ).squeeze(0)
     # roughly there.
     assert torch.allclose(fastener_tip_actual, fastener_tip_expected, atol=0.1), (
         f"Fastener tip position in state {fastener_tip_actual} != expected {fastener_tip_expected}"

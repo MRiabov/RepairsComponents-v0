@@ -20,7 +20,9 @@ from repairs_components.processing.geom_utils import get_connector_pos
 def scene_franka_and_two_cubes():
     ########################## init ##########################
     if not gs._initialized:
-        gs.init(backend=gs.gpu, logging_level="warning")
+        gs.init(
+            backend=gs.gpu, logging_level="error"
+        )  # note: logging_level="error" to not spam console.
 
     ########################## create a scene ##########################
     scene = gs.Scene(
