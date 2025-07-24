@@ -261,8 +261,6 @@ def translate_compound_to_sim_state(
         "All compounds must have children."
     )
     sim_state = RepairsSimState(batch_dim=len(batch_b123d_compounds))
-    all_male_connector_def_positions = []
-    all_female_connector_def_positions = []
 
     for env_idx in range(len(batch_b123d_compounds)):
         b123d_compound = batch_b123d_compounds[env_idx]
@@ -280,8 +278,6 @@ def translate_compound_to_sim_state(
             f"\nAABBs of all parts: { {p.label: p.bounding_box() for p in b123d_compound.leaves} }"
         )
         part_dict = {part.label: part for part in b123d_compound.leaves}
-        male_connector_def_positions = {}  # not tensor because we will require labels.
-        female_connector_def_positions = {}  # not tensor because we will require labels.
 
         for part in (
             b123d_compound.leaves
@@ -318,12 +314,6 @@ def translate_compound_to_sim_state(
                     fixed=fixed,  # FIXME: orientation is as euler but I need quat!
                     connector_position_relative_to_center=connector_position_relative_to_center,
                 )
-                # get the connector def position
-                connector_def = part_dict[part_name + "@connector_def"]
-                connector_def_position = torch.tensor(
-                    tuple(connector_def.center(CenterOf.BOUNDING_BOX))
-                )  # ^beware!!! this must be translated as in children translation.
-
             elif part_type == "fastener":  # collect constraints, get labels of bodies,
                 # collect constraints (in build123d named joints)
                 assert "fastener_joint_a" in part.joints, (
@@ -376,27 +366,35 @@ def translate_compound_to_sim_state(
                     f"Part type {part_type} not implemented. Raise from part.label: {part.label}"
                 )
 
-        # FIXME: these are currently unupdated. get them from physical state instead.
-        raise NotImplementedError("Connector def positions are currently unupdated.")
-        all_male_connector_def_positions.append(male_connector_def_positions)
-        all_female_connector_def_positions.append(female_connector_def_positions)
-
     # NOTE: connectors and connector_defs other solid bodies are not encoded in electronics, only functional components and their connections are encoded.
     # so check_connections will remain, however it will simply be an intermediate before the actual export graph.
     # alternatively (!) connectors can be encoded as edges in the non-export graph,
     # however, during export they will be removed and component nodes will be connected
     # directly. # or should I? why not encode connectors? the model will need the type of connectors, I presume.
 
-    # if the last is non-empty all are non-empty...
-    if all_male_connector_def_positions[-1] and all_female_connector_def_positions[-1]:
-        all_male_connector_def_positions = torch.stack(all_male_connector_def_positions)
-        all_female_connector_def_positions = torch.stack(
-            all_female_connector_def_positions
-        )
+    # if the any is non-empty all are non-empty...
+    if (
+        sim_state.physical_state[0].male_connector_positions.size != 0  # non-empty
+        and sim_state.physical_state[0].female_connector_positions.size != 0
+    ):
+        # work over batch of env_id and batch of keys...
+        male_connector_positions_all = {}
+        female_connector_positions_all = {}
+        for k in sim_state.physical_state[0].male_connector_positions.keys():
+            this_male_connector_positions = torch.stack(
+                [ps.male_connector_positions[k] for ps in sim_state.physical_state]
+            )
+            this_female_connector_positions = torch.stack(
+                [ps.female_connector_positions[k] for ps in sim_state.physical_state]
+            )
+            male_connector_positions_all[k] = this_male_connector_positions
+            female_connector_positions_all[k] = this_female_connector_positions
+
         connections = connectors.check_connections(
-            all_male_connector_def_positions, all_female_connector_def_positions
+            male_connector_positions_all, female_connector_positions_all
         )
         for env_idx, connections in enumerate(connections):
+            sim_state.electronics_state[env_idx].clear_connections()
             for connection_a, connection_b in connections:
                 sim_state.electronics_state[env_idx].connect(connection_a, connection_b)
 

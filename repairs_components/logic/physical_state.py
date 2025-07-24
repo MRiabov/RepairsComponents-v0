@@ -156,6 +156,11 @@ class PhysicalState:
             else:
                 self.body_indices = indices
                 self.inverse_body_indices = {v: k for k, v in indices.items()}
+            self.male_connector_positions = {}
+            self.female_connector_positions = {}
+            # ^note: these damn better be in batched version, with their in_sim_id corresponding to position in tensor.
+            # that will be during batch refactor.
+
             # self.fastener = {}
         else:
             assert indices is not None, "Indices must be provided if graph is not None"
@@ -252,11 +257,7 @@ class PhysicalState:
         assert name.endswith(("@solid", "@connector", "@fixed_solid")), (
             f"Body name must end with @solid, @connector or @fixed_solid. Got {name}"
         )  # note: fasteners don't go here, they go in `register_fastener`.
-        # assert position.shape == (3,) and rotation.shape == (4,) # was a tensor.
-        assert len(position) == 3, (
-            f"Position must be 3D vector, got {position} "
-            f"Rotation must be 3D vector, got {rotation}. Note: transformation to quat already happens in this function."
-        )
+        assert len(position) == 3, f"Position must be 3D vector, got {position}"
         if not _expect_unnormalized_coordinates:
             max_bounds = torch.tensor([640, 640, 640], device=self.device)
             min_bounds = torch.tensor([0, 0, 0], device=self.device)
@@ -268,10 +269,11 @@ class PhysicalState:
         else:  # else to genesis (note: flip the var name to normalized coords.)
             max_bounds = torch.tensor([0.32, 0.32, 0.64], device=self.device)
             min_bounds = torch.tensor([-0.32, -0.32, 0.0], device=self.device)
+            position_sim = torch.tensor(position, device=self.device).unsqueeze(0)
         assert (position_sim >= min_bounds).all() and (
             position_sim <= max_bounds
         ).all(), (
-            f"Expected register position to be in [{min_bounds.tolist()}, {max_bounds.tolist()}], got {list(position)}"
+            f"Expected register position to be in [{min_bounds.tolist()}, {max_bounds.tolist()}], got {list(position_sim)} at body {name}"
         )
         if not rot_as_quat:
             assert len(rotation) == 3, (
@@ -280,6 +282,7 @@ class PhysicalState:
             rotation = euler_deg_to_quat_wxyz(torch.tensor(rotation))
         else:
             rotation = sanitize_quaternion(rotation)
+        rotation = rotation.to(self.device).unsqueeze(0)
 
         idx = len(self.body_indices)
         self.body_indices[name] = idx
@@ -289,7 +292,7 @@ class PhysicalState:
         self.graph = self.graph.to(self.device)
 
         self.graph.position = torch.cat([position_sim, self.graph.position], dim=0)
-        self.graph.quat = torch.cat([self.graph.quat, rotation.unsqueeze(0)], dim=0)
+        self.graph.quat = torch.cat([self.graph.quat, rotation], dim=0)
         self.graph.count_fasteners_held = torch.cat(
             [
                 self.graph.count_fasteners_held,
@@ -336,6 +339,7 @@ class PhysicalState:
         ).all(), (
             f"Position {position} out of bounds. Expected [-0.32, 0.32] for update."
         )
+        pos_tensor = pos_tensor
         rotation = sanitize_quaternion(rotation).to(device=self.device)
         if self.graph.fixed[self.body_indices[name]]:
             # assert torch.isclose(
@@ -355,7 +359,10 @@ class PhysicalState:
                 f"Connector {name} must have a connector position relative to center."
             )
             self._update_connector_def_pos(
-                name, pos_tensor, rotation, connector_position_relative_to_center
+                name,
+                pos_tensor.unsqueeze(0),
+                rotation.unsqueeze(0),
+                connector_position_relative_to_center,
             )
 
     def register_fastener(self, fastener: Fastener):
@@ -661,8 +668,16 @@ class PhysicalState:
             f"Likely dimension error: it is unlikely that a connector is further than 5m from the center of the "
             f"part. Failed at {name} with position {connector_position_relative_to_center}"
         )
+        assert position_sim.ndim == 2 and rotation.ndim == 2, (
+            f"Position and rotation must be 2D tensors, got {position_sim.shape} and {rotation.shape}"
+        )  # 2dim because it's just for convenience.
+        assert connector_position_relative_to_center.ndim == 1, (
+            f"Connector position relative to center must be 1D tensor, got {connector_position_relative_to_center.shape}"
+        )
         connector_pos = get_connector_pos(
-            position_sim, rotation, connector_position_relative_to_center
+            position_sim,
+            rotation,
+            connector_position_relative_to_center.to(self.device).unsqueeze(0),
         )
         if name.endswith("_male@connector"):
             self.male_connector_positions[name] = connector_pos

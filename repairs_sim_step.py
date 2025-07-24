@@ -4,7 +4,7 @@ import torch
 from genesis.engine.entities import RigidEntity
 from torch_geometric.data import Data
 
-from repairs_components.geometry.connectors.connectors import check_connections
+
 from repairs_components.geometry.fasteners import (
     Fastener,
     attach_fastener_to_screwdriver,
@@ -99,29 +99,13 @@ def step_repairs(
 def step_electronics(
     current_sim_state: RepairsSimState,
 ):
-    "Step electronics attachments: compute, clear, and apply if present"
-    if current_sim_state.has_electronics:
-        male_connector_positions = {}
-        female_connector_positions = {}
-        for k in current_sim_state.physical_state[0].male_connector_positions.keys():
-            male_connector_positions[k] = current_sim_state.physical_state[
-                0
-            ].male_connector_positions[k]
-            female_connector_positions[k] = current_sim_state.physical_state[
-                0
-            ].female_connector_positions[k]
-        # note that it was already batched. I've reverted now because of better(?) syntax.
-
-        electronics_attachments_batch = check_connections(
-            male_connector_positions, female_connector_positions
-        )
-        # clear all previous connections
-        for es in current_sim_state.electronics_state:
-            es.clear_connections()
-        # apply batch attachments [batch_idx, male_idx, female_idx]
-        for b, m, f in electronics_attachments_batch.tolist():
-            current_sim_state.electronics_state[b].connect(m, f)
-
+    """Step electronics attachments: No-op since connectivity is handled during translation phase.
+    
+    Electronics connections are already established in translate_compound_to_sim_state() 
+    in translation.py, making this function redundant.
+    """
+    # Electronics connectivity is already handled during the translation phase
+    # in translate_compound_to_sim_state(), so this function is a no-op
     return current_sim_state
 
 
@@ -334,6 +318,10 @@ def step_screw_in_or_out(
                     already_inserted_hole_id
                 ],
                 envs_idx=torch.tensor([env_id]),
+                already_inserted_into_one_hole=already_inserted_hole_id != -1,
+                top_hole_depth=physical_state[env_id].hole_depths[
+                    already_inserted_hole_id
+                ],
             )
             # future: assert (prevent) more than two connections.
 
@@ -441,7 +429,7 @@ def step_fastener_pick_up_release(
         fastener_positions = (
             torch.stack(
                 [
-                    current_sim_state.physical_state[i].graph.fasteners_loc
+                    current_sim_state.physical_state[i].graph.fasteners_pos
                     for i in desired_pick_up_indices
                 ]
             )

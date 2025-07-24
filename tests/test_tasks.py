@@ -25,13 +25,14 @@ def test_perturb_initial_state(bd_test_compound):
     task = AssembleTask()
     env_size = (640, 640, 640)  # 50cm x 50cm x 50cm environment
 
-    # Run the disassembly
-    new_compound = task.perturb_initial_state(bd_test_compound, env_size)
+    for i in range(10):  # 10 test cases to catch errors.
+        # Run the disassembly
+        new_compound = task.perturb_initial_state(bd_test_compound, env_size)
 
-    assert (
-        np.array(new_compound.bounding_box().size.to_tuple()) < np.array(env_size)
-    ).all(), "Parts are not within bounds."
-    filtered_intersection_check(new_compound, assertion=True)
+        assert (
+            np.array(new_compound.bounding_box().size.to_tuple()) < np.array(env_size)
+        ).all(), "Parts are not within bounds."
+        filtered_intersection_check(new_compound, assertion=True)
 
 
 def test_stable_orientation():
