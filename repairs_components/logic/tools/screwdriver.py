@@ -10,8 +10,12 @@ from build123d import *  # noqa: F403
 class Screwdriver(Tool):
     id: int = ToolsEnum.SCREWDRIVER.value
     picked_up_fastener_name: str | None = None
-    has_picked_up_fastener: bool = False
     picked_up_fastener_tip_position: torch.Tensor | None = None
+
+    @property
+    def has_picked_up_fastener(self):
+        # if batch refactor, rename the picked_up_fastener_name to ID and bool check.
+        return self.picked_up_fastener_name is not None
 
     @staticmethod
     def tool_grip_position():  # TODO rename to uppercase and make var.
@@ -73,7 +77,6 @@ class Screwdriver(Tool):
         return base_dir / f"shared/tools/screwdriver.{file_extension}"
 
     def on_tool_release(self):
-        self.has_picked_up_fastener = False
         self.picked_up_fastener_name = None
         self.picked_up_fastener_tip_position = None
 

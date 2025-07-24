@@ -282,7 +282,6 @@ def attach_fastener_to_screwdriver(
     tool_state_to_update.picked_up_fastener_name = Fastener.fastener_name_in_simulation(
         fastener_id
     )
-    tool_state_to_update.has_picked_up_fastener = True
 
 
 def detach_fastener_from_screwdriver(
@@ -303,7 +302,6 @@ def detach_fastener_from_screwdriver(
     assert isinstance(tool_state_to_update, Screwdriver), "Tool must be a Screwdriver"
     tool_state_to_update.picked_up_fastener_name = None
     tool_state_to_update.picked_up_fastener_tip_position = None
-    tool_state_to_update.has_picked_up_fastener = False
 
 
 def attach_fastener_to_part(

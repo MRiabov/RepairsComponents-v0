@@ -29,7 +29,11 @@ import trimesh
 
 
 class Connector(ElectricalComponent):
-    _connector_def_size = 0.3  # vis only
+    in_sim_id: int
+    "The connector id in the simulation."
+    # NOTE: this should correspond to the physical sim state connector_pos male/female tensors. It currently does not. (P2)
+
+    _connector_def_size: float = 0.3  # vis only
 
     def __init__(self, in_sim_id: int):
         super().__init__(self.get_name(in_sim_id, None))
@@ -309,20 +313,33 @@ def check_connections(
     assert len(male_connectors) == len(female_connectors) > 0, (
         f"Number of male and female connectors must be equal and greater than 0. Got: {len(male_connectors)} and {len(female_connectors)}"
     )
+    B = list(male_connectors.values())[0].shape[0]
 
     male_keys = list(male_connectors.keys())
     female_keys = list(female_connectors.keys())
 
-    male_vals = torch.stack(list(male_connectors.values()), dim=1)  # [B, M, 3]
-    female_vals = torch.stack(list(female_connectors.values()), dim=1)  # [B, F, 3]
+    male_tensors = []
+    for tensor in male_connectors.values():
+        assert tensor.shape == (B, 3), f"Expected [B, 3] tensor, got {tensor.shape}"
+        male_tensors.append(tensor)
 
-    D = torch.cdist(male_vals, female_vals, p=2)  # [B, M, F]
+    female_tensors = []
+    for tensor in female_connectors.values():
+        assert tensor.shape == (B, 3), f"Expected [B, 3] tensor, got {tensor.shape}"
+        female_tensors.append(tensor)
+
+    # Stack and transpose to get [B, M, 3] and [B, F, 3] for torch.cdist
+    male_stacked = torch.stack(male_tensors).transpose(0, 1)  # [M, B, 3] -> [B, M, 3]
+    female_stacked = torch.stack(female_tensors).transpose(0, 1)  # [F, B, 3] -> [B, F, 3]
+    
+    D = torch.cdist(male_stacked, female_stacked, p=2)  # [B, M, F]
     mask = D < connection_threshold
     indices = mask.nonzero(as_tuple=False)  # [N, 3] with (batch, m_idx, f_idx)
 
-    result: list[list[tuple[str, str]]] = [[] for _ in range(male_vals.shape[0])]
-    for b, m_idx, f_idx in indices.tolist():
-        result[b].append((male_keys[m_idx], female_keys[f_idx]))
+    result: list[list[tuple[str, str]]] = [[] for _ in range(B)]
+    if indices.shape[0] > 0:
+        for b, m_idx, f_idx in indices.tolist():
+            result[b].append((male_keys[m_idx], female_keys[f_idx]))
     return result
 
 
