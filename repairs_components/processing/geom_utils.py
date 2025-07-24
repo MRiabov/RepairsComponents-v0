@@ -136,3 +136,8 @@ def euler_deg_to_quat_wxyz(euler_deg: torch.Tensor) -> torch.Tensor:
 
     quat = torch.stack([w, x, y, z], dim=-1)
     return quat / quat.norm(dim=-1, keepdim=True)
+
+
+def quaternion_delta(q_from: torch.Tensor, q_to: torch.Tensor) -> torch.Tensor:
+    """Returns the quaternion that rotates *q_from* into *q_to* (element-wise)."""
+    return quat_multiply(q_to, quat_conjugate(q_from))

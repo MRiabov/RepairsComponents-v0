@@ -16,8 +16,10 @@ from repairs_components.geometry.fasteners import Fastener
 from torch_geometric.data import Data
 from dataclasses import dataclass, field
 from repairs_components.processing.geom_utils import (
+    are_quats_within_angle,
     euler_deg_to_quat_wxyz,
     get_connector_pos,
+    quaternion_delta,
     sanitize_quaternion,
 )
 
@@ -668,39 +670,6 @@ class PhysicalState:
             self.female_connector_positions[name] = connector_pos
 
 
-def _quaternion_conjugate(q: torch.Tensor) -> torch.Tensor:
-    """Conjugate of a quaternion (w, x, y, z)."""
-    w, xyz = q[..., :1], q[..., 1:]
-    return torch.cat([w, -xyz], dim=-1)
-
-
-# FIXME: quat_conj, quat_multiply, quat_angle_diff are equally implemented in `translation.py`
-def _quaternion_multiply(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
-    """Hamilton product of two quaternions.  Inputs (...,4) → output (...,4)."""
-    w1, x1, y1, z1 = q1.unbind(-1)
-    w2, x2, y2, z2 = q2.unbind(-1)
-    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-    return torch.stack([w, x, y, z], dim=-1)
-
-
-def _quaternion_delta(q_from: torch.Tensor, q_to: torch.Tensor) -> torch.Tensor:
-    """Returns the quaternion that rotates *q_from* into *q_to* (element-wise)."""
-    return _quaternion_multiply(q_to, _quaternion_conjugate(q_from))
-
-
-def _quaternion_angle_diff(q1: torch.Tensor, q2: torch.Tensor) -> torch.Tensor:
-    """Angular distance between two quaternions, degrees."""
-    dot = torch.sum(q1 * q2, dim=-1).clamp(-1.0, 1.0).abs()
-    angle_rad = 2.0 * torch.acos(dot)
-    return torch.rad2deg(angle_rad)
-    # q1, q2: [N, 4]
-    dot = torch.sum(q1 * q2, dim=1).clamp(-1.0, 1.0).abs()
-    return 2 * torch.acos(dot).rad2deg()
-
-
 def _diff_node_features(
     data_a: Data,
     data_b: Data,
@@ -716,9 +685,10 @@ def _diff_node_features(
     pos_diff[pos_mask] = pos_raw[pos_mask]
 
     # Quaternion diff
-    quat_delta = _quaternion_delta(data_a.quat, data_b.quat)  # [N,4]
-    ang_deg = _quaternion_angle_diff(data_a.quat, data_b.quat)  # [N]
-    rot_mask = ang_deg > deg_threshold  # [N]
+    quat_delta = quaternion_delta(data_a.quat, data_b.quat)  # [N,4]
+    rot_mask = ~are_quats_within_angle(
+        data_a.quat, data_b.quat, deg_threshold, (5)
+    )  # [N]
     quat_diff = torch.zeros_like(quat_delta)
     quat_diff[rot_mask] = quat_delta[rot_mask]
 
