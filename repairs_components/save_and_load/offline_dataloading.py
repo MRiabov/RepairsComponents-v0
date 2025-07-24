@@ -317,6 +317,9 @@ def check_if_data_exists(
         holes_files = [
             holes_dir / "starting_hole_positions.pt",
             holes_dir / "starting_hole_quats.pt",
+            holes_dir / "hole_depth.pt",
+            holes_dir / "part_hole_batch.pt",
+            holes_dir / "hole_is_through.pt",
         ]
         # Check all
         if not all(

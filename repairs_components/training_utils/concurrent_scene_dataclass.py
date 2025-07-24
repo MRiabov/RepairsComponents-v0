@@ -408,7 +408,7 @@ def split_scene_config(scene_config: ConcurrentSceneData):
                 reward_history=RewardHistory(batch_dim=1),
                 step_count=scene_config.step_count[i],
                 task_ids=scene_config.task_ids[i : i + 1],
-                #holes are uniform throughout the batch
+                # holes are uniform throughout the batch
                 starting_hole_positions=scene_config.starting_hole_positions,
                 starting_hole_quats=scene_config.starting_hole_quats,
                 hole_depth=scene_config.hole_depth,

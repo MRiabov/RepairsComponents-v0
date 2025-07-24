@@ -88,6 +88,9 @@ def save_concurrent_scene_metadata(
     # hole - persist tensors
     torch.save(data.starting_hole_positions, scene_dir / "starting_hole_positions.pt")
     torch.save(data.starting_hole_quats, scene_dir / "starting_hole_quats.pt")
+    torch.save(data.hole_depth, scene_dir / "hole_depth.pt")
+    torch.save(data.part_hole_batch, scene_dir / "part_hole_batch.pt")
+    torch.save(data.hole_is_through, scene_dir / "hole_is_through.pt")
 
     # save metadata
     metadata = {

@@ -106,6 +106,7 @@ def execute_straight_line_trajectory(
 
     # print(franka.get_links_pos()[:, 7])  # hand.
 
+
 def execute_planned_path(
     franka: RigidEntity,
     scene: gs.Scene,
@@ -136,15 +137,14 @@ def execute_planned_path(
             for camera in cameras:
                 camera.render()
 
-    #dry run not added (?)
-    
+    # dry run not added (?)
+
     if render:
         cameras = scene.visualizer.cameras
         for camera in cameras:
             camera.stop_recording(
                 save_to_filename="test_tool_genesis_bug_repro.mp4",
             )
-
 
 
 # attempt to convert to ti kernel (failed - ti kernels don't support python/torch operations.)

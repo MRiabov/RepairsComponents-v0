@@ -242,13 +242,13 @@ def test_recalculate_fastener_pos_with_offset_to_hole_blind_hole_returns_offset_
     )
     # With identity quaternion, get_connector_pos applies no rotation, just addition
     # So [0, 0, 10] becomes [0, 0, 10] and is added to hole_pos
-    expected_offset = fastener_length[0] - hole_depth[0]  # get_connector_pos no longer negates
+    expected_offset = (
+        fastener_length[0] - hole_depth[0]
+    )  # get_connector_pos no longer negates
     assert torch.isclose(
         fastener_pos,
         hole_pos + torch.tensor([0.0, 0.0, expected_offset]),
-    ).all(), (
-        "fastener_pos should be hole_pos + (fastener_length - hole_depth)"
-    )
+    ).all(), "fastener_pos should be hole_pos + (fastener_length - hole_depth)"
 
 
 def test_recalculate_fastener_pos_with_offset_to_hole_partial_insertion_returns_offset_pos():
@@ -287,9 +287,7 @@ def test_recalculate_fastener_pos_with_offset_to_hole_partial_insertion_returns_
     assert torch.isclose(
         fastener_pos_through,
         hole_pos + torch.tensor([0.0, 0.0, expected_offset]),
-    ).all(), (
-        "fastener_pos should be hole_pos + top_hole_depth (same as blind case)"
-    )
+    ).all(), "fastener_pos should be hole_pos + top_hole_depth (same as blind case)"
 
 
 def test_recalculate_fastener_pos_with_offset_to_hole_with_quaternion():
@@ -299,22 +297,32 @@ def test_recalculate_fastener_pos_with_offset_to_hole_with_quaternion():
     hole_pos = torch.tensor([[1.0, 2.0, 3.0]])
     hole_depth = torch.tensor([5.0])
     fastener_length = torch.tensor([15.0])
-    
+
     # Case 1: Through hole without partial insertion - should return hole_pos (no offset)
     hole_is_through = torch.tensor([True])
     top_hole_depth = torch.tensor([0.0])
     fastener_pos_through = recalculate_fastener_pos_with_offset_to_hole(
-        hole_pos, hole_quat, hole_depth, hole_is_through, fastener_length, top_hole_depth
+        hole_pos,
+        hole_quat,
+        hole_depth,
+        hole_is_through,
+        fastener_length,
+        top_hole_depth,
     )
     assert torch.isclose(fastener_pos_through, hole_pos).all(), (
         "Through hole without partial insertion should return hole_pos exactly"
     )
-    
+
     # Case 2: Blind hole without partial insertion - should apply quaternion transformation
     hole_is_through = torch.tensor([False])
     top_hole_depth = torch.tensor([0.0])
     fastener_pos_blind = recalculate_fastener_pos_with_offset_to_hole(
-        hole_pos, hole_quat, hole_depth, hole_is_through, fastener_length, top_hole_depth
+        hole_pos,
+        hole_quat,
+        hole_depth,
+        hole_is_through,
+        fastener_length,
+        top_hole_depth,
     )
     # Expected: get_connector_pos(hole_pos, hole_quat, [0, 0, fastener_length - hole_depth])
     # get_connector_pos no longer negates input: [0, 0, 10] stays [0, 0, 10]
@@ -324,12 +332,17 @@ def test_recalculate_fastener_pos_with_offset_to_hole_with_quaternion():
     assert torch.isclose(fastener_pos_blind, expected_blind, atol=1e-3).all(), (
         f"Blind hole should apply quaternion transformation. Got {fastener_pos_blind}, expected {expected_blind}"
     )
-    
+
     # Case 3: Partial insertion (through hole) - should apply quaternion transformation
     hole_is_through = torch.tensor([True])
     top_hole_depth = torch.tensor([7.0])
     fastener_pos_partial = recalculate_fastener_pos_with_offset_to_hole(
-        hole_pos, hole_quat, hole_depth, hole_is_through, fastener_length, top_hole_depth
+        hole_pos,
+        hole_quat,
+        hole_depth,
+        hole_is_through,
+        fastener_length,
+        top_hole_depth,
     )
     # Expected: get_connector_pos(hole_pos, hole_quat, [0, 0, top_hole_depth])
     # get_connector_pos no longer negates input: [0, 0, 7] stays [0, 0, 7]
@@ -339,4 +352,3 @@ def test_recalculate_fastener_pos_with_offset_to_hole_with_quaternion():
     assert torch.isclose(fastener_pos_partial, expected_partial, atol=1e-3).all(), (
         f"Partial insertion should apply quaternion transformation. Got {fastener_pos_partial}, expected {expected_partial}"
     )
-

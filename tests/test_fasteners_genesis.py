@@ -262,8 +262,12 @@ def test_attach_and_detach_fastener_to_part(
         already_inserted_into_one_hole=torch.tensor([False]),
     )
     # For blind hole without partial insertion, fastener should be offset by (fastener_length - hole_depth)
-    expected_fastener_pos = hole_pos[0] + torch.tensor([0.0, 0.0, 0.015 - 0.005])  # fastener_length - hole_depth
-    assert torch.isclose(entities["0@fastener"].get_pos(0), expected_fastener_pos).all(), (
+    expected_fastener_pos = hole_pos[0] + torch.tensor(
+        [0.0, 0.0, 0.015 - 0.005]
+    )  # fastener_length - hole_depth
+    assert torch.isclose(
+        entities["0@fastener"].get_pos(0), expected_fastener_pos
+    ).all(), (
         "Fastener cube should be attached to part at offset position for blind hole"
     )
     assert torch.isclose(entities["0@fastener"].get_quat(0), hole_quat[0]).all(), (
@@ -291,9 +295,7 @@ def test_attach_and_detach_fastener_to_part(
 
     assert torch.isclose(
         entities["screwdriver@tool"].get_pos(0), screwdriver_pos[0]
-    ).all(), (
-        "Screwdriver cube should be at the position it was set to"
-    )
+    ).all(), "Screwdriver cube should be at the position it was set to"
     assert torch.isclose(
         entities["screwdriver@tool"].get_quat(0),
         entities["screwdriver@tool"].get_quat(0),
@@ -310,9 +312,7 @@ def test_attach_and_detach_fastener_to_part(
     )
     assert torch.isclose(
         entities["0@fastener"].get_pos(0), expected_fastener_pos
-    ).all(), (
-        "Fastener cube should remain attached to part, not move with screwdriver"
-    )
+    ).all(), "Fastener cube should remain attached to part, not move with screwdriver"
     assert torch.isclose(
         entities["0@fastener"].get_quat(0), entities["screwdriver@tool"].get_quat(0)
     ).all(), (
