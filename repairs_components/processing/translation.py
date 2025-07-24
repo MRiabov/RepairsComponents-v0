@@ -186,7 +186,9 @@ def translate_genesis_to_python(  # translate to sim state, really.
             for env_id in range(n_envs):
                 relative_connector_pos = None
                 if part_type == "connector":
-                    male = part_name.endswith("male")
+                    male = part_name.endswith(
+                        "_male"
+                    )  # dev note: _male, not male. is passes for female otherwise.
                     connector = Connector.from_name(part_name)
                     if male:
                         relative_connector_pos = (
@@ -218,28 +220,28 @@ def translate_genesis_to_python(  # translate to sim state, really.
                     fastener_quat[env_id]
                 )
 
-        # handle picked up fastener (tip)
-        # fastener_tip_pos
-        for env_id in range(n_envs):
-            if (
-                isinstance(sim_state.tool_state[env_id].current_tool, Screwdriver)
-                and sim_state.tool_state[env_id].current_tool.has_picked_up_fastener
-            ):
-                fastener_name = sim_state.tool_state[
-                    env_id
-                ].current_tool.picked_up_fastener_name
-                assert fastener_name is not None
-                fastener_pos = gs_entities[fastener_name].get_pos(env_id)
-                fastener_quat = gs_entities[fastener_name].get_quat(env_id)
-                # get tip pos
-                tip_pos = get_connector_pos(
-                    fastener_pos,
-                    fastener_quat,
-                    Fastener.get_tip_pos_relative_to_center().unsqueeze(0),
-                )
-                sim_state.tool_state[
-                    env_id
-                ].current_tool.picked_up_tip_position = tip_pos
+    # handle picked up fastener (tip)
+    # fastener_tip_pos
+    for env_id in range(n_envs):
+        if (
+            isinstance(sim_state.tool_state[env_id].current_tool, Screwdriver)
+            and sim_state.tool_state[env_id].current_tool.has_picked_up_fastener
+        ):
+            fastener_name = sim_state.tool_state[
+                env_id
+            ].current_tool.picked_up_fastener_name
+            assert fastener_name is not None
+            fastener_pos = gs_entities[fastener_name].get_pos(env_id)
+            fastener_quat = gs_entities[fastener_name].get_quat(env_id)
+            # get tip pos
+            tip_pos = get_connector_pos(
+                fastener_pos,
+                fastener_quat,
+                Fastener.get_tip_pos_relative_to_center().unsqueeze(0),
+            )
+            sim_state.tool_state[
+                env_id
+            ].current_tool.picked_up_fastener_tip_position = tip_pos
 
     # update holes
     sim_state = update_hole_locs(
@@ -299,11 +301,11 @@ def translate_compound_to_sim_state(
                 if part_type == "connector":
                     # get the connector def position
                     connector = Connector.from_name(part.label)
-                    if part_name.endswith("male"):
+                    if part_name.endswith("_male"):
                         connector_position_relative_to_center = torch.tensor(
                             connector.connector_pos_relative_to_center_male / 1000
                         )
-                    elif part_name.endswith("female"):
+                    elif part_name.endswith("_female"):
                         connector_position_relative_to_center = torch.tensor(
                             connector.connector_pos_relative_to_center_female / 1000
                         )
@@ -359,7 +361,6 @@ def translate_compound_to_sim_state(
                     initial_body_b=initial_body_b.label
                     if constraint_b_active
                     else None,
-                    constraint_b_active=constraint_b_active,
                 )
                 sim_state.physical_state[env_idx].register_fastener(fastener)
 
@@ -374,6 +375,9 @@ def translate_compound_to_sim_state(
                 raise NotImplementedError(
                     f"Part type {part_type} not implemented. Raise from part.label: {part.label}"
                 )
+
+        # FIXME: these are currently unupdated. get them from physical state instead.
+        raise NotImplementedError("Connector def positions are currently unupdated.")
         all_male_connector_def_positions.append(male_connector_def_positions)
         all_female_connector_def_positions.append(female_connector_def_positions)
 
