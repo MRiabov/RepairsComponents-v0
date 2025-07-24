@@ -26,7 +26,6 @@ class Fastener(Component):
 
     def __init__(
         self,
-        constraint_b_active: bool,
         initial_body_a: str
         | None = None,  # how will it be constrained in case of hole?
         initial_body_b: str | None = None,
@@ -52,7 +51,9 @@ class Fastener(Component):
         self.head_diameter = head_diameter
         self.head_height = head_height
         # self.a_constraint_active = True # note: a_constraint_active is always True now.
-        self.b_constraint_active = constraint_b_active
+        self.b_constraint_active = (
+            initial_body_b is not None
+        )  # deprecated, for backwards compatibility
         self.name = get_fastener_singleton_name(self.diameter, self.length)
 
     def get_mjcf(self):

@@ -186,14 +186,14 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
         position=part_with_holes_1_pos,
         rotation=entities["part_with_holes_1@solid"].get_quat(0).squeeze(0),
         rot_as_quat=True,
-        _register_during_init=False,
+        _expect_unnormalized_coordinates=False,
     )
     physical_state.register_body(
         "part_with_holes_2@solid",
         position=part_with_holes_2_pos,
         rotation=entities["part_with_holes_2@solid"].get_quat(0).squeeze(0),
         rot_as_quat=True,
-        _register_during_init=False,
+        _expect_unnormalized_coordinates=False,
     )
     # expected shape
     physical_state.hole_positions = hole_positions
@@ -215,14 +215,14 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
         position=desired_part_with_holes_1_pos,
         rotation=(0, 0, 0, 1),
         rot_as_quat=True,
-        _register_during_init=False,
+        _expect_unnormalized_coordinates=False,
     )
     desired_physical_state.register_body(
         "part_with_holes_2@solid",
         position=desired_part_with_holes_2_pos,
         rotation=(0, 0, 0, 1),
         rot_as_quat=True,
-        _register_during_init=False,
+        _expect_unnormalized_coordinates=False,
     )
 
     return scene, entities, repairs_sim_state, desired_sim_state
@@ -599,7 +599,7 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
     fastener_entity.set_quat(fastener_initial_quat.unsqueeze(0))
 
     # Update fastener position in sim state
-    repairs_sim_state.physical_state[0].graph.fasteners_loc = torch.tensor(
+    repairs_sim_state.physical_state[0].graph.fasteners_pos = torch.tensor(
         [[0.2, 0.0, 0.02]]
     )
 

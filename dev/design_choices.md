@@ -35,7 +35,9 @@ how to know which fasteners need connection checks?
 
 %%shit, how many bugs are left to fix?
 
-
+## Electronics 
+Electronics is encoded as a graph of 1. model id, 2. component id, 3. according solid body (recorded in mechanical state). Electronics graph is meant to be only connecting functional parts (e.g. LEDs and motors, NOT connectors), so it is not connected to the mechanical graph for ML purposes.
+Electronics graph is updated during `translate_genesis_to_python`.
 ### electronics connectors encoding:
 1. electronics connectors @connector are encoded as solids in mechanical graph with type "connector".
 2. when they are connected with other connectors, add edges to electronics graph.
@@ -44,6 +46,7 @@ how to know which fasteners need connection checks?
 %% this would mean that an assembly with only electronics connectors would have an empty electronics graph. ... 
 %% which is fair? there is no flow of electronics through those connectors anyway.
 %%note: when connecting other components, e.g. buttons, how would I encode their connection defs?
+
 
 
 # Encoding hints to the model

@@ -15,7 +15,11 @@ import torch
 from repairs_components.geometry.fasteners import Fastener
 from torch_geometric.data import Data
 from dataclasses import dataclass, field
-from repairs_components.processing.geom_utils import sanitize_quaternion
+from repairs_components.processing.geom_utils import (
+    euler_deg_to_quat_wxyz,
+    get_connector_pos,
+    sanitize_quaternion,
+)
 
 
 @dataclass
@@ -34,7 +38,7 @@ class PhysicalState:
     Graph features:
     - position
     - quat
-    - fasteners_loc
+    - fasteners_pos
     - fasteners_quat
     - fasteners_attached_to
     - fasteners_inserted_into_holes
@@ -59,15 +63,13 @@ class PhysicalState:
     female_connector_positions: dict[str, torch.Tensor] = field(default_factory=dict)
     """Female connector positions per part."""
 
-    
-
     # Fastener metadata (shared across batch)
     # fastener: dict[str, Fastener] = field(default_factory=dict)
     # "When the fastener is inserted only into one body, it is stored here. Otherwise, it is -1."
     # ^ self.fastener deprecated? graph stores everything.
 
     # # Free fasteners - not attached to two parts, but to one or none
-    # free_fasteners_loc: torch.Tensor = field(
+    # free_fasteners_pos: torch.Tensor = field(
     #     default_factory=lambda: torch.zeros((0, 3), dtype=torch.float32)
     # )
     # free_fasteners_quat: torch.Tensor = field(
@@ -93,7 +95,7 @@ class PhysicalState:
         ),  # should be always on CPU to my understanding. it's not buffer.
     ):
         assert graph is None or (
-            graph.fasteners_loc.shape[0]
+            graph.fasteners_pos.shape[0]
             == graph.fasteners_quat.shape[0]
             == graph.fasteners_attached_to.shape[0]
         ), "Free fasteners must have the same shape"
@@ -123,7 +125,7 @@ class PhysicalState:
                 (0,), dtype=torch.int8, device=self.device
             )  # NOTE: 0 info about fasteners?
 
-            self.graph.fasteners_loc = torch.empty(
+            self.graph.fasteners_pos = torch.empty(
                 (0, 3), dtype=torch.float32, device=self.device
             )
             self.graph.fasteners_quat = torch.empty(
@@ -165,7 +167,7 @@ class PhysicalState:
             # self.fastener = {}
 
             assert (
-                graph.fasteners_loc is not None
+                graph.fasteners_pos is not None
                 and graph.fasteners_quat is not None
                 and graph.fasteners_attached_to is not None
             ), "Passed graph can't have None fasteners."
@@ -206,7 +208,7 @@ class PhysicalState:
         global_feat_mask = (self.graph.fasteners_attached_to == -1).any(dim=-1)
         global_feat_export = torch.cat(
             [
-                self.graph.fasteners_loc[global_feat_mask],
+                self.graph.fasteners_pos[global_feat_mask],
                 self.graph.fasteners_quat[global_feat_mask],
                 (self.graph.fasteners_attached_to[global_feat_mask] == -1).float(),
                 # export which are attached and which not, but not their ids.
@@ -228,7 +230,7 @@ class PhysicalState:
             num_nodes=len(self.body_indices),
             global_feat=global_feat_export,
             # batch=self.graph.batch,
-            # global_feat_count=self.graph.fasteners_loc.shape[0],
+            # global_feat_count=self.graph.fasteners_pos.shape[0],
             # ^export global fastener features as a part of graph.
         )
         # print("debug: graph global feat shape", graph.global_feat.shape)
@@ -241,22 +243,31 @@ class PhysicalState:
         rotation: tuple,
         fixed: bool = False,
         rot_as_quat: bool = False,  # mostly for convenience in testing
-        _register_during_init: bool = True,  # mostly for tests...
+        _expect_unnormalized_coordinates: bool = True,  # mostly for tests...
+        connector_position_relative_to_center: torch.Tensor | None = None,
     ):
         assert name not in self.body_indices, f"Body {name} already registered"
+        assert name.endswith(("@solid", "@connector", "@fixed_solid")), (
+            f"Body name must end with @solid, @connector or @fixed_solid. Got {name}"
+        )  # note: fasteners don't go here, they go in `register_fastener`.
         # assert position.shape == (3,) and rotation.shape == (4,) # was a tensor.
         assert len(position) == 3, (
             f"Position must be 3D vector, got {position} "
             f"Rotation must be 3D vector, got {rotation}. Note: transformation to quat already happens in this function."
         )
-        if _register_during_init:
+        if not _expect_unnormalized_coordinates:
             max_bounds = torch.tensor([640, 640, 640], device=self.device)
             min_bounds = torch.tensor([0, 0, 0], device=self.device)
-        else:
+
+            # position_sim because that's what we put into sim state.
+            position_sim = compound_pos_to_sim_pos(
+                torch.tensor(position, device=self.device).unsqueeze(0)
+            )
+        else:  # else to genesis (note: flip the var name to normalized coords.)
             max_bounds = torch.tensor([0.32, 0.32, 0.64], device=self.device)
             min_bounds = torch.tensor([-0.32, -0.32, 0.0], device=self.device)
-        assert (torch.tensor(position, device=self.device) >= min_bounds).all() and (
-            torch.tensor(position, device=self.device) <= max_bounds
+        assert (position_sim >= min_bounds).all() and (
+            position_sim <= max_bounds
         ).all(), (
             f"Expected register position to be in [{min_bounds.tolist()}, {max_bounds.tolist()}], got {list(position)}"
         )
@@ -266,7 +277,7 @@ class PhysicalState:
             )
             rotation = euler_deg_to_quat_wxyz(torch.tensor(rotation))
         else:
-            sanitize_quaternion(rotation)
+            rotation = sanitize_quaternion(rotation)
 
         idx = len(self.body_indices)
         self.body_indices[name] = idx
@@ -275,19 +286,8 @@ class PhysicalState:
         # Ensure all graph tensors are on the correct device before concatenation
         self.graph = self.graph.to(self.device)
 
-        self.graph.position = torch.cat(
-            [
-                self.graph.position,
-                compound_pos_to_sim_pos(
-                    torch.tensor(position, device=self.device).unsqueeze(0)
-                ),
-            ],
-            dim=0,
-        )
-        self.graph.quat = torch.cat(
-            [self.graph.quat, torch.tensor(rotation, device=self.device).unsqueeze(0)],
-            dim=0,
-        )
+        self.graph.position = torch.cat([position_sim, self.graph.position], dim=0)
+        self.graph.quat = torch.cat([self.graph.quat, rotation.unsqueeze(0)], dim=0)
         self.graph.count_fasteners_held = torch.cat(
             [
                 self.graph.count_fasteners_held,
@@ -307,8 +307,25 @@ class PhysicalState:
             dim=0,
         )  # maybe will put this into hint instead as -1s or something.
 
-    def update_body(self, name: str, position: tuple, rotation: tuple):
-        assert name in self.body_indices, f"Body {name} not registered"
+        # handle male and female connector positions.
+        if name.endswith("@connector"):
+            assert connector_position_relative_to_center is not None, (
+                f"Connector {name} must have a connector position relative to center."
+            )
+            self._update_connector_def_pos(
+                name, position_sim, rotation, connector_position_relative_to_center
+            )
+
+    def update_body(
+        self,
+        name: str,
+        position: tuple,
+        rotation: tuple,
+        connector_position_relative_to_center: torch.Tensor | None = None,
+    ):
+        assert name in self.body_indices, (
+            f"Body {name} not registered. Registered bodies: {self.body_indices.keys()}"
+        )
         pos_tensor = torch.tensor(position, device=self.device)
         assert (
             pos_tensor >= torch.tensor([-0.32, -0.32, 0.0]).to(self.device)
@@ -317,6 +334,7 @@ class PhysicalState:
         ).all(), (
             f"Position {position} out of bounds. Expected [-0.32, 0.32] for update."
         )
+        rotation = sanitize_quaternion(rotation).to(device=self.device)
         if self.graph.fixed[self.body_indices[name]]:
             # assert torch.isclose(
             #     torch.tensor(position, device=self.device),
@@ -328,7 +346,15 @@ class PhysicalState:
 
         idx = self.body_indices[name]
         self.graph.position[idx] = pos_tensor
-        self.graph.quat[idx] = torch.tensor(rotation, device=self.device)
+        self.graph.quat[idx] = rotation
+
+        if name.endswith("@connector"):
+            assert connector_position_relative_to_center is not None, (
+                f"Connector {name} must have a connector position relative to center."
+            )
+            self._update_connector_def_pos(
+                name, pos_tensor, rotation, connector_position_relative_to_center
+            )
 
     def register_fastener(self, fastener: Fastener):
         """A fastener method to register fasteners and add all necessary components.
@@ -345,9 +371,9 @@ class PhysicalState:
             assert fastener.initial_body_b in self.body_indices, (
                 f"Body {fastener.initial_body_b} marked as connected to fastener {fastener.name} is not registered"
             )
-        fastener_id = len(self.graph.fasteners_loc)
-        self.graph.fasteners_loc = torch.cat(
-            [self.graph.fasteners_loc, torch.zeros((1, 3), device=self.device)], dim=0
+        fastener_id = len(self.graph.fasteners_pos)
+        self.graph.fasteners_pos = torch.cat(
+            [self.graph.fasteners_pos, torch.zeros((1, 3), device=self.device)], dim=0
         )
         self.graph.fasteners_quat = torch.cat(
             [self.graph.fasteners_quat, torch.zeros((1, 4), device=self.device)], dim=0
@@ -612,12 +638,34 @@ class PhysicalState:
         # new_graph.position = graph.position
         # new_graph.quat = graph.quat
         # new_graph.count_fasteners_held = graph.count_fasteners_held
-        # new_graph.fasteners_loc = graph.fasteners_loc
+        # new_graph.fasteners_pos = graph.fasteners_pos
         # new_graph.fasteners_quat = graph.fasteners_quat
         # new_graph.fasteners_attached_to = graph.fasteners_attached_to
         # note: fasteners are not reconstructed because hopefully, they should not be necessary after offline reconstruction.
         new_state = PhysicalState(graph=graph, indices=indices)
         return new_state
+
+    def _update_connector_def_pos(
+        self,
+        name: str,
+        position_sim: torch.Tensor,
+        rotation: torch.Tensor,
+        connector_position_relative_to_center: torch.Tensor,
+    ):
+        assert name.endswith(("_male@connector", "_female@connector")), (
+            f"Connector {name} must end with _male@connector or _female@connector."
+        )
+        assert (connector_position_relative_to_center < 5).all(), (
+            f"Likely dimension error: it is unlikely that a connector is further than 5m from the center of the "
+            f"part. Failed at {name} with position {connector_position_relative_to_center}"
+        )
+        connector_pos = get_connector_pos(
+            position_sim, rotation, connector_position_relative_to_center
+        )
+        if name.endswith("_male@connector"):
+            self.male_connector_positions[name] = connector_pos
+        else:
+            self.female_connector_positions[name] = connector_pos
 
 
 def _quaternion_conjugate(q: torch.Tensor) -> torch.Tensor:

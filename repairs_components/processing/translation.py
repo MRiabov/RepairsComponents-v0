@@ -183,35 +183,26 @@ def translate_genesis_to_python(  # translate to sim state, really.
             # fastener_hole_positions[full_name] = hole_pos
             pos_all = entity.get_pos(env_idx)  # fixme: 0,0,0 on pos?
             quat_all = entity.get_quat(env_idx)
-            for i in range(n_envs):
-                sim_state.physical_state[i].update_body(
-                    full_name, pos_all[i], quat_all[i]
-                )
-            if part_type == "connector":
-                male = part_name.endswith("male")
-                if male:
-                    relative_connector_pos = Connector.from_name(
-                        part_name
-                    ).connector_pos_relative_to_center_male
-                else:
-                    relative_connector_pos = Connector.from_name(
-                        part_name
-                    ).connector_pos_relative_to_center_female
-                relative_connector_pos = (
-                    torch.tensor(relative_connector_pos, device=device) / 1000
-                )
-                scene_connector_pos = get_connector_pos(
-                    pos_all, quat_all, relative_connector_pos.unsqueeze(0)
-                )
-            for i in range(n_envs):
-                if male:
-                    sim_state.physical_state[i].male_connector_positions[full_name] = (
-                        scene_connector_pos[i]
+            for env_id in range(n_envs):
+                relative_connector_pos = None
+                if part_type == "connector":
+                    male = part_name.endswith("male")
+                    connector = Connector.from_name(part_name)
+                    if male:
+                        relative_connector_pos = (
+                            connector.connector_pos_relative_to_center_male
+                        )
+                    else:
+                        relative_connector_pos = (
+                            connector.connector_pos_relative_to_center_female
+                        )
+                    relative_connector_pos = (
+                        torch.tensor(relative_connector_pos, device=device) / 1000
                     )
-                else:
-                    sim_state.physical_state[i].female_connector_positions[
-                        full_name
-                    ] = scene_connector_pos[i]
+                sim_state.physical_state[env_id].update_body(
+                    full_name, pos_all[env_id], quat_all[env_id], relative_connector_pos
+                )
+
         elif part_type == "control":
             continue  # skip.
         elif part_type == "fastener":
@@ -219,12 +210,12 @@ def translate_genesis_to_python(  # translate to sim state, really.
             fastener_pos = torch.tensor(entity.get_pos(env_idx), device=device)
             fastener_quat = torch.tensor(entity.get_quat(env_idx), device=device)
             fastener_id = int(full_name.split("@")[0])  # fastener name is "1@fastener"
-            for i in range(n_envs):
-                sim_state.physical_state[i].graph.fasteners_loc[fastener_id] = (
-                    fastener_pos[i]
+            for env_id in range(n_envs):
+                sim_state.physical_state[env_id].graph.fasteners_pos[fastener_id] = (
+                    fastener_pos[env_id]
                 )
-                sim_state.physical_state[i].graph.fasteners_quat[fastener_id] = (
-                    fastener_quat[i]
+                sim_state.physical_state[env_id].graph.fasteners_quat[fastener_id] = (
+                    fastener_quat[env_id]
                 )
 
         # handle picked up fastener (tip)
@@ -302,15 +293,35 @@ def translate_compound_to_sim_state(
 
             part_name, part_type = part.label.split("@", 1)
             # physical state
-            if part_type == "solid" or part_type == "fixed_solid":
+            if part_type in ("solid", "fixed_solid", "connector"):
                 fixed = part_type == "fixed_solid"
+                connector_position_relative_to_center = None
+                if part_type == "connector":
+                    # get the connector def position
+                    connector = Connector.from_name(part.label)
+                    if part_name.endswith("male"):
+                        connector_position_relative_to_center = torch.tensor(
+                            connector.connector_pos_relative_to_center_male / 1000
+                        )
+                    elif part_name.endswith("female"):
+                        connector_position_relative_to_center = torch.tensor(
+                            connector.connector_pos_relative_to_center_female / 1000
+                        )
+
                 sim_state.physical_state[env_idx].register_body(
                     name=part.label,
                     # position=tuple(part.position), # this isn't always true
                     position=tuple(part.center(CenterOf.BOUNDING_BOX)),
                     rotation=tuple(part.global_location.orientation),
                     fixed=fixed,  # FIXME: orientation is as euler but I need quat!
+                    connector_position_relative_to_center=connector_position_relative_to_center,
                 )
+                # get the connector def position
+                connector_def = part_dict[part_name + "@connector_def"]
+                connector_def_position = torch.tensor(
+                    tuple(connector_def.center(CenterOf.BOUNDING_BOX))
+                )  # ^beware!!! this must be translated as in children translation.
+
             elif part_type == "fastener":  # collect constraints, get labels of bodies,
                 # collect constraints (in build123d named joints)
                 assert "fastener_joint_a" in part.joints, (
@@ -357,24 +368,6 @@ def translate_compound_to_sim_state(
                 raise NotImplementedError("Liquid is not handled yet.")
             elif part_type == "button":
                 raise NotImplementedError("Buttons are not handled yet.")
-            elif part_type == "connector":
-                # register the solid part of the connector
-                sim_state.physical_state[env_idx].register_body(
-                    name=part.label,
-                    # position=tuple(part.position), # this isn't always true
-                    position=tuple(part.center(CenterOf.BOUNDING_BOX)),
-                    rotation=tuple(part.global_location.orientation),
-                )  # BEWARE OF ROTATION AND POSITION NOT BEING TRANSLATED. (compounds don't translate pos automatically.)
-
-                # get the connector def position
-                connector_def = part_dict[part_name + "@connector_def"]
-                connector_def_position = torch.tensor(
-                    tuple(connector_def.center(CenterOf.BOUNDING_BOX))
-                )  # ^beware!!! this must be translated as in children translation.
-                if part_name.endswith("male"):
-                    male_connector_def_positions[part_name] = connector_def_position
-                elif part_name.endswith("female"):
-                    female_connector_def_positions[part_name] = connector_def_position
             elif part_type == "connector_def":
                 continue  # connector def is already registered in connectors.
             else:
@@ -383,6 +376,12 @@ def translate_compound_to_sim_state(
                 )
         all_male_connector_def_positions.append(male_connector_def_positions)
         all_female_connector_def_positions.append(female_connector_def_positions)
+
+    # NOTE: connectors and connector_defs other solid bodies are not encoded in electronics, only functional components and their connections are encoded.
+    # so check_connections will remain, however it will simply be an intermediate before the actual export graph.
+    # alternatively (!) connectors can be encoded as edges in the non-export graph,
+    # however, during export they will be removed and component nodes will be connected
+    # directly. # or should I? why not encode connectors? the model will need the type of connectors, I presume.
 
     # if the last is non-empty all are non-empty...
     if all_male_connector_def_positions[-1] and all_female_connector_def_positions[-1]:

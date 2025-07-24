@@ -28,7 +28,7 @@ def fastener_hole(radius: float, depth: float | None, id: int):
     is_through = depth is None
     if depth is None:
         depth = fastener_hole.vertices().sort_by(Axis.Z).first.Z
-        #TODO: check if this is absolute or relative.
+        # TODO: check if this is absolute or relative.
     else:
         assert depth > 0, "Depth must be positive."
 
