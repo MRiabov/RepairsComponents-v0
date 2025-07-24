@@ -389,58 +389,67 @@ class ElectronicsState(SimState):
         assert component.name not in self.components, (
             f"Component {component.name} already registered"
         )
+        assert not component.name.endswith(("@connector")), (
+            f"Connectors should not be registered in electrical state (yet). Failed at {component.name}."
+        )
+
         self.components[component.name] = component
-        self._graph_built = False  # Invalidate graph cache
+        assert not self._graph_built, (
+            "Graph is already built, cannot register component"
+        )
+        # fixme: it better is to add to graph directly rather than to components. but that's later.
+        # self._graph_built = False  # Invalidate graph cache
+        # note: probably better to assert that graph is not built at all? why would it?
 
-        # Update node features if graph is already built
-        if hasattr(self.graph, "max_voltage"):  # good use of hasattr.
-            # Add new node features
-            max_voltage = (
-                component.max_load[0] if component.max_load is not None else 0.0
-            )
-            max_current = (
-                component.max_load[1] if component.max_load is not None else 0.0
-            )
-            component_type = (
-                component.component_type if hasattr(component, "component_type") else 0
-            )
-            component_id = (
-                component.component_id if hasattr(component, "component_id") else 0
-            )
+        # # Update node features if graph is already built
+        # if hasattr(self.graph, "max_voltage"):  # good use of hasattr.
+        #     # Add new node features
+        #     max_voltage = (
+        #         component.max_load[0] if component.max_load is not None else 0.0
+        #     )
+        #     max_current = (
+        #         component.max_load[1] if component.max_load is not None else 0.0
+        #     )
+        #     component_type = (
+        #         component.component_type if hasattr(component, "component_type") else 0
+        #     )
+        #     component_id = (
+        #         component.component_id if hasattr(component, "component_id") else 0
+        #     )
 
-            # Append new features to each tensor
-            self.graph.max_voltage = torch.cat(
-                [
-                    self.graph.max_voltage,
-                    torch.tensor(
-                        [max_voltage], dtype=torch.float32, device=self.device
-                    ),
-                ]
-            )
-            self.graph.max_current = torch.cat(
-                [
-                    self.graph.max_current,
-                    torch.tensor(
-                        [max_current], dtype=torch.float32, device=self.device
-                    ),
-                ]
-            )
-            self.graph.component_type = torch.cat(
-                [
-                    self.graph.component_type,
-                    torch.tensor(
-                        [component_type], dtype=torch.long, device=self.device
-                    ),
-                ]
-            )
-            self.graph.component_id = torch.cat(
-                [
-                    self.graph.component_id,
-                    torch.tensor([component_id], dtype=torch.long, device=self.device),
-                ]
-            )
+        #     # Append new features to each tensor
+        #     self.graph.max_voltage = torch.cat(
+        #         [
+        #             self.graph.max_voltage,
+        #             torch.tensor(
+        #                 [max_voltage], dtype=torch.float32, device=self.device
+        #             ),
+        #         ]
+        #     )
+        #     self.graph.max_current = torch.cat(
+        #         [
+        #             self.graph.max_current,
+        #             torch.tensor(
+        #                 [max_current], dtype=torch.float32, device=self.device
+        #             ),
+        #         ]
+        #     )
+        #     self.graph.component_type = torch.cat(
+        #         [
+        #             self.graph.component_type,
+        #             torch.tensor(
+        #                 [component_type], dtype=torch.long, device=self.device
+        #             ),
+        #         ]
+        #     )
+        #     self.graph.component_id = torch.cat(
+        #         [
+        #             self.graph.component_id,
+        #             torch.tensor([component_id], dtype=torch.long, device=self.device),
+        #         ]
+        #     )
 
-            self.graph.num_nodes = len(self.components)
+        #     self.graph.num_nodes = len(self.components)
 
     # def register_contacts(self, contacts: dict[str, tuple[str, str]]):
     #     "Register components of body A to bodies B"

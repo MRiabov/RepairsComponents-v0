@@ -64,9 +64,7 @@ phys_state.register_body("box", (0, 0, 0), (0, 0, 0))
 phys_state.register_body(
     "box_2", (1000, 0, 0), (0, 0, 0)
 )  # note: 1000 because 1/1000 later.
-phys_state.register_fastener(
-    Fastener(initial_body_a="box_2", initial_body_b="box", constraint_b_active=True)
-)
+phys_state.register_fastener(Fastener(initial_body_a="box_2", initial_body_b="box"))
 phys_state.connect_fastener_to_one_body(0, "box_2")
 phys_state.connect_fastener_to_one_body(0, "box")
 

@@ -22,7 +22,6 @@ from genesis.engine.entities import RigidEntity
 @pytest.fixture
 def fastener():
     return Fastener(
-        constraint_b_active=True,
         initial_body_a="body_a",
         initial_body_b="body_b",
         length=15.0,
@@ -46,7 +45,8 @@ def scene_with_fastener_screwdriver_and_two_parts():
 
     ########################## init ##########################
     if not gs._initialized:
-        gs.init(backend=gs.gpu, logging_level="warning")
+        gs.init(backend=gs.gpu, logging_level="error")
+        # note: logging_level="error" to not spam console.
 
     ########################## create a scene ##########################
     scene = gs.Scene(

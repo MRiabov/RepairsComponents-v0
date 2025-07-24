@@ -501,7 +501,7 @@ def persist_meshes_and_mjcf(
                     child.label
                 )
                 fastener_mjcf = Fastener(  # constraint and b not noted as unnecessary
-                    False, length=fastener_height, diameter=fastener_diameter
+                    length=fastener_height, diameter=fastener_diameter
                 ).get_mjcf()
                 # fastener_shared_path.parent.mkdir(parents=True, exist_ok=True)
                 fastener_shared_path.parent.mkdir(parents=True, exist_ok=True)

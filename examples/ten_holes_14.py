@@ -23,9 +23,7 @@ class TenHoles(EnvSetup):
                     joints.append(joint)
             debug__ = ""
 
-        start_fastener = Fastener(
-            False, initial_body_a="base_box@fixed_solid"
-        ).bd_geometry()
+        start_fastener = Fastener(initial_body_a="base_box@fixed_solid").bd_geometry()
         fasteners = []
         for i, loc in enumerate(grid_locs.locations):
             moved_fastener = start_fastener.located(loc)

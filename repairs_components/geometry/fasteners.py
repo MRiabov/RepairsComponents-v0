@@ -509,4 +509,4 @@ def recalculate_fastener_pos_with_offset_to_hole(
 
 
 if __name__ == "__main__":
-    show(Fastener(constraint_b_active=True).bd_geometry())
+    show(Fastener().bd_geometry())

@@ -26,7 +26,6 @@ import numpy as np
 @pytest.fixture
 def fastener():
     return Fastener(
-        constraint_b_active=True,
         initial_body_a="body_a",
         initial_body_b="body_b",
         length=15.0,
@@ -172,7 +171,7 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
     scene.reset()
     hole_positions, hole_quats, hole_indices_batch = holes_for_two_parts
 
-    fastener_data = Fastener(constraint_b_active=False, initial_body_a=None)
+    fastener_data = Fastener(initial_body_a=None)
     # populate current sim state
     repairs_sim_state = RepairsSimState(1)
     physical_state = repairs_sim_state.physical_state[0]
@@ -246,7 +245,6 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     screwdriver = Screwdriver(
         picked_up_fastener_name="0@fastener",
         picked_up_fastener_tip_position=physical_state.hole_positions[0],
-        has_picked_up_fastener=True,
     )  # mark as moved to closest hole.
     repairs_sim_state.tool_state[0].current_tool = screwdriver
     connected_part_id = physical_state.body_indices["part_with_holes_1@solid"]
@@ -304,7 +302,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     screwdriver = Screwdriver(
         picked_up_fastener_tip_position=physical_state.hole_positions[0],
         picked_up_fastener_name="0@fastener",
-        has_picked_up_fastener=True,
+
     )
     repairs_sim_state.tool_state[0].current_tool = screwdriver
     connected_part_1_id = physical_state.body_indices["part_with_holes_1@solid"]
@@ -383,7 +381,6 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
     repairs_sim_state.tool_state[0].current_tool = Screwdriver(
         picked_up_fastener_name="0@fastener",
         picked_up_fastener_tip_position=physical_state.hole_positions[0],
-        has_picked_up_fastener=True,
     )
 
     connected_part_1_id = physical_state.body_indices["part_with_holes_1@solid"]

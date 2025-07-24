@@ -173,7 +173,6 @@ def test_distance_tie_selects_first():
 @pytest.fixture
 def fastener():
     return Fastener(
-        constraint_b_active=True,
         initial_body_a="body_a",
         initial_body_b="body_b",
         length=15.0,
