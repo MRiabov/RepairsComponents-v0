@@ -231,7 +231,9 @@ def reconstruct_sim_state(
         for graph in electronics_graphs
     ]
     repairs_sim_state.physical_state = [
-        PhysicalState.rebuild_from_graph(graph, mechanical_indices)
+        PhysicalState.rebuild_from_graph(
+            graph, mechanical_indices, hole_pos, hole_quats, hole_indices_batch
+        )
         for graph in mechanical_graphs
     ]
     repairs_sim_state.tool_state = [

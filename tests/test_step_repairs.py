@@ -197,7 +197,7 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
     # expected shape
     physical_state.hole_positions = hole_positions
     physical_state.hole_quats = hole_quats
-    physical_state.hole_indices_batch = hole_indices_batch
+    physical_state.part_hole_batch = hole_indices_batch
 
     # populate desired state
     desired_sim_state = RepairsSimState(1)

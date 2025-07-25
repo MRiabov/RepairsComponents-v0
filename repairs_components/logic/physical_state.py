@@ -53,8 +53,9 @@ class PhysicalState:
     # fastener_ids: dict[int, str] = field(default_factory=dict) # fixme: I don't remember how, but this is unused.
     hole_indices_from_name: dict[str, int] = field(default_factory=dict)
     """Hole indices per part name."""
-    hole_indices_batch: torch.Tensor = field(default_factory=torch.empty)
+    part_hole_batch: torch.Tensor = field(default_factory=torch.empty)
     """Hole indices per part in the batch."""
+    # FIXME: part_hole_batch is a duplication from ConcurrentSimState
     hole_positions: torch.Tensor = field(default_factory=torch.empty)  # [H, 3]
     """Hole positions per part, batched with hole_indices_batch."""
     hole_quats: torch.Tensor = field(default_factory=torch.empty)  # [H, 4]
@@ -366,33 +367,39 @@ class PhysicalState:
 
     def register_fastener(self, fastener: Fastener):
         """A fastener method to register fasteners and add all necessary components.
-        Handles constraining to bodies and adding to graph."""
+        Handles constraining to bodies and adding to graph.
+
+        Args:
+        - count_holes: Number of holes in the batch. If None, uses the number of holes in the batch (necessary during initial population)
+        """
         assert fastener.name not in self.body_indices, (
             f"Fasteners can't be registered as bodies!"
         )
+        assert self.part_hole_batch is not None, "Part hole batch must be set before registering fasteners."
 
         # Convert hole IDs to body names using hole_indices_batch
         initial_body_a = None
         initial_body_b = None
 
         if fastener.initial_hole_id_a is not None:
-            assert 0 <= fastener.initial_hole_id_a < len(self.hole_indices_batch), (
-                f"Hole ID {fastener.initial_hole_id_a} is out of range. Available holes: 0-{len(self.hole_indices_batch) - 1}"
+            assert 0 <= fastener.initial_hole_id_a < self.part_hole_batch.shape[0], (
+                f"Hole ID {fastener.initial_hole_id_a} is out of range. Available holes: 0-{self.part_hole_batch.shape[0] - 1}"
             )
-            body_idx_a = int(self.hole_indices_batch[fastener.initial_hole_id_a].item())
+            body_idx_a = int(self.part_hole_batch[fastener.initial_hole_id_a].item())
             initial_body_a = self.inverse_body_indices[body_idx_a]
 
         if fastener.initial_hole_id_b is not None:
-            assert 0 <= fastener.initial_hole_id_b < len(self.hole_indices_batch), (
-                f"Hole ID {fastener.initial_hole_id_b} is out of range. Available holes: 0-{len(self.hole_indices_batch) - 1}"
+            assert 0 <= fastener.initial_hole_id_b < self.part_hole_batch.shape[0], (
+                f"Hole ID {fastener.initial_hole_id_b} is out of range. Available holes: 0-{self.part_hole_batch.shape[0] - 1}"
             )
-            body_idx_b = int(self.hole_indices_batch[fastener.initial_hole_id_b].item())
+            body_idx_b = int(self.part_hole_batch[fastener.initial_hole_id_b].item())
             initial_body_b = self.inverse_body_indices[body_idx_b]
 
         fastener_id = len(self.graph.fasteners_pos)
         self.graph.fasteners_pos = torch.cat(
             [self.graph.fasteners_pos, torch.zeros((1, 3), device=self.device)], dim=0
         )
+
         self.graph.fasteners_quat = torch.cat(
             [self.graph.fasteners_quat, torch.zeros((1, 4), device=self.device)], dim=0
         )
@@ -655,7 +662,13 @@ class PhysicalState:
         return (changed == part_id).any()
 
     @staticmethod
-    def rebuild_from_graph(graph: Data, indices: dict[str, int]) -> "PhysicalState":
+    def rebuild_from_graph(
+        graph: Data,
+        indices: dict[str, int],
+        hole_pos: torch.Tensor,
+        hole_quats: torch.Tensor,
+        hole_indices_batch: torch.Tensor,
+    ) -> "PhysicalState":
         "Rebuild an ElectronicsState from a graph"
         assert graph.num_nodes == len(indices), (
             f"Graph and indices do not match: {graph.num_nodes} != {len(indices)}"
@@ -668,7 +681,7 @@ class PhysicalState:
         # new_graph.fasteners_quat = graph.fasteners_quat
         # new_graph.fasteners_attached_to = graph.fasteners_attached_to
         # note: fasteners are not reconstructed because hopefully, they should not be necessary after offline reconstruction.
-        new_state = PhysicalState(graph=graph, indices=indices)
+        new_state = PhysicalState(graph=graph, indices=indices, hole_pos)
         return new_state
 
     def _update_connector_def_pos(

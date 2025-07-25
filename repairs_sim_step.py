@@ -282,7 +282,7 @@ def step_screw_in_or_out(
             part_hole_quats=torch.stack(
                 [physical_state[env_id].hole_quats for env_id in env_ids]
             ),
-            part_hole_batch=physical_state[env_ids[0]].hole_indices_batch,
+            part_hole_batch=physical_state[env_ids[0]].part_hole_batch,
             # as fastener quat is equal to screwdriver quat, we can pass it here
             active_fastener_quat=gs_entities["screwdriver@control"].get_quat(env_ids),
             ignore_part_idx=ignore_part_idx,

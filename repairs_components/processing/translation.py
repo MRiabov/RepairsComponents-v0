@@ -20,6 +20,7 @@ from torch_geometric.data import Data
 import numpy as np
 import torch.nn.functional as F
 from repairs_components.processing.geom_utils import (
+    euler_deg_to_quat_wxyz,
     get_connector_pos,
     quat_multiply,
     quat_conjugate,
@@ -255,15 +256,39 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
 def translate_compound_to_sim_state(
     batch_b123d_compounds: list[Compound], connected_bodies: list[list[str]] = []
-) -> RepairsSimState:
+) -> tuple[RepairsSimState, tuple]:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
     assert len(batch_b123d_compounds) > 0, "Batch must not be empty."
     assert all(len(compound.leaves) > 0 for compound in batch_b123d_compounds), (
         "All compounds must have children."
     )
-    sim_state = RepairsSimState(batch_dim=len(batch_b123d_compounds))
+    n_envs = len(batch_b123d_compounds)
+    sim_state = RepairsSimState(batch_dim=n_envs)
 
-    for env_idx in range(len(batch_b123d_compounds)):
+    # Compute hole data upfront from the first compound
+    # (assuming all compounds in the batch have the same hole structure)
+    first_compound = batch_b123d_compounds[0]
+    first_body_indices = {}
+
+    # Build body indices for the first compound to get hole data
+    body_idx = 0
+    for part in first_compound.leaves:
+        part_name, part_type = part.label.split("@", 1)
+        if part_type in ("solid", "fixed_solid", "connector"):
+            first_body_indices[part.label] = body_idx
+            body_idx += 1
+
+    # Get hole data to populate part_hole_batch # it's recomputed but nobody cares.
+    starting_holes = get_starting_part_holes(first_compound, first_body_indices)
+    (
+        _part_holes_pos,
+        _part_holes_quat,
+        _part_hole_depth,
+        _hole_is_through,
+        part_hole_batch,
+    ) = starting_holes
+
+    for env_idx in range(n_envs):
         b123d_compound = batch_b123d_compounds[env_idx]
         env_size = np.array((640, 640, 640))
         expected_bounds_min = np.array((0, 0, 0))
@@ -278,8 +303,6 @@ def translate_compound_to_sim_state(
             f"Compound must be within bounds. Currently have {b123d_compound.bounding_box()}. Expected AABB min: {expected_bounds_min}, max: {expected_bounds_max} "
             f"\nAABBs of all parts: { {p.label: p.bounding_box() for p in b123d_compound.leaves} }"
         )
-        part_dict = {part.label: part for part in b123d_compound.leaves}
-
         for part in (
             b123d_compound.leaves
         ):  # leaves, not children. children will have compounds.
@@ -315,7 +338,32 @@ def translate_compound_to_sim_state(
                     fixed=fixed,  # FIXME: orientation is as euler but I need quat!
                     connector_position_relative_to_center=connector_position_relative_to_center,
                 )
-            elif part_type == "fastener":  # collect constraints, get labels of bodies,
+
+            # FIXME: no electronics implemented???
+            elif part_type == "liquid":
+                raise NotImplementedError("Liquid is not handled yet.")
+            elif part_type == "button":
+                raise NotImplementedError("Buttons are not handled yet.")
+            elif part_type == "connector_def":
+                continue  # connector def is already registered in connectors.
+            elif part_type == "fastener":
+                # we will handle fastener in the second loop
+                continue
+            else:
+                raise NotImplementedError(
+                    f"Part type {part_type} not implemented. Raise from part.label: {part.label}"
+                )
+
+        # Set part_hole_batch for this environment
+        sim_state.physical_state[env_idx].part_hole_batch = part_hole_batch
+    # Fasteners (validation) depends on parts being registered, so make a second for loop
+    # Otherwise it's the same logic.
+
+    for env_idx in range(n_envs):
+        b123d_compound = batch_b123d_compounds[env_idx]
+        for part in b123d_compound.leaves:
+            part_type = part.label.split("@", 1)[1]
+            if part_type == "fastener":  # collect constraints, get labels of bodies,
                 # collect constraints (in build123d named joints)
                 assert "fastener_joint_a" in part.joints, (
                     "Fastener must have a joint a."
@@ -359,18 +407,6 @@ def translate_compound_to_sim_state(
                 )
                 sim_state.physical_state[env_idx].register_fastener(fastener)
 
-            # FIXME: no electronics implemented???
-            elif part_type == "liquid":
-                raise NotImplementedError("Liquid is not handled yet.")
-            elif part_type == "button":
-                raise NotImplementedError("Buttons are not handled yet.")
-            elif part_type == "connector_def":
-                continue  # connector def is already registered in connectors.
-            else:
-                raise NotImplementedError(
-                    f"Part type {part_type} not implemented. Raise from part.label: {part.label}"
-                )
-
     # NOTE: connectors and connector_defs other solid bodies are not encoded in electronics, only functional components and their connections are encoded.
     # so check_connections will remain, however it will simply be an intermediate before the actual export graph.
     # alternatively (!) connectors can be encoded as edges in the non-export graph,
@@ -412,8 +448,7 @@ def translate_compound_to_sim_state(
     assert np.all(np.abs(max_pos) <= (env_size / 2 / 1000)), (
         f"massive out of bounds, at env_id 0, max_pos {max_pos}"
     )
-
-    return sim_state
+    return sim_state, starting_holes
 
 
 def create_constraints_based_on_graph(
@@ -537,3 +572,86 @@ def update_hole_locs(
         phys_state.hole_positions = hole_pos[i]
         phys_state.hole_quats = hole_quat[i]
     return current_sim_state
+
+
+# now in translation (it should be anyway)
+def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
+    """Get the starting part holes as "per part, relative to 0,0,0 position"""
+    part_holes_pos: torch.Tensor = torch.empty((0, 3))
+    part_holes_quat: torch.Tensor = torch.empty((0, 4))
+    part_hole_depth: torch.Tensor = torch.empty((0,))
+    part_hole_is_through: torch.Tensor = torch.empty((0,), dtype=torch.bool)
+    part_hole_batch: torch.Tensor = torch.empty((0,), dtype=torch.long)
+    all_parts = compound.leaves
+    filtered_parts = [
+        part
+        for part in all_parts
+        if part.label.endswith(("@solid", "@fixed_solid", "@connector"))
+    ]
+
+    # not other fasteners.
+    for part in filtered_parts:
+        has_fastener_holes = any(
+            joint.label.startswith("fastener_hole_") for joint in part.joints.values()
+        )
+        if has_fastener_holes:
+            count_fastener_hole_joints = len(
+                [
+                    joint
+                    for joint in part.joints.values()
+                    if joint.label.startswith("fastener_hole_")
+                ]
+            )  # count by filtering
+            fastener_hole_pos = torch.zeros(count_fastener_hole_joints, 3)
+            fastener_hole_quat = torch.zeros(count_fastener_hole_joints, 4)
+            fastener_hole_depths = torch.zeros(count_fastener_hole_joints)
+            fastener_hole_is_through = torch.zeros(
+                count_fastener_hole_joints, dtype=torch.bool
+            )
+
+            for joint in part.joints.values():
+                if joint.label.startswith("fastener_hole_"):
+                    id, depth, is_through = fastener_hole_info_from_joint_name(
+                        joint.label
+                    )
+                    assert id < count_fastener_hole_joints, (
+                        "id of joint is out of bounds. "
+                        f"id: {id}, count: {count_fastener_hole_joints}"
+                    )
+                    fastener_hole_pos[id] = (
+                        torch.tensor(tuple(joint.location.position)) / 1000
+                    )
+                    fastener_hole_quat[id] = euler_deg_to_quat_wxyz(
+                        torch.tensor(tuple(joint.location.orientation))
+                    )
+                    fastener_hole_depths[id] = depth / 1000
+                    # FIXME: I explicitly don't need depth when I have it, I need it when the hole is through.
+                    fastener_hole_is_through[id] = is_through
+            # note: there could be positional mismatch in id, however I hope this won't be an issue.
+
+            # simply cat it because it's easier.
+            part_holes_pos = torch.cat([part_holes_pos, fastener_hole_pos], dim=0)
+            part_holes_quat = torch.cat([part_holes_quat, fastener_hole_quat], dim=0)
+            part_hole_depth = torch.cat([part_hole_depth, fastener_hole_depths], dim=0)
+            part_hole_is_through = torch.cat(
+                [part_hole_is_through, fastener_hole_is_through], dim=0
+            )
+            part_hole_batch = torch.cat(
+                [
+                    part_hole_batch,
+                    torch.full(
+                        (count_fastener_hole_joints,),
+                        body_indices[part.label],
+                        dtype=torch.long,
+                    ),
+                ],
+                dim=0,
+            )
+    # TODO sort part_hole_batch, although I don't know if that's necessary.
+    return (
+        part_holes_pos,
+        part_holes_quat,
+        part_hole_depth,
+        part_hole_is_through,
+        part_hole_batch,
+    )
