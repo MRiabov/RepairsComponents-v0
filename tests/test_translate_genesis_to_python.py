@@ -186,59 +186,59 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     )
 
     # test solid bodies translated (pos and quat)
-    graph_device = sim_state.physical_state[0].graph.position.device
+    graph_device = sim_state.physical_state[0].position.device
     gs_device = entities["part_1@solid"].get_pos(0).device
 
     # body 1
     part_1_id = sim_state.physical_state[0].body_indices["part_1@solid"]
     assert torch.allclose(
-        sim_state.physical_state[0].graph.position[part_1_id],
+        sim_state.physical_state[0].position[part_1_id],
         entities["part_1@solid"].get_pos(0).squeeze(0).to(graph_device),
     )
     assert torch.allclose(
-        sim_state.physical_state[0].graph.quat[part_1_id],
+        sim_state.physical_state[0].quat[part_1_id],
         entities["part_1@solid"].get_quat(0).squeeze(0).to(graph_device),
     )
 
     part_2_id = sim_state.physical_state[0].body_indices["part_2@solid"]
     assert torch.allclose(
-        sim_state.physical_state[0].graph.position[part_2_id],
+        sim_state.physical_state[0].position[part_2_id],
         entities["part_2@solid"].get_pos(0).squeeze(0).to(graph_device),
     )
     assert torch.allclose(
-        sim_state.physical_state[0].graph.quat[part_2_id],
+        sim_state.physical_state[0].quat[part_2_id],
         entities["part_2@solid"].get_quat(0).squeeze(0).to(graph_device),
     )
 
     # fastners
     fastener_id = 0  # note that fastener ID is 0 because it's 0 in graph.
     assert torch.allclose(
-        sim_state.physical_state[0].graph.fasteners_pos[fastener_id],
+        sim_state.physical_state[0].fasteners_pos[fastener_id],
         entities["0@fastener"].get_pos(0).squeeze(0).to(graph_device),
     )
     assert torch.allclose(
-        sim_state.physical_state[0].graph.fasteners_quat[fastener_id],
+        sim_state.physical_state[0].fasteners_quat[fastener_id],
         entities["0@fastener"].get_quat(0).squeeze(0).to(graph_device),
     )
 
     # europlug physical positions
     male_id = sim_state.physical_state[0].body_indices["europlug_0_male@connector"]
     assert torch.allclose(
-        sim_state.physical_state[0].graph.position[male_id],
+        sim_state.physical_state[0].position[male_id],
         entities["europlug_0_male@connector"].get_pos(0).squeeze(0).to(graph_device),
     )
     assert torch.allclose(
-        sim_state.physical_state[0].graph.quat[male_id],
+        sim_state.physical_state[0].quat[male_id],
         entities["europlug_0_male@connector"].get_quat(0).squeeze(0).to(graph_device),
     )
 
     female_id = sim_state.physical_state[0].body_indices["europlug_0_female@connector"]
     assert torch.allclose(
-        sim_state.physical_state[0].graph.position[female_id],
+        sim_state.physical_state[0].position[female_id],
         entities["europlug_0_female@connector"].get_pos(0).squeeze(0).to(graph_device),
     )
     assert torch.allclose(
-        sim_state.physical_state[0].graph.quat[female_id],
+        sim_state.physical_state[0].quat[female_id],
         entities["europlug_0_female@connector"].get_quat(0).squeeze(0).to(graph_device),
     )
 

@@ -391,7 +391,7 @@ def move_entities_to_pos(
     all_positions = (
         torch.stack(
             [
-                torch.tensor(s.graph.position, device=env_idx.device)
+                torch.tensor(s.position, device=env_idx.device)
                 for s in starting_sim_state.physical_state
             ],
             dim=0,
@@ -511,4 +511,3 @@ def persist_meshes_and_mjcf(
 
             mesh_file_names[child.label] = str(fastener_shared_path)
     return mesh_file_names
-

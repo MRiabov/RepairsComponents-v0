@@ -201,11 +201,11 @@ def step_screw_in_or_out(
     # note:if there are more tools, create an interface, I guess.
 
     fastener_connected_to = torch.stack(
-        [phys_state.graph.fasteners_attached_to for phys_state in physical_state],
+        [phys_state.fasteners_attached_to for phys_state in physical_state],
     ).to(actions.device)
     fastener_connected_to_hole = torch.stack(
         [
-            phys_state.graph.fasteners_inserted_into_holes
+            phys_state.fasteners_inserted_into_holes
             for phys_state in physical_state
         ]
     ).to(actions.device)
@@ -311,11 +311,8 @@ def step_screw_in_or_out(
                     hole_id
                 ],
                 inserted_into_part_entity=gs_entities[part_name],
-                fastener_length=physical_state[env_id].graph.fasteners_length[
+                fastener_length=physical_state[env_id].fasteners_length[
                     fastener_id
-                ],
-                top_hole_depths=physical_state[env_id].hole_depths[
-                    already_inserted_hole_id
                 ],
                 top_hole_is_through=physical_state[env_id].hole_is_through[
                     already_inserted_hole_id
@@ -343,7 +340,7 @@ def step_screw_in_or_out(
             fastener_id = int(
                 fastener_name.split("@")[0]
             )  # fasteners have naming as "{id}@fastener"
-            fastener_body_indices = physical_state[env_id].graph.fasteners_attached_to[
+            fastener_body_indices = physical_state[env_id].fasteners_attached_to[
                 fastener_id
             ]
             for body_idx in fastener_body_indices:
@@ -432,7 +429,7 @@ def step_fastener_pick_up_release(
         fastener_positions = (
             torch.stack(
                 [
-                    current_sim_state.physical_state[i].graph.fasteners_pos
+                    current_sim_state.physical_state[i].fasteners_pos
                     for i in desired_pick_up_indices
                 ]
             )

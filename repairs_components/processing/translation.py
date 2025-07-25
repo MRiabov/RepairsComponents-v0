@@ -81,9 +81,9 @@ def translate_state_to_genesis_scene(
         #     surface = gs.surfaces.Plastic(color=get_color_by_type(part_type))
         surface = gs.surfaces.Plastic(color=(1, 1, 1, 1))
 
-        pos = physical_state.graph.position[body_idx]
-        quat = physical_state.graph.quat[body_idx]
-        count_fasteners_held = physical_state.graph.count_fasteners_held[body_idx]
+        pos = physical_state.fasteners.position[body_idx]
+        quat = physical_state.fasteners.quat[body_idx]
+        count_fasteners_held = physical_state.fasteners.count_fasteners_held[body_idx]
 
         mesh_or_mjcf_path = str(mesh_file_names[body_name])
 
@@ -113,10 +113,10 @@ def translate_state_to_genesis_scene(
     singleton_fastener_morphs = {}  # cache to reduce load times.
 
     for fastener_id, attached_to in enumerate(
-        sim_state.physical_state[0].graph.fasteners_attached_to
+        sim_state.physical_state[0].fasteners_attached_to
     ):
-        fastener_d = sim_state.physical_state[0].graph.fasteners_diam[fastener_id]
-        fastener_h = sim_state.physical_state[0].graph.fasteners_length[fastener_id]
+        fastener_d = sim_state.physical_state[0].fasteners_diam[fastener_id]
+        fastener_h = sim_state.physical_state[0].fasteners_length[fastener_id]
 
         fastener_name = get_fastener_singleton_name(
             float(fastener_d), float(fastener_h)
@@ -215,10 +215,10 @@ def translate_genesis_to_python(  # translate to sim state, really.
             fastener_quat = torch.tensor(entity.get_quat(env_idx), device=device)
             fastener_id = int(full_name.split("@")[0])  # fastener name is "1@fastener"
             for env_id in range(n_envs):
-                sim_state.physical_state[env_id].graph.fasteners_pos[fastener_id] = (
+                sim_state.physical_state[env_id].fasteners_pos[fastener_id] = (
                     fastener_pos[env_id]
                 )
-                sim_state.physical_state[env_id].graph.fasteners_quat[fastener_id] = (
+                sim_state.physical_state[env_id].fasteners_quat[fastener_id] = (
                     fastener_quat[env_id]
                 )
 
@@ -249,7 +249,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
     sim_state = update_hole_locs(
         sim_state, starting_hole_positions, starting_hole_quats, part_hole_batch
     )  # would be ideal if starting_hole_positions, hole_quats and hole_batch were batched already.
-    max_pos = sim_state.physical_state[0].graph.position.max()
+    max_pos = sim_state.physical_state[0].fasteners.position.max()
     assert max_pos <= 50, f"massive out of bounds, at env_id 0, max_pos {max_pos}"
     return sim_state
 
@@ -444,7 +444,7 @@ def translate_compound_to_sim_state(
     # however this won't mean they will be returned in export_graph.
 
     # assert out
-    max_pos = np.array(sim_state.physical_state[0].graph.position.max())
+    max_pos = np.array(sim_state.physical_state[0].fasteners.position.max())
     assert np.all(np.abs(max_pos) <= (env_size / 2 / 1000)), (
         f"massive out of bounds, at env_id 0, max_pos {max_pos}"
     )
@@ -485,13 +485,12 @@ def create_constraints_based_on_graph(
 
     for env_id in env_idx.tolist():
         state = env_state.physical_state[env_id]
-        graph: Data = state.graph
         # FIXME: this kind of works but does not account for fastener constraint
         # should actually be linked to a fastener, and fastener is linked to another body.
 
         # genesis supports constraints on per-scene basis.
 
-        for fastener_id, connected_to in enumerate(graph.fasteners_attached_to):
+        for fastener_id, connected_to in enumerate(state.fasteners_attached_to):
             fastener_entity = gs_entities[
                 Fastener.fastener_name_in_simulation(fastener_id)
             ]
@@ -553,10 +552,10 @@ def update_hole_locs(
 
     # will remove when (if) batch RepairsSimStep.
     part_pos = torch.stack(
-        [phys_state.graph.position for phys_state in current_sim_state.physical_state]
+        [phys_state.position for phys_state in current_sim_state.physical_state]
     ).to(device)  # [B, P, 3]
     part_quat = torch.stack(
-        [phys_state.graph.quat for phys_state in current_sim_state.physical_state]
+        [phys_state.quat for phys_state in current_sim_state.physical_state]
     ).to(device, dtype=torch.float32)  # [B, P, 4]
 
     # duplicate values by batch
