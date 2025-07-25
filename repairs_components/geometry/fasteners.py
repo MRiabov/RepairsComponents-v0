@@ -105,23 +105,21 @@ class Fastener(Component):
         Returns:
             A build123d Solid representing the screw with shaft and head.
         """
-        from build123d import BuildPart, Cylinder, Pos, Align
+        from build123d import BuildPart, Cylinder, Align
 
         with BuildPart() as fastener:
-            with Locations(Pos(0, 0, -self.length + self.head_height / 2)):
+            with Locations((0, 0, -self.length / 2)):
                 # Create the shaft (main cylinder)
                 shaft = Cylinder(
                     radius=self.diameter / 2,  # Convert diameter to radius
                     height=self.length,
-                    align=(Align.CENTER, Align.CENTER, Align.MIN),
                 )
 
             # Create the head (wider cylinder)
-            with Locations(Pos(0, 0, self.head_height / 2)):
+            with Locations((0, 0, self.head_height / 2)):
                 head = Cylinder(
                     radius=self.head_diameter / 2,  # Convert diameter to radius
                     height=self.head_height,
-                    align=(Align.CENTER, Align.CENTER, Align.MIN),
                 )
             head.faces().filter_by(Axis.Z).sort_by(Axis.Z).last
 

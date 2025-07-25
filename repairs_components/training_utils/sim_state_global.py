@@ -210,6 +210,7 @@ def reconstruct_sim_state(
     tool_data: torch.Tensor,  # int tensor of tool ids
     starting_hole_positions: torch.Tensor,
     starting_hole_quats: torch.Tensor,
+    part_hole_batch: torch.Tensor,
     fluid_data_placeholder: list[dict[str, int]] | None = None,
 ) -> RepairsSimState:
     """Load a single simulation state from graphs and indices (i.e. from the offline dataset)"""
@@ -237,7 +238,7 @@ def reconstruct_sim_state(
         ToolState.rebuild_from_saved(indices) for indices in tool_data
     ]
     repairs_sim_state = update_hole_locs(
-        repairs_sim_state, starting_hole_positions, starting_hole_quats
+        repairs_sim_state, starting_hole_positions, starting_hole_quats, part_hole_batch
     )
 
     return repairs_sim_state

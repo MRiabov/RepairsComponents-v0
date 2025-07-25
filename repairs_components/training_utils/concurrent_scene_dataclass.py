@@ -110,20 +110,12 @@ class ConcurrentSceneData:
             f"initial_diff_counts must have the same batch dimension as batch_dim, but got {self.initial_diff_counts.shape[0]} and {self.batch_dim}"
         )
         # holes
-        self.hole_count = self.starting_hole_positions.shape[1]
-        assert self.starting_hole_positions.shape == (
-            self.batch_dim,
-            self.hole_count,
-            3,
-        ), (
-            f"Starting hole positions must have shape ({self.batch_dim}, {self.hole_count}, 3), but got {self.starting_hole_positions.shape}"
-        )
-        assert self.starting_hole_quats.shape == (
-            self.batch_dim,
-            self.hole_count,
-            4,
-        ), (
-            f"Starting hole quats must have shape ({self.batch_dim}, {self.hole_count}, 4), but got {self.starting_hole_quats.shape}"
+        self.hole_count = self.starting_hole_positions.shape[0]
+        assert self.starting_hole_positions.shape == (self.hole_count, 3), (
+            f"Starting hole positions must have shape ({self.hole_count}, 3), but got {self.starting_hole_positions.shape}"
+        )  # note the no batch dim.
+        assert self.starting_hole_quats.shape == (self.hole_count, 4), (
+            f"Starting hole quats must have shape ({self.hole_count}, 4), but got {self.starting_hole_quats.shape}"
         )
         assert self.part_hole_batch.shape == (self.hole_count,), (
             "Part hole batch must have shape (H,)"
@@ -157,13 +149,13 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         for scene_cfg in scene_configs
     )
     assert all(
-        scene_configs[0].starting_hole_positions.keys()
-        == scene_cfg.starting_hole_positions.keys()
+        scene_configs[0].starting_hole_positions.shape[0]
+        == scene_cfg.starting_hole_positions.shape[0]
         for scene_cfg in scene_configs
     )
     assert all(
-        scene_configs[0].starting_hole_quats.keys()
-        == scene_cfg.starting_hole_quats.keys()
+        scene_configs[0].starting_hole_quats.shape[0]
+        == scene_cfg.starting_hole_quats.shape[0]
         for scene_cfg in scene_configs
     )
 
@@ -193,18 +185,6 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         "electronics_diff": electronics_diffs,
         "fluid_diff": fluid_diffs,
     }
-    starting_hole_positions = {}
-    starting_hole_quats = {}
-
-    for data in scene_configs:
-        # cat per key
-        for key in data.starting_hole_positions.keys():
-            starting_hole_positions[key] = torch.cat(
-                [data.starting_hole_positions[key] for data in scene_configs], dim=0
-            )
-            starting_hole_quats[key] = torch.cat(
-                [data.starting_hole_quats[key] for data in scene_configs], dim=0
-            )
 
     # Extend tensors and RepairsSimState with items from other scene_configs
 
@@ -231,8 +211,8 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         reward_history=reward_history,
         step_count=torch.zeros(new_batch_dim, dtype=torch.int),
         task_ids=torch.cat([data.task_ids for data in scene_configs], dim=0),
-        starting_hole_positions=starting_hole_positions,
-        starting_hole_quats=starting_hole_quats,
+        starting_hole_positions=scene_configs[0].starting_hole_positions,
+        starting_hole_quats=scene_configs[0].starting_hole_quats,
         hole_depth=scene_configs[0].hole_depth,
         part_hole_batch=scene_configs[0].part_hole_batch,
         hole_is_through=scene_configs[0].hole_is_through,
@@ -265,9 +245,9 @@ def merge_scene_configs_at_idx(
         "Count of reset configs must be equal to the batch dimension of the incoming configs."
     )
     assert (
-        old_scene_config.starting_hole_positions.keys()
-        == new_scene_config.starting_hole_positions.keys()
-    ), "Starting hole positions must have the same keys."
+        old_scene_config.starting_hole_positions.shape[0]
+        == new_scene_config.starting_hole_positions.shape[0]
+    ), "Starting hole positions must have the same shape."
     if torch.any(reset_mask):
         old_idx = torch.nonzero(reset_mask).squeeze(1)
         new_idx = torch.arange(len(old_idx))
@@ -301,11 +281,11 @@ def merge_scene_configs_at_idx(
             ),
             step_count=old_scene_config.step_count.clone(),
             task_ids=old_scene_config.task_ids.clone(),
-            starting_hole_positions=old_scene_config.starting_hole_positions,
-            starting_hole_quats=old_scene_config.starting_hole_quats,
-            hole_depth=old_scene_config.hole_depth,
-            part_hole_batch=old_scene_config.part_hole_batch,
-            hole_is_through=old_scene_config.hole_is_through,
+            starting_hole_positions=old_scene_config.starting_hole_positions.clone(),
+            starting_hole_quats=old_scene_config.starting_hole_quats.clone(),
+            hole_depth=old_scene_config.hole_depth.clone(),
+            part_hole_batch=old_scene_config.part_hole_batch.clone(),
+            hole_is_through=old_scene_config.hole_is_through.clone(),
         )
         # Update vox_init and vox_des for reset states
         merged_scene_config.vox_init = sparse_arr_put(
@@ -409,11 +389,11 @@ def split_scene_config(scene_config: ConcurrentSceneData):
                 step_count=scene_config.step_count[i],
                 task_ids=scene_config.task_ids[i : i + 1],
                 # holes are uniform throughout the batch
-                starting_hole_positions=scene_config.starting_hole_positions,
-                starting_hole_quats=scene_config.starting_hole_quats,
-                hole_depth=scene_config.hole_depth,
-                part_hole_batch=scene_config.part_hole_batch,
-                hole_is_through=scene_config.hole_is_through,
+                starting_hole_positions=scene_config.starting_hole_positions.clone(),
+                starting_hole_quats=scene_config.starting_hole_quats.clone(),
+                hole_depth=scene_config.hole_depth.clone(),
+                part_hole_batch=scene_config.part_hole_batch.clone(),
+                hole_is_through=scene_config.hole_is_through.clone(),
             )
         )
     return cfg_list

@@ -68,8 +68,8 @@ def are_quats_within_angle(
     q1: torch.Tensor, q2: torch.Tensor, max_angle_deg: torch.Tensor
 ) -> torch.Tensor:
     """Returns True where angular distance between q1 and q2 is ≤ max_angle_deg."""
-    sanitize_quaternion(q1)
-    sanitize_quaternion(q2)
+    q1 = sanitize_quaternion(q1)
+    q2 = sanitize_quaternion(q2)
     return quat_angle_diff_deg(q1, q2) <= max_angle_deg
 
 

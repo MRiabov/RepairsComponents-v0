@@ -374,8 +374,8 @@ def translate_compound_to_sim_state(
 
     # if the any is non-empty all are non-empty...
     if (
-        sim_state.physical_state[0].male_connector_positions.size != 0  # non-empty
-        and sim_state.physical_state[0].female_connector_positions.size != 0
+        sim_state.physical_state[0].male_connector_positions  # dict is non-empty
+        and sim_state.physical_state[0].female_connector_positions
     ):
         # work over batch of env_id and batch of keys...
         male_connector_positions_all = {}

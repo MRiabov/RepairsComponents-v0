@@ -33,7 +33,7 @@ assert len(env_setups) == 1, "Only one environment setup is supported for now."
 ml_batch_dim = 8
 
 debug = True  # True
-force_recreate_data = False  # True
+force_recreate_data = True  # True
 # Note: set force_recreate_data to True after non-debug runs to remove large config files.
 
 # Environment configuration

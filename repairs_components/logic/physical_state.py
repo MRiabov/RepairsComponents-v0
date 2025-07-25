@@ -134,15 +134,15 @@ class PhysicalState:
                 (0, 4), dtype=torch.float32, device=self.device
             )
             self.graph.fasteners_attached_to = torch.empty(
-                (0, 2), dtype=torch.int16, device=self.device
+                (0, 2), dtype=torch.int32, device=self.device
             )  # to which 2 bodies attached. -1 if not attached.
             self.graph.fasteners_inserted_into_holes = torch.empty(
-                (0, 2), dtype=torch.int16, device=self.device
+                (0, 2), dtype=torch.int32, device=self.device
             )  # to which 2 holes inserted. -1 if not inserted. # equal in shape and -1 to fasteners_attached_to
 
             # note: free_fasteners_id does not go into graph, it is only used for
             # fastener_id_to_name mapping.
-            # self.graph.fasteners_id = torch.empty((0,), dtype=torch.int16)
+            # self.graph.fasteners_id = torch.empty((0,), dtype=torch.int32)
             self.graph.fasteners_diam = torch.empty(
                 (0,), dtype=torch.float32, device=self.device
             )
@@ -252,28 +252,26 @@ class PhysicalState:
         rot_as_quat: bool = False,  # mostly for convenience in testing
         _expect_unnormalized_coordinates: bool = True,  # mostly for tests...
         connector_position_relative_to_center: torch.Tensor | None = None,
+        max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64]),
+        min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0]),
     ):
         assert name not in self.body_indices, f"Body {name} already registered"
         assert name.endswith(("@solid", "@connector", "@fixed_solid")), (
             f"Body name must end with @solid, @connector or @fixed_solid. Got {name}"
         )  # note: fasteners don't go here, they go in `register_fastener`.
         assert len(position) == 3, f"Position must be 3D vector, got {position}"
-        if not _expect_unnormalized_coordinates:
-            max_bounds = torch.tensor([640, 640, 640], device=self.device)
-            min_bounds = torch.tensor([0, 0, 0], device=self.device)
 
-            # position_sim because that's what we put into sim state.
+        # position_sim because that's what we put into sim state.
+        if _expect_unnormalized_coordinates:
             position_sim = compound_pos_to_sim_pos(
                 torch.tensor(position, device=self.device).unsqueeze(0)
             )
         else:  # else to genesis (note: flip the var name to normalized coords.)
-            max_bounds = torch.tensor([0.32, 0.32, 0.64], device=self.device)
-            min_bounds = torch.tensor([-0.32, -0.32, 0.0], device=self.device)
             position_sim = torch.tensor(position, device=self.device).unsqueeze(0)
         assert (position_sim >= min_bounds).all() and (
             position_sim <= max_bounds
         ).all(), (
-            f"Expected register position to be in [{min_bounds.tolist()}, {max_bounds.tolist()}], got {list(position_sim)} at body {name}"
+            f"Expected register position to be in [{min_bounds.tolist()}, {max_bounds.tolist()}], got {(position_sim.tolist())} at body {name}"
         )
         if not rot_as_quat:
             assert len(rotation) == 3, (
@@ -328,6 +326,7 @@ class PhysicalState:
         rotation: tuple,
         connector_position_relative_to_center: torch.Tensor | None = None,
     ):
+        "Note: expects normalized coordinates."
         assert name in self.body_indices, (
             f"Body {name} not registered. Registered bodies: {self.body_indices.keys()}"
         )
@@ -368,6 +367,8 @@ class PhysicalState:
     def register_fastener(self, fastener: Fastener):
         """A fastener method to register fasteners and add all necessary components.
         Handles constraining to bodies and adding to graph."""
+        # FIXME: register_fastener can't currently work because it doesn't know which hole we are adding to!
+        # TODO: update register_fastener to take hole_ids as inputs, translate that to bodies and update register_fastener.
 
         assert fastener.name not in self.body_indices, (
             f"Fasteners can't be registered as bodies!"
@@ -702,7 +703,7 @@ def _diff_node_features(
     # Quaternion diff
     quat_delta = quaternion_delta(data_a.quat, data_b.quat)  # [N,4]
     rot_mask = ~are_quats_within_angle(
-        data_a.quat, data_b.quat, deg_threshold, (5)
+        data_a.quat, data_b.quat, torch.tensor(deg_threshold, device=data_a.quat.device)
     )  # [N]
     quat_diff = torch.zeros_like(quat_delta)
     quat_diff[rot_mask] = quat_delta[rot_mask]
@@ -751,6 +752,10 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
 
 def compound_pos_to_sim_pos(compound_pos: torch.Tensor, env_size_mm=(640, 640, 640)):
     "Pos in compound to pos in sim/sim state"
+    assert compound_pos.ndim == 2 and compound_pos.shape[1] == 3, (
+        f"compound_pos must be [N, 3], got {compound_pos.shape}"
+    )
+    assert (compound_pos >= -1e-6).all(), "compound_pos must be non-negative"
     env_size_mm = torch.tensor(env_size_mm, device=compound_pos.device)
     compound_pos_xy = (compound_pos[:, :2] - env_size_mm[:2] / 2) / 1000
     compound_pos_z = compound_pos[:, 2] / 1000  # z needs not go lower.

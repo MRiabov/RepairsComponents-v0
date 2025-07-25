@@ -330,8 +330,10 @@ def check_connections(
 
     # Stack and transpose to get [B, M, 3] and [B, F, 3] for torch.cdist
     male_stacked = torch.stack(male_tensors).transpose(0, 1)  # [M, B, 3] -> [B, M, 3]
-    female_stacked = torch.stack(female_tensors).transpose(0, 1)  # [F, B, 3] -> [B, F, 3]
-    
+    female_stacked = torch.stack(female_tensors).transpose(
+        0, 1
+    )  # [F, B, 3] -> [B, F, 3]
+
     D = torch.cdist(male_stacked, female_stacked, p=2)  # [B, M, F]
     mask = D < connection_threshold
     indices = mask.nonzero(as_tuple=False)  # [N, 3] with (batch, m_idx, f_idx)

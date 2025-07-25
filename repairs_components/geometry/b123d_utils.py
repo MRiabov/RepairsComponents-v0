@@ -49,7 +49,7 @@ def fastener_hole_joint_name(id: int, depth: float, is_through: bool):
 
 def fastener_hole_info_from_joint_name(name: str):
     parts = name.split("#")
-    id = int(parts[0].split("_")[1])
+    id = int(parts[0].split("_")[2])
     depth_str, hole_type = parts[1], parts[2]
     depth = float(depth_str)
     assert hole_type in ("through", "blind"), f"Invalid hole type: {hole_type}"

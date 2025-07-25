@@ -140,11 +140,10 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 part_holes_pos,
                 part_holes_quat,
                 part_hole_depth,
-                part_hole_batch,
                 hole_is_through,
+                part_hole_batch,
             ) = get_starting_part_holes(
-                starting_scene_geom_,
-                starting_sim_state.physical_state[0].body_indices,
+                starting_scene_geom_, starting_sim_state.physical_state[0].body_indices
             )
 
             # store states
@@ -518,7 +517,7 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
     part_holes_quat: torch.Tensor = torch.empty((0, 4))
     part_hole_depth: torch.Tensor = torch.empty((0,))
     part_hole_is_through: torch.Tensor = torch.empty((0,), dtype=torch.bool)
-    part_hole_batch: torch.Tensor = torch.empty((0,))
+    part_hole_batch: torch.Tensor = torch.empty((0,), dtype=torch.long)
     all_parts = compound.leaves
     filtered_parts = [
         part
@@ -558,8 +557,8 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
                     fastener_hole_pos[id] = (
                         torch.tensor(tuple(joint.location.position)) / 1000
                     )
-                    fastener_hole_quat[id] = torch.tensor(
-                        tuple(joint.location.orientation)
+                    fastener_hole_quat[id] = euler_deg_to_quat_wxyz(
+                        torch.tensor(tuple(joint.location.orientation))
                     )
                     fastener_hole_depths[id] = depth / 1000
                     # FIXME: I explicitly don't need depth when I have it, I need it when the hole is through.

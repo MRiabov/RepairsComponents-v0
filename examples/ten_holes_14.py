@@ -19,7 +19,7 @@ class TenHoles(EnvSetup):
                 grid_locs = GridLocations(15, 0, 10, 1)
             for i, loc in enumerate(grid_locs.local_locations):
                 with Locations(loc):
-                    _hole, _loc, joint = fastener_hole(radius=3, depth=16, id=i)
+                    _hole, _loc, joint = fastener_hole(radius=3, depth=17, id=i)
                     joints.append(joint)
             debug__ = ""
 

@@ -100,8 +100,8 @@ def step_electronics(
     current_sim_state: RepairsSimState,
 ):
     """Step electronics attachments: No-op since connectivity is handled during translation phase.
-    
-    Electronics connections are already established in translate_compound_to_sim_state() 
+
+    Electronics connections are already established in translate_compound_to_sim_state()
     in translation.py, making this function redundant.
     """
     # Electronics connectivity is already handled during the translation phase
@@ -204,7 +204,10 @@ def step_screw_in_or_out(
         [phys_state.graph.fasteners_attached_to for phys_state in physical_state],
     ).to(actions.device)
     fastener_connected_to_hole = torch.stack(
-        [phys_state.graph.fasteners_attached_to_hole for phys_state in physical_state],
+        [
+            phys_state.graph.fasteners_inserted_into_holes
+            for phys_state in physical_state
+        ]
     ).to(actions.device)
 
     picked_up_fastener_ids = torch.tensor(

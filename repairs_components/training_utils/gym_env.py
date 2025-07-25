@@ -277,6 +277,7 @@ class RepairsEnv(gym.Env):
                 starting_hole_quats=partial_env_configs[scene_id].starting_hole_quats,
                 hole_depth=partial_env_configs[scene_id].hole_depth,
                 part_hole_batch=partial_env_configs[scene_id].part_hole_batch,
+                hole_is_through=partial_env_configs[scene_id].hole_is_through,
             )
 
             # store built scene and data
@@ -381,13 +382,16 @@ class RepairsEnv(gym.Env):
 
             # Update the current simulation state based on the scene
             success, total_diff_left, current_sim_state, diff = step_repairs(
-                scene_data.scene,
-                action_by_scenes[scene_id],
-                scene_data.gs_entities,
-                scene_data.current_state,
-                scene_data.desired_state,
-                scene_data.starting_hole_positions,
-                scene_data.starting_hole_quats,
+                scene=scene_data.scene,
+                actions=action_by_scenes[scene_id],
+                gs_entities=scene_data.gs_entities,
+                current_sim_state=scene_data.current_state,
+                desired_state=scene_data.desired_state,
+                starting_hole_positions=scene_data.starting_hole_positions,
+                starting_hole_quats=scene_data.starting_hole_quats,
+                hole_depth=scene_data.hole_depth,
+                hole_is_through=scene_data.hole_is_through,
+                part_hole_batch=scene_data.part_hole_batch,
             )
 
             # Update the scene data with the new state

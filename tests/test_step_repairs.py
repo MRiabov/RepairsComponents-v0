@@ -302,7 +302,6 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     screwdriver = Screwdriver(
         picked_up_fastener_tip_position=physical_state.hole_positions[0],
         picked_up_fastener_name="0@fastener",
-
     )
     repairs_sim_state.tool_state[0].current_tool = screwdriver
     connected_part_1_id = physical_state.body_indices["part_with_holes_1@solid"]

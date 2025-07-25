@@ -166,22 +166,24 @@ class OfflineDataloader:
 
         # load RepairsEnvState
         init_sim_state = reconstruct_sim_state(
-            elec_graphs_init,
-            mech_graphs_init,
-            scene_metadata["electronics_indices"],
-            scene_metadata["mechanical_indices"],
-            tool_data_init,
-            starting_hole_positions,
-            starting_hole_quats,
+            electronics_graphs=elec_graphs_init,
+            mechanical_graphs=mech_graphs_init,
+            electronics_indices=scene_metadata["electronics_indices"],
+            mechanical_indices=scene_metadata["mechanical_indices"],
+            tool_data=tool_data_init,
+            starting_hole_positions=starting_hole_positions,
+            starting_hole_quats=starting_hole_quats,
+            part_hole_batch=part_hole_batch,
         )
         des_sim_state = reconstruct_sim_state(
-            elec_graphs_des,
-            mech_graphs_des,
-            scene_metadata["electronics_indices"],
-            scene_metadata["mechanical_indices"],
-            tool_data_des,
-            starting_hole_positions,
-            starting_hole_quats,
+            electronics_graphs=elec_graphs_des,
+            mechanical_graphs=mech_graphs_des,
+            electronics_indices=scene_metadata["electronics_indices"],
+            mechanical_indices=scene_metadata["mechanical_indices"],
+            tool_data=tool_data_des,
+            starting_hole_positions=starting_hole_positions,
+            starting_hole_quats=starting_hole_quats,
+            part_hole_batch=part_hole_batch,
         )
 
         batch_dim = init_sim_state.scene_batch_dim
