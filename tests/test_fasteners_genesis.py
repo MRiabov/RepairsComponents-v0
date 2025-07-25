@@ -19,25 +19,6 @@ from tests.test_tool_genesis import move_franka_to_pos
 from genesis.engine.entities import RigidEntity
 
 
-@pytest.fixture
-def fastener():
-    return Fastener(
-        initial_body_a="body_a",
-        initial_body_b="body_b",
-        length=15.0,
-        diameter=5.0,
-        b_depth=5.0,
-        head_diameter=7.5,
-        head_height=3.0,
-        thread_pitch=0.5,
-    )
-
-
-@pytest.fixture
-def bd_geometry(fastener):
-    return fastener.bd_geometry()
-
-
 @pytest.fixture(scope="module")
 def scene_with_fastener_screwdriver_and_two_parts():
     from repairs_components.logic.tools.screwdriver import Screwdriver

@@ -26,8 +26,8 @@ import numpy as np
 @pytest.fixture
 def fastener():
     return Fastener(
-        initial_body_a="body_a",
-        initial_body_b="body_b",
+        initial_hole_id_a=0,
+        initial_hole_id_b=2,
         length=15.0,
         diameter=5.0,
         b_depth=5.0,
@@ -171,7 +171,7 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
     scene.reset()
     hole_positions, hole_quats, hole_indices_batch = holes_for_two_parts
 
-    fastener_data = Fastener(initial_body_a=None)
+    fastener_data = Fastener(initial_hole_id_a=None)
     # populate current sim state
     repairs_sim_state = RepairsSimState(1)
     physical_state = repairs_sim_state.physical_state[0]

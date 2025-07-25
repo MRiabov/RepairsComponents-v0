@@ -136,7 +136,7 @@ class PhysicalState:
             self.graph.fasteners_attached_to = torch.empty(
                 (0, 2), dtype=torch.int32, device=self.device
             )  # to which 2 bodies attached. -1 if not attached.
-            self.graph.fasteners_inserted_into_holes = torch.empty(
+            self.graph.fasteners_attached_to_hole = torch.empty(
                 (0, 2), dtype=torch.int32, device=self.device
             )  # to which 2 holes inserted. -1 if not inserted. # equal in shape and -1 to fasteners_attached_to
 
@@ -367,20 +367,28 @@ class PhysicalState:
     def register_fastener(self, fastener: Fastener):
         """A fastener method to register fasteners and add all necessary components.
         Handles constraining to bodies and adding to graph."""
-        # FIXME: register_fastener can't currently work because it doesn't know which hole we are adding to!
-        # TODO: update register_fastener to take hole_ids as inputs, translate that to bodies and update register_fastener.
-
         assert fastener.name not in self.body_indices, (
             f"Fasteners can't be registered as bodies!"
         )
-        if fastener.initial_body_a is not None:
-            assert fastener.initial_body_a in self.body_indices, (
-                f"Body {fastener.initial_body_a} marked as connected to fastener {fastener.name} is not registered"
+
+        # Convert hole IDs to body names using hole_indices_batch
+        initial_body_a = None
+        initial_body_b = None
+
+        if fastener.initial_hole_id_a is not None:
+            assert 0 <= fastener.initial_hole_id_a < len(self.hole_indices_batch), (
+                f"Hole ID {fastener.initial_hole_id_a} is out of range. Available holes: 0-{len(self.hole_indices_batch) - 1}"
             )
-        if fastener.initial_body_b is not None:
-            assert fastener.initial_body_b in self.body_indices, (
-                f"Body {fastener.initial_body_b} marked as connected to fastener {fastener.name} is not registered"
+            body_idx_a = int(self.hole_indices_batch[fastener.initial_hole_id_a].item())
+            initial_body_a = self.inverse_body_indices[body_idx_a]
+
+        if fastener.initial_hole_id_b is not None:
+            assert 0 <= fastener.initial_hole_id_b < len(self.hole_indices_batch), (
+                f"Hole ID {fastener.initial_hole_id_b} is out of range. Available holes: 0-{len(self.hole_indices_batch) - 1}"
             )
+            body_idx_b = int(self.hole_indices_batch[fastener.initial_hole_id_b].item())
+            initial_body_b = self.inverse_body_indices[body_idx_b]
+
         fastener_id = len(self.graph.fasteners_pos)
         self.graph.fasteners_pos = torch.cat(
             [self.graph.fasteners_pos, torch.zeros((1, 3), device=self.device)], dim=0
@@ -388,13 +396,7 @@ class PhysicalState:
         self.graph.fasteners_quat = torch.cat(
             [self.graph.fasteners_quat, torch.zeros((1, 4), device=self.device)], dim=0
         )
-        self.graph.fasteners_attached_to = torch.cat(
-            [
-                self.graph.fasteners_attached_to,
-                torch.full((1, 2), -1, device=self.device),
-            ],
-            dim=0,
-        )
+
         self.graph.fasteners_diam = torch.cat(
             [
                 self.graph.fasteners_diam,
@@ -409,11 +411,25 @@ class PhysicalState:
             ],
             dim=0,
         )
+        self.graph.fasteners_attached_to = torch.cat(
+            [
+                self.graph.fasteners_attached_to,
+                torch.full((1, 2), -1, device=self.device),
+            ],
+            dim=0,
+        )  # note: technically fasteners_attached_to is a junk value as it simply repeats fasteners_attached_to_hole except with part IDs.
+        self.graph.fasteners_attached_to_hole = torch.cat(
+            [
+                self.graph.fasteners_attached_to_hole,
+                torch.full((1, 2), -1, device=self.device),
+            ],
+            dim=0,
+        )
 
-        if fastener.initial_body_a is not None:
-            self.connect_fastener_to_one_body(fastener_id, fastener.initial_body_a)
-        if fastener.initial_body_b is not None:
-            self.connect_fastener_to_one_body(fastener_id, fastener.initial_body_b)
+        if initial_body_a is not None:
+            self.connect_fastener_to_one_body(fastener_id, initial_body_a)
+        if initial_body_b is not None:
+            self.connect_fastener_to_one_body(fastener_id, initial_body_b)
 
     def connect_fastener_to_one_body(self, fastener_id: int, body_name: str):
         """Connect a fastener to a body. Used during screw-in and initial construction."""

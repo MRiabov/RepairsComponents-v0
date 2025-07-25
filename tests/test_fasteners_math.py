@@ -173,8 +173,8 @@ def test_distance_tie_selects_first():
 @pytest.fixture
 def fastener():
     return Fastener(
-        initial_body_a="body_a",
-        initial_body_b="body_b",
+        initial_hole_id_a=0,
+        initial_hole_id_b=1,
         length=15.0,
         diameter=5.0,
         b_depth=5.0,

@@ -28,8 +28,8 @@ class ClampPlates(EnvSetup):
         bottom_plate = top_plate.part.moved(Location((0, 0, -5)))
 
         start_fastener = Fastener(
-            initial_body_a="top_plate@solid",
-            initial_body_b="bottom_plate@solid",
+            initial_hole_id_a=0,
+            initial_hole_id_b=None,
             b_depth=10,
         ).bd_geometry()
         fasteners = []

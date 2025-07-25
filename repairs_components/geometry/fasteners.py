@@ -26,24 +26,33 @@ class Fastener(Component):
 
     def __init__(
         self,
-        initial_body_a: str
-        | None = None,  # how will it be constrained in case of hole?
-        initial_body_b: str | None = None,
+        initial_hole_id_a: int | None = None,  # hole ID for constraint A
+        initial_hole_id_b: int | None = None,  # hole ID for constraint B
+        # note: initial_hole_a and b are not used in bd geometry.
         length: float = 15.0,  # mm
         diameter: float = 5.0,  # mm
         *,
+        expected_body_name_a: str | None = None,
+        expected_body_name_b: str | None = None,
         b_depth: float = 5.0,
         head_diameter: float = 7.5,  # mm
         head_height: float = 3.0,  # mm
         thread_pitch: float = 0.5,  # mm
     ):
-        # assert initial_body_a is not None, "initial_body_a must be provided"
+        """
+        Args:
+        - initial_hole_id_a: ID of the hole for constraint A
+        - initial_hole_id_b: ID of the hole for constraint B
+        - expected_body_name_a: Optional(!) Name of the body for constraint A. If provided, constraint mechanism can check that id of holes corresponds to ids of bodies, and those to names.
+        - expected_body_name_b: Optional(!) Name of the body for constraint B. If provided, constraint mechanism can check that id of holes corresponds to ids of bodies, and those to names.
+        """#maybe TODO: expected_body_name_a and b.
+        # assert initial_hole_id_a is not None, "initial_hole_id_a must be provided"
         assert head_diameter > diameter, (
             "head_diameter of a fastener must be greater than diameter"
         )
         assert b_depth > 0, "b_depth of a fastener must be greater than 0"
-        self.initial_body_a = initial_body_a
-        self.initial_body_b = initial_body_b
+        self.initial_hole_id_a = initial_hole_id_a
+        self.initial_hole_id_b = initial_hole_id_b
         self.thread_pitch = thread_pitch
         self.length = length
         self.b_depth = b_depth
@@ -52,7 +61,7 @@ class Fastener(Component):
         self.head_height = head_height
         # self.a_constraint_active = True # note: a_constraint_active is always True now.
         self.b_constraint_active = (
-            initial_body_b is not None
+            initial_hole_id_b is not None
         )  # deprecated, for backwards compatibility
         self.name = get_fastener_singleton_name(self.diameter, self.length)
 

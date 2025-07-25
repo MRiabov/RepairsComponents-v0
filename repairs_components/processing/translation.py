@@ -27,6 +27,7 @@ from repairs_components.processing.geom_utils import (
     are_quats_within_angle,
     sanitize_quaternion,
 )
+from repairs_components.geometry.b123d_utils import fastener_hole_info_from_joint_name
 
 
 def translate_state_to_genesis_scene(
@@ -330,27 +331,31 @@ def translate_compound_to_sim_state(
                 joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
                 joint_tip: RevoluteJoint = part.joints["fastener_joint_tip"]
 
-                # check if constraint_b active
-                # note: constraint a may only be inactive in perturbed "disassembled" states.
-
+                # check if constraint_a and constraint_b are active
                 constraint_a_active = joint_a.connected_to is not None
                 constraint_b_active = joint_b.connected_to is not None
 
-                # if active, get connected to names
-                initial_body_a = (
-                    joint_a.connected_to.parent if constraint_a_active else None
-                )
-                initial_body_b = (
-                    joint_b.connected_to.parent if constraint_b_active else None
-                )
+                # if active, get hole IDs from connected joint labels
+                initial_hole_id_a = None
+                initial_hole_id_b = None
+                # note: a little verbose, but OK code.
+                if constraint_a_active:
+                    # Extract hole ID from the connected joint label
+                    joint_label = joint_a.connected_to.label
+                    assert joint_label.startswith("fastener_hole_")
+                    hole_id, _, _ = fastener_hole_info_from_joint_name(joint_label)
+                    initial_hole_id_a = hole_id
+
+                if constraint_b_active:
+                    # Extract hole ID from the connected joint label
+                    joint_label = joint_b.connected_to.label
+                    assert joint_label.startswith("fastener_hole_")
+                    hole_id, _, _ = fastener_hole_info_from_joint_name(joint_label)
+                    initial_hole_id_b = hole_id
 
                 fastener = Fastener(
-                    initial_body_a=initial_body_a.label
-                    if constraint_a_active
-                    else None,
-                    initial_body_b=initial_body_b.label
-                    if constraint_b_active
-                    else None,
+                    initial_hole_id_a=initial_hole_id_a,
+                    initial_hole_id_b=initial_hole_id_b,
                 )
                 sim_state.physical_state[env_idx].register_fastener(fastener)
 
