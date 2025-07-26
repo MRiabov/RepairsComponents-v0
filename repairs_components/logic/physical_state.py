@@ -10,11 +10,11 @@ Provides diff methods:
 diff(): combines both into {'fasteners', 'bodies'} with total change count
 """
 
-from typing_extensions import deprecated
 import torch
 from repairs_components.geometry.fasteners import Fastener
 from torch_geometric.data import Data
 from dataclasses import dataclass, field
+from tensordict import tensorclass
 from repairs_components.processing.geom_utils import (
     are_quats_within_angle,
     euler_deg_to_quat_wxyz,
@@ -24,7 +24,7 @@ from repairs_components.processing.geom_utils import (
 )
 
 
-@dataclass
+@tensorclass
 class PhysicalState:
     device: torch.device = field(
         default_factory=lambda: torch.device(
@@ -49,8 +49,6 @@ class PhysicalState:
         default_factory=lambda: torch.empty((0,), dtype=torch.int8)
     )
     """Count of fasteners held by each body (not fasteners)"""
-    num_nodes: int = 0
-    """Number of solids in the graph"""
 
     # Edge attributes (previously in graph)
     edge_index: torch.Tensor = field(
@@ -527,7 +525,7 @@ class PhysicalState:
         diff_graph.edge_index = edge_index
         diff_graph.edge_attr = edge_attr
         diff_graph.edge_mask = edge_mask
-        diff_graph.num_nodes = num_nodes
+        diff_graph.num_nodes = len()
 
         return diff_graph, int(total_diff_count)
 
@@ -652,13 +650,15 @@ class PhysicalState:
             rotation,
             connector_position_relative_to_center.to(self.device).unsqueeze(0),
         ).squeeze(0)
-        
+
         # For connectors, the body index is the connector itself since connectors are registered as bodies
         if name not in self.body_indices:
-            raise ValueError(f"Connector body {name} not found in body_indices. Available: {list(self.body_indices.keys())}")
-        
+            raise ValueError(
+                f"Connector body {name} not found in body_indices. Available: {list(self.body_indices.keys())}"
+            )
+
         body_idx = self.body_indices[name]
-        
+
         if name.endswith("_male@connector"):
             # Check if connector already exists
             if name in self.connector_indices_from_name:
@@ -669,14 +669,18 @@ class PhysicalState:
                 # Add new connector
                 connector_idx = len(self.male_connector_positions)
                 self.connector_indices_from_name[name] = connector_idx
-                self.male_connector_batch = torch.cat([
-                    self.male_connector_batch, 
-                    torch.tensor([body_idx], dtype=torch.long, device=self.device)
-                ])
-                self.male_connector_positions = torch.cat([
-                    self.male_connector_positions.to(self.device), 
-                    connector_pos.unsqueeze(0)
-                ])
+                self.male_connector_batch = torch.cat(
+                    [
+                        self.male_connector_batch,
+                        torch.tensor([body_idx], dtype=torch.long, device=self.device),
+                    ]
+                )
+                self.male_connector_positions = torch.cat(
+                    [
+                        self.male_connector_positions.to(self.device),
+                        connector_pos.unsqueeze(0),
+                    ]
+                )
         else:
             # Check if connector already exists
             if name in self.connector_indices_from_name:
@@ -687,16 +691,18 @@ class PhysicalState:
                 # Add new connector
                 connector_idx = len(self.female_connector_positions)
                 self.connector_indices_from_name[name] = connector_idx
-                self.female_connector_batch = torch.cat([
-                    self.female_connector_batch, 
-                    torch.tensor([body_idx], dtype=torch.long, device=self.device)
-                ])
-                self.female_connector_positions = torch.cat([
-                    self.female_connector_positions.to(self.device), 
-                    connector_pos.unsqueeze(0)
-                ])
-
-
+                self.female_connector_batch = torch.cat(
+                    [
+                        self.female_connector_batch,
+                        torch.tensor([body_idx], dtype=torch.long, device=self.device),
+                    ]
+                )
+                self.female_connector_positions = torch.cat(
+                    [
+                        self.female_connector_positions.to(self.device),
+                        connector_pos.unsqueeze(0),
+                    ]
+                )
 
 
 def _diff_body_features(
