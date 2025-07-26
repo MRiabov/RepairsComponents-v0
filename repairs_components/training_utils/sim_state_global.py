@@ -115,20 +115,23 @@ class RepairsSimState(SimState):
         # explicitly patch some fields as expected to be missing:
         self.physical_state[0].fastener = None
 
-        # save graphs, everything else can be reconstructed from the build123d scene.
+        # save entire dataclasses directly instead of graphs
 
         mech_graph_path, elec_graph_path = get_graph_save_paths(
             path, scene_id, init=init
         )
-        # physical_graphs = [self.physical_state[env_id] for env_id in env_idx]
-        physical_graphs = [self.physical_state[env_id].graph for env_id in env_idx]
+        physical_states = [self.physical_state[env_id] for env_id in env_idx]
         electronics_graphs = [
             self.electronics_state[env_id].graph for env_id in env_idx
         ]
-        # mech_batch = Batch.from_data_list(physical_graphs)
-        # assert (torch.max(mech_batch.position) < 1).all(), "Saved data is out of bounds"
+        # Validation: check that saved data is within bounds
+        for state in physical_states:
+            if len(state.position) > 0:
+                assert (torch.max(state.position) < 1).all(), (
+                    "Saved data is out of bounds"
+                )
 
-        torch.save(mech_batch, mech_graph_path)
+        torch.save(physical_states, mech_graph_path)
         torch.save(Batch.from_data_list(electronics_graphs), elec_graph_path)
 
         torch.save(
@@ -205,7 +208,7 @@ def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
 
 def reconstruct_sim_state(
     electronics_graphs: list[Data],
-    mechanical_graphs: list[Data],
+    mechanical_states: list,  # Now PhysicalState objects directly
     electronics_indices: dict[str, int],
     mechanical_indices: dict[str, int],
     tool_data: torch.Tensor,  # int tensor of tool ids
@@ -214,16 +217,48 @@ def reconstruct_sim_state(
     part_hole_batch: torch.Tensor,
     fluid_data_placeholder: list[dict[str, int]] | None = None,
 ) -> RepairsSimState:
-    """Load a single simulation state from graphs and indices (i.e. from the offline dataset)"""
+    """Load a single simulation state from PhysicalState objects and electronics graphs (i.e. from the offline dataset)"""
     from repairs_components.training_utils.sim_state_global import RepairsSimState
     from repairs_components.processing.translation import update_hole_locs
+    from repairs_components.logic.physical_state import PhysicalState
 
     assert fluid_data_placeholder is None, NotImplementedError(
         "Fluid data reconstruction is not implemented."
     )
-    assert len(electronics_graphs) == len(mechanical_graphs), (
-        "Electronics and mechanical graphs must have the same length."
+    assert len(electronics_graphs) == len(mechanical_states), (
+        "Electronics graphs and mechanical states must have the same length."
     )
+
+    # Validate that mechanical_states are actually PhysicalState objects
+    for i, state in enumerate(mechanical_states):
+        assert isinstance(state, PhysicalState), (
+            f"Expected PhysicalState object at index {i}, got {type(state)}"
+        )
+
+        # Validate dataclass fields - check that all expected keys exist and tensor shapes are consistent
+        state_dict = state.__dict__
+        expected_keys = PhysicalState.__dataclass_fields__.keys()
+
+        actual_keys = set(state_dict.keys())
+        assert expected_keys == actual_keys, (
+            f"PhysicalState at index {i} has mismatched keys.\n"
+            f"Missing: {expected_keys - actual_keys}\n"
+            f"Extra: {actual_keys - expected_keys}"
+        )
+
+        # Validate tensor shapes are consistent within the state
+        if len(state.position) > 0:
+            assert state.position.shape[0] == state.quat.shape[0], (
+                f"Position and quat tensors must have same batch size at index {i}"
+            )
+            assert state.position.shape[0] == state.fixed.shape[0], (
+                f"Position and fixed tensors must have same batch size at index {i}"
+            )
+
+        if len(state.fasteners_pos) > 0:
+            assert state.fasteners_pos.shape[0] == state.fasteners_quat.shape[0], (
+                f"Fastener position and quat tensors must have same batch size at index {i}"
+            )
 
     batch_dim = len(electronics_graphs)
     repairs_sim_state = RepairsSimState(batch_dim)
@@ -231,12 +266,9 @@ def reconstruct_sim_state(
         ElectronicsState.rebuild_from_graph(graph, electronics_indices)
         for graph in electronics_graphs
     ]
-    repairs_sim_state.physical_state = [
-        PhysicalState.rebuild_from_graph(
-            graph, mechanical_indices, hole_pos, hole_quats, hole_indices_batch
-        )
-        for graph in mechanical_graphs
-    ]
+    # Use the PhysicalState objects directly - no need to rebuild from graphs
+    repairs_sim_state.physical_state = mechanical_states
+
     repairs_sim_state.tool_state = [
         ToolState.rebuild_from_saved(indices) for indices in tool_data
     ]

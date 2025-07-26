@@ -167,7 +167,7 @@ class OfflineDataloader:
         # load RepairsEnvState
         init_sim_state = reconstruct_sim_state(
             electronics_graphs=elec_graphs_init,
-            mechanical_graphs=mech_graphs_init,
+            mechanical_states=mech_graphs_init,  # Now PhysicalState objects
             electronics_indices=scene_metadata["electronics_indices"],
             mechanical_indices=scene_metadata["mechanical_indices"],
             tool_data=tool_data_init,
@@ -177,7 +177,7 @@ class OfflineDataloader:
         )
         des_sim_state = reconstruct_sim_state(
             electronics_graphs=elec_graphs_des,
-            mechanical_graphs=mech_graphs_des,
+            mechanical_states=mech_graphs_des,  # Now PhysicalState objects
             electronics_indices=scene_metadata["electronics_indices"],
             mechanical_indices=scene_metadata["mechanical_indices"],
             tool_data=tool_data_des,
@@ -227,15 +227,14 @@ class OfflineDataloader:
 
     def _load_graphs(
         self, scene_id: int, env_idx: torch.Tensor | None = None
-    ) -> tuple[list[Data], list[Data], list[Data], list[Data]]:
-        # ^ no point in converting lists of data to batches.
-        """Load the graphs for a scene."""
+    ) -> tuple[list, list[Data], list, list[Data]]:
+        # ^ Returns: (mech_init_states, elec_init_graphs, mech_des_states, elec_des_graphs)
+        """Load the physical states and electronics graphs for a scene."""
         if (
             scene_id not in self.loaded_pyg_batch_dict_mech_init
             or scene_id not in self.loaded_pyg_batch_dict_elec_init
         ):
-            # load initial and desired graphs: mech init, mech des, elec init, elec des
-            # note: not in a for loop, but it's OK.
+            # load initial and desired: mech init, mech des (PhysicalState lists), elec init, elec des (graph batches)
             mech_graph_init_path, elec_graph_init_path = get_graph_save_paths(
                 self.data_dir, scene_id, init=True
             )
@@ -243,42 +242,63 @@ class OfflineDataloader:
                 self.data_dir, scene_id, init=False
             )
 
-            graphs = []
-            for path in [
-                mech_graph_init_path,
-                elec_graph_init_path,
-                mech_graph_des_path,
-                elec_graph_des_path,
-            ]:
-                assert path.exists(), f"Graph file not found at {path}"
-                batch = torch.load(path)
-                assert isinstance(batch, Batch), (
-                    f"Graph under path {path} is not a Batch, it is {type(batch)}"
-                )
-                graphs.append(batch)
-
-                assert batch.num_graphs == graphs[0].num_graphs, (
-                    "Num graphs is expected to be equal for all graph batches."
-                )
-            (
-                self.loaded_pyg_batch_dict_mech_init[scene_id],
-                self.loaded_pyg_batch_dict_elec_init[scene_id],
-                self.loaded_pyg_batch_dict_mech_des[scene_id],
-                self.loaded_pyg_batch_dict_elec_des[scene_id],
-            ) = graphs
+            # Load mechanical data (now PhysicalState lists)
+            assert mech_graph_init_path.exists(), f"Mechanical file not found at {mech_graph_init_path}"
+            assert mech_graph_des_path.exists(), f"Mechanical file not found at {mech_graph_des_path}"
+            
+            mech_init_states = torch.load(mech_graph_init_path)
+            mech_des_states = torch.load(mech_graph_des_path)
+            
+            assert isinstance(mech_init_states, list), (
+                f"Mechanical data under path {mech_graph_init_path} is not a list, it is {type(mech_init_states)}"
+            )
+            assert isinstance(mech_des_states, list), (
+                f"Mechanical data under path {mech_graph_des_path} is not a list, it is {type(mech_des_states)}"
+            )
+            
+            # Load electronics data (still graph batches)
+            assert elec_graph_init_path.exists(), f"Electronics file not found at {elec_graph_init_path}"
+            assert elec_graph_des_path.exists(), f"Electronics file not found at {elec_graph_des_path}"
+            
+            elec_init_batch = torch.load(elec_graph_init_path)
+            elec_des_batch = torch.load(elec_graph_des_path)
+            
+            assert isinstance(elec_init_batch, Batch), (
+                f"Electronics data under path {elec_graph_init_path} is not a Batch, it is {type(elec_init_batch)}"
+            )
+            assert isinstance(elec_des_batch, Batch), (
+                f"Electronics data under path {elec_graph_des_path} is not a Batch, it is {type(elec_des_batch)}"
+            )
+            
+            # Validate batch dimensions match
+            assert len(mech_init_states) == len(mech_des_states), (
+                "Mechanical init and desired states must have the same length."
+            )
+            assert len(mech_init_states) == elec_init_batch.num_graphs, (
+                "Mechanical states and electronics graphs must have the same batch size."
+            )
+            assert elec_init_batch.num_graphs == elec_des_batch.num_graphs, (
+                "Electronics init and desired graphs must have the same batch size."
+            )
+            
+            # Store in cache
+            self.loaded_pyg_batch_dict_mech_init[scene_id] = mech_init_states
+            self.loaded_pyg_batch_dict_elec_init[scene_id] = elec_init_batch
+            self.loaded_pyg_batch_dict_mech_des[scene_id] = mech_des_states
+            self.loaded_pyg_batch_dict_elec_des[scene_id] = elec_des_batch
 
         if env_idx is None:
             return (
-                self.loaded_pyg_batch_dict_mech_init[scene_id].to_data_list(),
+                self.loaded_pyg_batch_dict_mech_init[scene_id],  # Already a list of PhysicalState
                 self.loaded_pyg_batch_dict_elec_init[scene_id].to_data_list(),
-                self.loaded_pyg_batch_dict_mech_des[scene_id].to_data_list(),
+                self.loaded_pyg_batch_dict_mech_des[scene_id],  # Already a list of PhysicalState
                 self.loaded_pyg_batch_dict_elec_des[scene_id].to_data_list(),
             )
         else:
             return (
-                self.loaded_pyg_batch_dict_mech_init[scene_id][env_idx],
+                [self.loaded_pyg_batch_dict_mech_init[scene_id][i] for i in env_idx],
                 self.loaded_pyg_batch_dict_elec_init[scene_id][env_idx],
-                self.loaded_pyg_batch_dict_mech_des[scene_id][env_idx],
+                [self.loaded_pyg_batch_dict_mech_des[scene_id][i] for i in env_idx],
                 self.loaded_pyg_batch_dict_elec_des[scene_id][env_idx],
             )
 
