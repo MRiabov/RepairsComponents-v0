@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 
 import numpy as np
+
 import torch
 from torch_geometric.data import Batch, Data
 
@@ -249,11 +250,14 @@ class OfflineDataloader:
             mech_init_states = torch.load(mech_graph_init_path)
             mech_des_states = torch.load(mech_graph_des_path)
             
-            assert isinstance(mech_init_states, list), (
-                f"Mechanical data under path {mech_graph_init_path} is not a list, it is {type(mech_init_states)}"
+            # Import PhysicalState for type checking
+            from repairs_components.logic.physical_state import PhysicalState
+            
+            assert isinstance(mech_init_states, PhysicalState), (
+                f"Mechanical data under path {mech_graph_init_path} is not a PhysicalState, it is {type(mech_init_states)}"
             )
-            assert isinstance(mech_des_states, list), (
-                f"Mechanical data under path {mech_graph_des_path} is not a list, it is {type(mech_des_states)}"
+            assert isinstance(mech_des_states, PhysicalState), (
+                f"Mechanical data under path {mech_graph_des_path} is not a PhysicalState, it is {type(mech_des_states)}"
             )
             
             # Load electronics data (still graph batches)

@@ -26,11 +26,11 @@ from repairs_components.processing.geom_utils import (
 
 @tensorclass
 class PhysicalState:
-    device: torch.device = field(
-        default_factory=lambda: torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu"
-        )
-    )
+    # device: torch.device = field(
+    #     default_factory=lambda: torch.device(
+    #         "cuda" if torch.cuda.is_available() else "cpu"
+    #     )
+    # ) #already included in tensordict
 
     # Node attributes (previously in graph)
     position: torch.Tensor = field(
@@ -165,7 +165,24 @@ class PhysicalState:
     # wait, do I not register free fasteners in the graph at all?
 
     def __post_init__(self):
-        self.inverse_body_indices = {v: k for k, v in self.body_indices.items()}
+        # Handle batched states where body_indices is a list of dicts
+        if isinstance(self.body_indices, list):
+            # For batched states, use the first dict as reference
+            # (assuming all batches have the same structure)
+            if len(self.body_indices) > 0:
+                first_item = self.body_indices[0]
+                if isinstance(first_item, dict):
+                    self.inverse_body_indices = {v: k for k, v in first_item.items()}
+                else:
+                    self.inverse_body_indices = {}
+            else:
+                self.inverse_body_indices = {}
+        elif isinstance(self.body_indices, dict):
+            # For single states, use the dict directly
+            self.inverse_body_indices = {v: k for k, v in self.body_indices.items()}
+        else:
+            # Fallback for unexpected types
+            self.inverse_body_indices = {}
 
     def export_graph(self):
         """Export the graph to a torch_geometric Data object usable by ML."""
@@ -525,7 +542,8 @@ class PhysicalState:
         diff_graph.edge_index = edge_index
         diff_graph.edge_attr = edge_attr
         diff_graph.edge_mask = edge_mask
-        diff_graph.num_nodes = len()
+        diff_graph.num_nodes = len(self.body_indices)
+        # ^ could be shape of positions... could be shape too.
 
         return diff_graph, int(total_diff_count)
 

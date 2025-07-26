@@ -111,10 +111,6 @@ class RepairsSimState(SimState):
         # uid = str(uuid.uuid4())
         # filename = f"step_state_{uid}.json"
         # filepath = path / filename
-
-        # explicitly patch some fields as expected to be missing:
-        self.physical_state[0].fastener = None
-
         # save entire dataclasses directly instead of graphs
 
         mech_graph_path, elec_graph_path = get_graph_save_paths(
@@ -131,7 +127,7 @@ class RepairsSimState(SimState):
                     "Saved data is out of bounds"
                 )
 
-        torch.save(physical_states, mech_graph_path)
+        torch.save(torch.stack(physical_states), mech_graph_path)
         torch.save(Batch.from_data_list(electronics_graphs), elec_graph_path)
 
         torch.save(
@@ -237,7 +233,10 @@ def reconstruct_sim_state(
 
         # Validate dataclass fields - check that all expected keys exist and tensor shapes are consistent
         state_dict = state.__dict__
-        expected_keys = PhysicalState.__dataclass_fields__.keys()
+        expected_keys = PhysicalState.__dataclass_fields__.keys() + (
+            "_tensordict",
+            "_non_tensordict",
+        )
 
         actual_keys = set(state_dict.keys())
         assert expected_keys == actual_keys, (
