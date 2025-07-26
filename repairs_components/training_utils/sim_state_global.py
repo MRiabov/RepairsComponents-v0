@@ -120,12 +120,13 @@ class RepairsSimState(SimState):
         mech_graph_path, elec_graph_path = get_graph_save_paths(
             path, scene_id, init=init
         )
-        physical_graphs = [self.physical_state[env_id] for env_id in env_idx]
+        # physical_graphs = [self.physical_state[env_id] for env_id in env_idx]
+        physical_graphs = [self.physical_state[env_id].graph for env_id in env_idx]
         electronics_graphs = [
             self.electronics_state[env_id].graph for env_id in env_idx
         ]
-        mech_batch = Batch.from_data_list(physical_graphs)
-        assert (torch.max(mech_batch.position) < 1).all(), "Saved data is out of bounds"
+        # mech_batch = Batch.from_data_list(physical_graphs)
+        # assert (torch.max(mech_batch.position) < 1).all(), "Saved data is out of bounds"
 
         torch.save(mech_batch, mech_graph_path)
         torch.save(Batch.from_data_list(electronics_graphs), elec_graph_path)

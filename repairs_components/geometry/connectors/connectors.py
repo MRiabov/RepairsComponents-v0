@@ -285,10 +285,10 @@ class Connector(ElectricalComponent):
 
 
 def check_connections(
-    male_connectors: Mapping[str, torch.Tensor],
-    female_connectors: Mapping[str, torch.Tensor],
+    male_connector_positions: torch.Tensor,
+    female_connector_positions: torch.Tensor,
     connection_threshold: float = 2.5,
-) -> list[list[tuple[str, str]]]:
+) -> torch.Tensor:
     """
     Find all male-female connector pairs that are spatially close.
 
@@ -297,52 +297,48 @@ def check_connections(
 
     Parameters
     ----------
-    male_connectors : Mapping[str, torch.Tensor]
-        Dict mapping male connector names to tensors of shape [B, 3].
-    female_connectors : Mapping[str, torch.Tensor]
-        Dict mapping female connector names to tensors of shape [B, 3].
+    male_connector_positions : torch.Tensor
+        Tensor of shape [M, 3] containing male connector positions.
+    female_connector_positions : torch.Tensor
+        Tensor of shape [F, 3] containing female connector positions.
     connection_threshold : float, default=2.5
         Max distance allowed for a valid connection.
 
     Returns
     -------
-    connections : list[list[tuple[str, str]]]
-        List of length B (batch size). Each element is a list of (male_name, female_name)
-        pairs that are valid connections in that batch.
+    connections : torch.Tensor
+        Tensor of shape [N, 2] where N is the number of valid connections.
+        Each row contains [male_idx, female_idx] for a valid connection.
     """
-    assert len(male_connectors) == len(female_connectors) > 0, (
-        f"Number of male and female connectors must be equal and greater than 0. Got: {len(male_connectors)} and {len(female_connectors)}"
+    if male_connector_positions.numel() == 0 or female_connector_positions.numel() == 0:
+        return torch.empty(
+            (0, 2), dtype=torch.long, device=male_connector_positions.device
+        )
+
+    assert (
+        male_connector_positions.ndim == 2 and male_connector_positions.shape[1] == 3
+    ), (
+        f"Expected male_connector_positions to be [M, 3], got {male_connector_positions.shape}"
     )
-    B = list(male_connectors.values())[0].shape[0]
+    assert (
+        female_connector_positions.ndim == 2
+        and female_connector_positions.shape[1] == 3
+    ), (
+        f"Expected female_connector_positions to be [F, 3], got {female_connector_positions.shape}"
+    )
 
-    male_keys = list(male_connectors.keys())
-    female_keys = list(female_connectors.keys())
+    # Compute pairwise distances [M, F]
+    D = torch.cdist(
+        male_connector_positions.unsqueeze(0),
+        female_connector_positions.unsqueeze(0),
+        p=2,
+    ).squeeze(0)
 
-    male_tensors = []
-    for tensor in male_connectors.values():
-        assert tensor.shape == (B, 3), f"Expected [B, 3] tensor, got {tensor.shape}"
-        male_tensors.append(tensor)
-
-    female_tensors = []
-    for tensor in female_connectors.values():
-        assert tensor.shape == (B, 3), f"Expected [B, 3] tensor, got {tensor.shape}"
-        female_tensors.append(tensor)
-
-    # Stack and transpose to get [B, M, 3] and [B, F, 3] for torch.cdist
-    male_stacked = torch.stack(male_tensors).transpose(0, 1)  # [M, B, 3] -> [B, M, 3]
-    female_stacked = torch.stack(female_tensors).transpose(
-        0, 1
-    )  # [F, B, 3] -> [B, F, 3]
-
-    D = torch.cdist(male_stacked, female_stacked, p=2)  # [B, M, F]
+    # Find connections below threshold
     mask = D < connection_threshold
-    indices = mask.nonzero(as_tuple=False)  # [N, 3] with (batch, m_idx, f_idx)
+    indices = mask.nonzero(as_tuple=False)  # [N, 2] with (m_idx, f_idx)
 
-    result: list[list[tuple[str, str]]] = [[] for _ in range(B)]
-    if indices.shape[0] > 0:
-        for b, m_idx, f_idx in indices.tolist():
-            result[b].append((male_keys[m_idx], female_keys[f_idx]))
-    return result
+    return indices
 
 
 class ConnectorsEnum(IntEnum):

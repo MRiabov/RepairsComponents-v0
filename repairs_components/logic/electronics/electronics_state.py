@@ -9,7 +9,7 @@ from repairs_components.logic.electronics.component import (
     ElectricalComponentsEnum,
 )
 from repairs_components.training_utils.sim_state import SimState
-from repairs_components.logic.physical_state import _diff_edge_features
+from repairs_components.logic.physical_state import _diff_fastener_features
 
 
 @dataclass  # note: possibly doable with @tensorclass. But it'll be not easy.
@@ -171,7 +171,7 @@ class ElectronicsState(SimState):
         other._build_graph()
 
         # Get edge differences
-        edge_diff, edge_diff_count = _diff_edge_features(self.graph, other.graph)
+        edge_diff, edge_diff_count = _diff_fastener_features(self.graph, other.graph)
 
         # Calculate total differences (only edge differences for now, as nodes are just existence checks)
         total_diff_count = edge_diff_count

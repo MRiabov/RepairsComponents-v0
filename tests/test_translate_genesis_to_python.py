@@ -96,21 +96,21 @@ def scene_with_entities():
         entities["part_1@solid"].get_pos(0).squeeze(0),
         entities["part_1@solid"].get_quat(0).squeeze(0),
         rot_as_quat=True,
-        _expect_unnormalized_coordinates=True,
+        _expect_unnormalized_coordinates=False,
     )  # note: register during init makes it expect gs coords (-0.32 to 0.32)
     sim_state.physical_state[0].register_body(
         "part_2@solid",
         entities["part_2@solid"].get_pos(0).squeeze(0),
         entities["part_2@solid"].get_quat(0).squeeze(0),
         rot_as_quat=True,
-        _expect_unnormalized_coordinates=True,
+        _expect_unnormalized_coordinates=False,
     )
     sim_state.physical_state[0].register_body(
         male_name + "@connector",
         entities[male_name + "@connector"].get_pos(0).squeeze(0),
         entities[male_name + "@connector"].get_quat(0).squeeze(0),
         rot_as_quat=True,
-        _expect_unnormalized_coordinates=True,
+        _expect_unnormalized_coordinates=False,
         connector_position_relative_to_center=torch.tensor(
             europlug.connector_pos_relative_to_center_male / 1000
         ),
@@ -120,7 +120,7 @@ def scene_with_entities():
         entities[female_name + "@connector"].get_pos(0).squeeze(0),
         entities[female_name + "@connector"].get_quat(0).squeeze(0),
         rot_as_quat=True,
-        _expect_unnormalized_coordinates=True,
+        _expect_unnormalized_coordinates=False,
         connector_position_relative_to_center=torch.tensor(
             europlug.connector_pos_relative_to_center_female / 1000
         ),
@@ -254,8 +254,14 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     ).to(gs_device)
 
     # connector_def pos should be at their positions too.
+    # Get male connector index and position from tensor-based structure
+    male_connector_idx = sim_state.physical_state[0].connector_indices_from_name[
+        male_name
+    ]
     connector_def_actual_m = (
-        sim_state.physical_state[0].male_connector_positions[male_name].to(gs_device)
+        sim_state.physical_state[0]
+        .male_connector_positions[male_connector_idx]
+        .to(gs_device)
     )
     connector_def_expected_m = get_connector_pos(
         entities[male_name].get_pos(0),
@@ -265,16 +271,20 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     assert torch.allclose(connector_def_actual_m, connector_def_expected_m)
 
     # connector_def pos should be at their positions too.
+    # Get female connector index and position from tensor-based structure
+    female_connector_idx = sim_state.physical_state[0].connector_indices_from_name[
+        female_name
+    ]
     connector_def_actual_f = (
         sim_state.physical_state[0]
-        .female_connector_positions[female_name]
+        .female_connector_positions[female_connector_idx]
         .to(gs_device)
     )
     connector_def_expected_f = get_connector_pos(
         entities[female_name].get_pos(0),
         entities[female_name].get_quat(0),
         f_connector_pos_untranslated.unsqueeze(0),
-    )
+    ).squeeze(0)
     assert torch.allclose(connector_def_actual_f, connector_def_expected_f)
 
     # holes should be updated relative to bodies:

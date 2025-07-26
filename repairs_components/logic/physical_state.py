@@ -100,7 +100,9 @@ class PhysicalState:
     # fastener_ids: dict[int, str] = field(default_factory=dict) # fixme: I don't remember how, but this is unused.
     hole_indices_from_name: dict[str, int] = field(default_factory=dict)
     """Hole indices per part name."""
-    part_hole_batch: torch.Tensor = field(default_factory=lambda: torch.empty((0,), dtype=torch.long))
+    part_hole_batch: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.long)
+    )
     """Hole indices per part in the batch."""
     # FIXME: part_hole_batch is a duplication from ConcurrentSimState
     hole_positions: torch.Tensor = field(
@@ -112,16 +114,28 @@ class PhysicalState:
     )  # [H, 4]
     """Hole quats per part, batched with hole_indices_batch."""
 
-    male_connector_positions: dict[str, torch.Tensor] = field(default_factory=dict)
-    """Male connector positions per part."""
-    female_connector_positions: dict[str, torch.Tensor] = field(default_factory=dict)
-    """Female connector positions per part."""
+    # Connector attributes (tensor-based batching)
+    connector_indices_from_name: dict[str, int] = field(default_factory=dict)
+    """Connector indices per connector name."""
+    male_connector_batch: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.long)
+    )
+    """Male connector indices per part in the batch."""
+    female_connector_batch: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.long)
+    )
+    """Female connector indices per part in the batch."""
+    male_connector_positions: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0, 3), dtype=torch.float32)
+    )
+    """Male connector positions per part, batched with male_connector_batch."""
+    female_connector_positions: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0, 3), dtype=torch.float32)
+    )
+    """Female connector positions per part, batched with female_connector_batch."""
 
     permanently_constrained_parts: list[list[str]] = field(default_factory=list)
     """List of lists of permanently constrained parts (linked_groups from EnvSetup)"""
-    device: torch.device = torch.device(
-        "cpu"
-    )  # should be always on CPU to my understanding. it's not a buffer.
 
     # TODO logic for fastener rebuild...
     # for edge_index, edge_attr in zip(graph.edge_index.t(), graph.edge_attr):
@@ -199,14 +213,17 @@ class PhysicalState:
         rot_as_quat: bool = False,  # mostly for convenience in testing
         _expect_unnormalized_coordinates: bool = True,  # mostly for tests...
         connector_position_relative_to_center: torch.Tensor | None = None,
-        max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64]),
-        min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0]),
+        max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64], device="cuda"),
+        min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0], device="cuda"),
     ):
         assert name not in self.body_indices, f"Body {name} already registered"
         assert name.endswith(("@solid", "@connector", "@fixed_solid")), (
             f"Body name must end with @solid, @connector or @fixed_solid. Got {name}"
         )  # note: fasteners don't go here, they go in `register_fastener`.
         assert len(position) == 3, f"Position must be 3D vector, got {position}"
+
+        min_bounds = min_bounds.to(self.device)
+        max_bounds = max_bounds.to(self.device)
 
         # position_sim because that's what we put into sim state.
         if _expect_unnormalized_coordinates:
@@ -215,6 +232,7 @@ class PhysicalState:
             )
         else:  # else to genesis (note: flip the var name to normalized coords.)
             position_sim = torch.tensor(position, device=self.device).unsqueeze(0)
+
         assert (position_sim >= min_bounds).all() and (
             position_sim <= max_bounds
         ).all(), (
@@ -234,7 +252,7 @@ class PhysicalState:
         self.inverse_body_indices[idx] = name
 
         # Update dataclass fields directly
-        self.position = torch.cat([position_sim, self.position], dim=0)
+        self.position = torch.cat([self.position, position_sim], dim=0)
         self.quat = torch.cat([self.quat, rotation], dim=0)
         self.count_fasteners_held = torch.cat(
             [
@@ -445,13 +463,13 @@ class PhysicalState:
             "Compared physical states must have equal bodies in them."
         )
         # Get node differences
-        node_diff, node_diff_count = _diff_node_features(self.graph, other.graph)
+        body_diff, body_diff_count = _diff_body_features(self, other)
 
         # Get edge differences
-        edge_diff, edge_diff_count = _diff_edge_features(self.graph, other.graph)
+        fastener_diff, fastener_diff_count = _diff_fastener_features(self, other)
 
         # Calculate total differences
-        total_diff_count = node_diff_count + edge_diff_count
+        total_diff_count = body_diff_count + fastener_diff_count
 
         # Create diff graph with same nodes as original
         diff_graph = Data()
@@ -464,10 +482,10 @@ class PhysicalState:
             num_nodes, dtype=torch.bool, device=self.device
         )
 
-        changed_indices = node_diff["changed_indices"].to(self.device)
+        changed_indices = body_diff["changed_indices"].to(self.device)
         # Store full per-node diff tensors (zeros for unchanged nodes)
-        diff_graph.position = node_diff["pos_diff"].to(self.device)
-        diff_graph.quat = node_diff["quat_diff"].to(self.device)
+        diff_graph.position = body_diff["pos_diff"].to(self.device)
+        diff_graph.quat = body_diff["quat_diff"].to(self.device)
         diff_graph.node_mask[changed_indices] = True
 
         # Edge features and mask
@@ -477,15 +495,15 @@ class PhysicalState:
         )  # [is_added, is_removed, is_changed]
         edge_mask = torch.empty((0,), dtype=torch.bool, device=self.device)
 
-        if edge_diff["added"] or edge_diff["removed"]:
+        if fastener_diff["added"] or fastener_diff["removed"]:
             added_edges = (
-                torch.tensor(edge_diff["added"], device=self.device).t()
-                if edge_diff["added"]
+                torch.tensor(fastener_diff["added"], device=self.device).t()
+                if fastener_diff["added"]
                 else torch.empty((2, 0), device=self.device, dtype=torch.long)
             )
             removed_edges = (
-                torch.tensor(edge_diff["removed"], device=self.device).t()
-                if edge_diff["removed"]
+                torch.tensor(fastener_diff["removed"], device=self.device).t()
+                if fastener_diff["removed"]
                 else torch.empty((2, 0), device=self.device, dtype=torch.long)
             )
 
@@ -543,7 +561,7 @@ class PhysicalState:
     def diff_to_str(self, diff_graph: Data) -> str:
         """Convert the graph diff to a human-readable string.
 
-        Args:indices
+        Args:
             diff_graph: The graph diff returned by diff()
 
         Returns:
@@ -596,10 +614,12 @@ class PhysicalState:
     #     return bool(connected_direct or connected_reverse)
     # TODO: this should be refactored to "are two parts connected" which is what it does.
 
-    def check_if_part_placed(self, part_id: int, data_a: Data, data_b: Data) -> bool:
+    def check_if_part_in_desired_pos(
+        self, part_id: int, data_a: "PhysicalState", data_b: "PhysicalState"
+    ) -> bool:
         """Check if a part (part_id) is in its desired position (within thresholds)."""
         # Compute node feature diffs (position & orientation) between data_a and data_b
-        diff_dict, _ = _diff_node_features(data_a, data_b)
+        diff_dict, _ = _diff_body_features(data_a, data_b)
         changed = diff_dict["changed_indices"]
         # Return True if this part_id did not exceed thresholds
 
@@ -631,19 +651,60 @@ class PhysicalState:
             position_sim,
             rotation,
             connector_position_relative_to_center.to(self.device).unsqueeze(0),
-        )
+        ).squeeze(0)
+        
+        # For connectors, the body index is the connector itself since connectors are registered as bodies
+        if name not in self.body_indices:
+            raise ValueError(f"Connector body {name} not found in body_indices. Available: {list(self.body_indices.keys())}")
+        
+        body_idx = self.body_indices[name]
+        
         if name.endswith("_male@connector"):
-            self.male_connector_positions[name] = connector_pos
+            # Check if connector already exists
+            if name in self.connector_indices_from_name:
+                # Update existing connector
+                connector_idx = self.connector_indices_from_name[name]
+                self.male_connector_positions[connector_idx] = connector_pos
+            else:
+                # Add new connector
+                connector_idx = len(self.male_connector_positions)
+                self.connector_indices_from_name[name] = connector_idx
+                self.male_connector_batch = torch.cat([
+                    self.male_connector_batch, 
+                    torch.tensor([body_idx], dtype=torch.long, device=self.device)
+                ])
+                self.male_connector_positions = torch.cat([
+                    self.male_connector_positions.to(self.device), 
+                    connector_pos.unsqueeze(0)
+                ])
         else:
-            self.female_connector_positions[name] = connector_pos
+            # Check if connector already exists
+            if name in self.connector_indices_from_name:
+                # Update existing connector
+                connector_idx = self.connector_indices_from_name[name]
+                self.female_connector_positions[connector_idx] = connector_pos
+            else:
+                # Add new connector
+                connector_idx = len(self.female_connector_positions)
+                self.connector_indices_from_name[name] = connector_idx
+                self.female_connector_batch = torch.cat([
+                    self.female_connector_batch, 
+                    torch.tensor([body_idx], dtype=torch.long, device=self.device)
+                ])
+                self.female_connector_positions = torch.cat([
+                    self.female_connector_positions.to(self.device), 
+                    connector_pos.unsqueeze(0)
+                ])
 
 
-def _diff_node_features(
-    data_a: Data,
-    data_b: Data,
+
+
+def _diff_body_features(
+    data_a: "PhysicalState",
+    data_b: "PhysicalState",
     pos_threshold: float = 5.0 / 1000,
     deg_threshold: float = 5.0,
-):
+) -> tuple[dict, int]:
     """Return per-node diffs (static shape) and changed indices/count."""
     # Position diff
     pos_raw = data_b.position - data_a.position  # [N, 3]
@@ -673,7 +734,11 @@ def _diff_node_features(
     )
 
 
-def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
+def _diff_fastener_features(
+    data_a: "PhysicalState", data_b: "PhysicalState"
+) -> tuple[dict, int]:
+    """Compare fastener features between two PhysicalState instances."""
+
     # FIXME: does this not check for feature value differences?
     # Stack edge pairs for easy comparison
     def to_sorted_tuple_tensor(edge_index):
@@ -692,22 +757,14 @@ def _diff_edge_features(data_a: Data, data_b: Data) -> tuple[dict, int]:
     return {"added": added, "removed": removed}, len(added) + len(removed)
 
 
-# def batch_graph_diff(batch_a: Batch, batch_b: Batch):
-#     assert batch_a.batch_size == batch_b.batch_size
-#     results = torch.zeros(batch_a.batch_size)
-#     for i in range(batch_a.num_graphs):
-#         data_a = batch_a.get_example(i)
-#         data_b = batch_b.get_example(i)
-#         results[i] = diff(data_a, data_b)[1]
-#     return results
-
-
-def compound_pos_to_sim_pos(compound_pos: torch.Tensor, env_size_mm=(640, 640, 640)):
-    "Pos in compound to pos in sim/sim state"
+def compound_pos_to_sim_pos(
+    compound_pos: torch.Tensor, env_size_mm=(640, 640, 640)
+) -> torch.Tensor:
+    """Convert position in compound to position in sim/sim state."""
     assert compound_pos.ndim == 2 and compound_pos.shape[1] == 3, (
         f"compound_pos must be [N, 3], got {compound_pos.shape}"
     )
-    assert (compound_pos >= -1e-6).all(), "compound_pos must be non-negative"
+    assert (compound_pos > 0).all(), "compound_pos must be non-negative, including 0."
     env_size_mm = torch.tensor(env_size_mm, device=compound_pos.device)
     compound_pos_xy = (compound_pos[:, :2] - env_size_mm[:2] / 2) / 1000
     compound_pos_z = compound_pos[:, 2] / 1000  # z needs not go lower.

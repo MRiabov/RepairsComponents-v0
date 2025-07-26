@@ -50,7 +50,6 @@ def step_repairs(
     Abstraction note: anything that uses `actions` goes into step_repairs, anything that
     merely collects observations goes into translate"""
     # get values (state) from genesis
-    # minor todo: male_connector_positions, female_connector_positions should be set into current_sim_state (because all the other logic does)
     current_sim_state = translate_genesis_to_python(
         scene,
         gs_entities,

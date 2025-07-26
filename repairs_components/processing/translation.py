@@ -156,10 +156,6 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     Returns:
         sim_state: RepairsSimState with active bodies in the physical state.
-        picked_up_tip_positions: torch.Tensor[n_envs,3] - tip pos per env
-        fastener_hole_positions: dict[str, torch.Tensor] - [n_envs,3]
-        male_connector_positions: dict[str, torch.Tensor] - [n_envs,3]
-        female_connector_positions: dict[str, torch.Tensor] - [n_envs,3]
     """
     assert len(gs_entities) > 0, "Genesis entities can not be empty"
     # batch over all environments
@@ -249,7 +245,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
     sim_state = update_hole_locs(
         sim_state, starting_hole_positions, starting_hole_quats, part_hole_batch
     )  # would be ideal if starting_hole_positions, hole_quats and hole_batch were batched already.
-    max_pos = sim_state.physical_state[0].fasteners.position.max()
+    max_pos = sim_state.physical_state[0].fasteners_pos.max()
     assert max_pos <= 50, f"massive out of bounds, at env_id 0, max_pos {max_pos}"
     return sim_state
 
@@ -288,11 +284,14 @@ def translate_compound_to_sim_state(
         part_hole_batch,
     ) = starting_holes
 
+    env_size_compound = np.array((640, 640, 640))
+    expected_bounds_min = np.array((0, 0, 0))
+    expected_bounds_max = np.array(
+        (env_size_compound[0], env_size_compound[1], env_size_compound[2])
+    )
+
     for env_idx in range(n_envs):
         b123d_compound = batch_b123d_compounds[env_idx]
-        env_size = np.array((640, 640, 640))
-        expected_bounds_min = np.array((0, 0, 0))
-        expected_bounds_max = np.array((env_size[0], env_size[1], env_size[2]))
         assert (
             np.array(tuple(b123d_compound.bounding_box().min)) + 1e-6
             >= expected_bounds_min
@@ -330,10 +329,16 @@ def translate_compound_to_sim_state(
                             connector.connector_pos_relative_to_center_female / 1000
                         )
 
+                # assert np.allclose(
+                #     np.array(tuple(part.center(CenterOf.BOUNDING_BOX))),
+                #     np.array([0, 0, 0]),
+                # ), (
+                #     f"Part is expected to be recentered, as we are getting position by `part.global_location`. Failed at {part.label}"
+                # )
                 sim_state.physical_state[env_idx].register_body(
                     name=part.label,
                     # position=tuple(part.position), # this isn't always true
-                    position=tuple(part.center(CenterOf.BOUNDING_BOX)),
+                    position=tuple(part.global_location.position),
                     rotation=tuple(part.global_location.orientation),
                     fixed=fixed,  # FIXME: orientation is as euler but I need quat!
                     connector_position_relative_to_center=connector_position_relative_to_center,
@@ -413,41 +418,49 @@ def translate_compound_to_sim_state(
     # however, during export they will be removed and component nodes will be connected
     # directly. # or should I? why not encode connectors? the model will need the type of connectors, I presume.
 
-    # if the any is non-empty all are non-empty...
+    # Check for connections using tensor-based connector positions
     if (
-        sim_state.physical_state[0].male_connector_positions  # dict is non-empty
-        and sim_state.physical_state[0].female_connector_positions
+        len(sim_state.physical_state[0].male_connector_positions) > 0
+        and len(sim_state.physical_state[0].female_connector_positions) > 0
     ):
-        # work over batch of env_id and batch of keys...
-        male_connector_positions_all = {}
-        female_connector_positions_all = {}
-        for k in sim_state.physical_state[0].male_connector_positions.keys():
-            this_male_connector_positions = torch.stack(
-                [ps.male_connector_positions[k] for ps in sim_state.physical_state]
-            )
-            this_female_connector_positions = torch.stack(
-                [ps.female_connector_positions[k] for ps in sim_state.physical_state]
-            )
-            male_connector_positions_all[k] = this_male_connector_positions
-            female_connector_positions_all[k] = this_female_connector_positions
-
-        connections = connectors.check_connections(
-            male_connector_positions_all, female_connector_positions_all
-        )
-        for env_idx, connections in enumerate(connections):
-            sim_state.electronics_state[env_idx].clear_connections()
-            for connection_a, connection_b in connections:
-                sim_state.electronics_state[env_idx].connect(connection_a, connection_b)
+        for env_idx in range(n_envs):
+            ps = sim_state.physical_state[env_idx]
+            
+            # Get tensor-based connector positions for this environment
+            male_positions = ps.male_connector_positions
+            female_positions = ps.female_connector_positions
+            
+            if male_positions.numel() > 0 and female_positions.numel() > 0:
+                # Find connections using the updated check_connections function
+                connection_indices = connectors.check_connections(
+                    male_positions, female_positions
+                )
+                
+                # Clear existing connections
+                sim_state.electronics_state[env_idx].clear_connections()
+                
+                # Add new connections using body indices to get connector names
+                for male_idx, female_idx in connection_indices.tolist():
+                    # Get connector names from indices
+                    male_body_idx = ps.male_connector_batch[male_idx].item()
+                    female_body_idx = ps.female_connector_batch[female_idx].item()
+                    
+                    # Convert body indices back to connector names
+                    male_name = ps.inverse_body_indices[male_body_idx]
+                    female_name = ps.inverse_body_indices[female_body_idx]
+                    
+                    # Connect using string names for electronics_state compatibility
+                    sim_state.electronics_state[env_idx].connect(male_name, female_name)
 
     # TODO I'll do this later.
     # possibly (reasonably) we can encode XYZ and quat of connector def positions into electronics state features.
     # however this won't mean they will be returned in export_graph.
 
-    # assert out
-    max_pos = np.array(sim_state.physical_state[0].fasteners.position.max())
-    assert np.all(np.abs(max_pos) <= (env_size / 2 / 1000)), (
-        f"massive out of bounds, at env_id 0, max_pos {max_pos}"
-    )
+    # assert out # absolute because it's normalized and equal to both sides.
+    max_pos = (sim_state.physical_state[0].position).abs().max(dim=0).values
+    assert (
+        max_pos <= (torch.tensor(env_size_compound, device=max_pos.device) / 2 / 1000)
+    ).all(), f"massive out of bounds, at env_id 0, max_pos {max_pos}"
     return sim_state, starting_holes
 
 
