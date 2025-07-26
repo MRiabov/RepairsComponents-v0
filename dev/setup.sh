@@ -3,11 +3,11 @@
 sudo apt install libgl1-mesa-dev libsparsehash-dev -y
 
 pip install uv
-cd RepairsComponents-v0/
+# cd RepairsComponents-v0/
 uv venv
 source .venv/bin/activate
 pip install uv
-uv pip install -r /workspace/RepairsComponents-v0/combined_req.txt -U # faster install of torchsparse
+uv pip install -r /workspace/RepairsComponents-v0/combined_req.txt -U 
 uv pip install torch==2.5.1 torchvision setuptools git+https://github.com/gumyr/build123d
 uv pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
 

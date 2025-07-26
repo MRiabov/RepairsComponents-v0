@@ -12,7 +12,8 @@ trimesh # note: not used in voxelization, but required for genesis.
 gymnasium
 ompl
 ruff
-pyrender  #how was it not installed before?
+## pyrender  #how was it not installed before?
+pytest
 ## git+https://github.com/mit-han-lab/torchsparse.git
 
 ## torch_scatter # note: something fails in uv, install separately.
