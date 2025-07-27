@@ -135,24 +135,6 @@ class PhysicalState:
     permanently_constrained_parts: list[list[str]] = field(default_factory=list)
     """List of lists of permanently constrained parts (linked_groups from EnvSetup)"""
 
-    # TODO logic for fastener rebuild...
-    # for edge_index, edge_attr in zip(graph.edge_index.t(), graph.edge_attr):
-    #     fastener_id = edge_attr[0]  # assume it is the first element
-    #     fastener_size = edge_attr[
-    #         1
-    #     ]  # TODO: should be in separate graphs before merge!
-    #     fastener_name = fastener_id_to_name[fastener_id]
-    #     connected_to_1 = self.reverse_indices[edge_index[0].item()]
-    #     connected_to_2 = self.reverse_indices[edge_index[1].item()]
-    #     # fastener = Fastener(  # FIXME: constraint_b_active always True. It is not selected
-    #     #     constraint_b_active=True,
-    #     #     initial_body_a=connected_to_1,
-    #     #     initial_body_b=connected_to_2,
-    #     #     name=fastener_name,
-    #     #     # fastener_size=fastener_size, # FIXME: size to actual params mapping
-    #     # )
-    #     # self.fastener[fastener_name] = fastener
-
     # next: there is something that needs to be figured out with data storage and reconstruction.
     # So 1. I do save STL/gltf files,
     # but during offline I don't want to scan meshes because that's costly.
@@ -181,8 +163,7 @@ class PhysicalState:
             # For single states, use the dict directly
             self.inverse_body_indices = {v: k for k, v in self.body_indices.items()}
         else:
-            # Fallback for unexpected types
-            self.inverse_body_indices = {}
+            raise ValueError("body_indices must be a dict or a list of dicts")
 
     def export_graph(self):
         """Export the graph to a torch_geometric Data object usable by ML."""

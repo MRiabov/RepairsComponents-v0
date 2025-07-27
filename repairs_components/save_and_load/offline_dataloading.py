@@ -8,6 +8,8 @@ import numpy as np
 import torch
 from torch_geometric.data import Batch, Data
 
+from repairs_components.logic.electronics.electronics_state import ElectronicsState
+from repairs_components.logic.physical_state import PhysicalState
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     merge_concurrent_scene_configs,
@@ -140,7 +142,7 @@ class OfflineDataloader:
         # ^ memory calculation: 100k samples*max 15 items * 10 datapoints * float16 =36mil = 36mbytes
         # graphs
         mech_graphs_init, elec_graphs_init, mech_graphs_des, elec_graphs_des = (
-            self._load_graphs(scene_id)
+            self._load_sim_states(scene_id)
         )
 
         # tool idx
@@ -168,7 +170,7 @@ class OfflineDataloader:
         # load RepairsEnvState
         init_sim_state = reconstruct_sim_state(
             electronics_graphs=elec_graphs_init,
-            mechanical_states=mech_graphs_init,  # Now PhysicalState objects
+            mechanical_state=mech_graphs_init,  # Now PhysicalState objects
             electronics_indices=scene_metadata["electronics_indices"],
             mechanical_indices=scene_metadata["mechanical_indices"],
             tool_data=tool_data_init,
@@ -178,7 +180,7 @@ class OfflineDataloader:
         )
         des_sim_state = reconstruct_sim_state(
             electronics_graphs=elec_graphs_des,
-            mechanical_states=mech_graphs_des,  # Now PhysicalState objects
+            mechanical_state=mech_graphs_des,  # Now PhysicalState objects
             electronics_indices=scene_metadata["electronics_indices"],
             mechanical_indices=scene_metadata["mechanical_indices"],
             tool_data=tool_data_des,
@@ -226,9 +228,9 @@ class OfflineDataloader:
         )
         return tensor
 
-    def _load_graphs(
+    def _load_sim_states(
         self, scene_id: int, env_idx: torch.Tensor | None = None
-    ) -> tuple[list, list[Data], list, list[Data]]:
+    ) -> tuple[PhysicalState, list[ElectronicsState]]:
         # ^ Returns: (mech_init_states, elec_init_graphs, mech_des_states, elec_des_graphs)
         """Load the physical states and electronics graphs for a scene."""
         if (
@@ -244,36 +246,75 @@ class OfflineDataloader:
             )
 
             # Load mechanical data (now PhysicalState lists)
-            assert mech_graph_init_path.exists(), f"Mechanical file not found at {mech_graph_init_path}"
-            assert mech_graph_des_path.exists(), f"Mechanical file not found at {mech_graph_des_path}"
-            
+            assert mech_graph_init_path.exists(), (
+                f"Mechanical file not found at {mech_graph_init_path}"
+            )
+            assert mech_graph_des_path.exists(), (
+                f"Mechanical file not found at {mech_graph_des_path}"
+            )
+
             mech_init_states = torch.load(mech_graph_init_path)
             mech_des_states = torch.load(mech_graph_des_path)
-            
-            # Import PhysicalState for type checking
-            from repairs_components.logic.physical_state import PhysicalState
-            
+
             assert isinstance(mech_init_states, PhysicalState), (
                 f"Mechanical data under path {mech_graph_init_path} is not a PhysicalState, it is {type(mech_init_states)}"
             )
             assert isinstance(mech_des_states, PhysicalState), (
                 f"Mechanical data under path {mech_graph_des_path} is not a PhysicalState, it is {type(mech_des_states)}"
             )
-            
+
+            # validate physical state
+            assert isinstance(mech_init_states, PhysicalState), (
+                f"Expected PhysicalState object at index {i}, got {type(state)}"
+            )
+
+            # Validate dataclass fields - check that all expected keys exist and tensor shapes are consistent
+            init_state_dict = mech_init_states.__dict__
+            des_state_dict = mech_des_states.__dict__
+            expected_keys = set(PhysicalState.__dataclass_fields__.keys()) | {
+                "_tensordict",
+                "_non_tensordict",
+            }
+
+            actual_keys = set(init_state_dict.keys())
+            assert expected_keys == actual_keys, (
+                f"PhysicalState at index {i} has mismatched keys.\n"
+                f"Missing: {expected_keys - actual_keys}\n"
+                f"Extra: {actual_keys - expected_keys}"
+            )
+
+            # Validate tensor shapes are consistent within the state
+            if len(state.position) > 0:
+                assert state.position.shape[0] == state.quat.shape[0], (
+                    f"Position and quat tensors must have same batch size at index {i}"
+                )
+                assert state.position.shape[0] == state.fixed.shape[0], (
+                    f"Position and fixed tensors must have same batch size at index {i}"
+                )
+
+            if len(state.fasteners_pos) > 0:
+                assert state.fasteners_pos.shape[0] == state.fasteners_quat.shape[0], (
+                    f"Fastener position and quat tensors must have same batch size at index {i}"
+                )
+
             # Load electronics data (still graph batches)
-            assert elec_graph_init_path.exists(), f"Electronics file not found at {elec_graph_init_path}"
-            assert elec_graph_des_path.exists(), f"Electronics file not found at {elec_graph_des_path}"
-            
+            assert elec_graph_init_path.exists(), (
+                f"Electronics file not found at {elec_graph_init_path}"
+            )
+            assert elec_graph_des_path.exists(), (
+                f"Electronics file not found at {elec_graph_des_path}"
+            )
+
             elec_init_batch = torch.load(elec_graph_init_path)
             elec_des_batch = torch.load(elec_graph_des_path)
-            
+
             assert isinstance(elec_init_batch, Batch), (
                 f"Electronics data under path {elec_graph_init_path} is not a Batch, it is {type(elec_init_batch)}"
             )
             assert isinstance(elec_des_batch, Batch), (
                 f"Electronics data under path {elec_graph_des_path} is not a Batch, it is {type(elec_des_batch)}"
             )
-            
+
             # Validate batch dimensions match
             assert len(mech_init_states) == len(mech_des_states), (
                 "Mechanical init and desired states must have the same length."
@@ -284,7 +325,7 @@ class OfflineDataloader:
             assert elec_init_batch.num_graphs == elec_des_batch.num_graphs, (
                 "Electronics init and desired graphs must have the same batch size."
             )
-            
+
             # Store in cache
             self.loaded_pyg_batch_dict_mech_init[scene_id] = mech_init_states
             self.loaded_pyg_batch_dict_elec_init[scene_id] = elec_init_batch
@@ -293,9 +334,13 @@ class OfflineDataloader:
 
         if env_idx is None:
             return (
-                self.loaded_pyg_batch_dict_mech_init[scene_id],  # Already a list of PhysicalState
+                self.loaded_pyg_batch_dict_mech_init[
+                    scene_id
+                ],  # Already a list of PhysicalState
                 self.loaded_pyg_batch_dict_elec_init[scene_id].to_data_list(),
-                self.loaded_pyg_batch_dict_mech_des[scene_id],  # Already a list of PhysicalState
+                self.loaded_pyg_batch_dict_mech_des[
+                    scene_id
+                ],  # Already a list of PhysicalState
                 self.loaded_pyg_batch_dict_elec_des[scene_id].to_data_list(),
             )
         else:

@@ -204,7 +204,7 @@ def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
 
 def reconstruct_sim_state(
     electronics_graphs: list[Data],
-    mechanical_states: list,  # Now PhysicalState objects directly
+    mechanical_state: PhysicalState,  # Now PhysicalState objects directly
     electronics_indices: dict[str, int],
     mechanical_indices: dict[str, int],
     tool_data: torch.Tensor,  # int tensor of tool ids
@@ -221,44 +221,10 @@ def reconstruct_sim_state(
     assert fluid_data_placeholder is None, NotImplementedError(
         "Fluid data reconstruction is not implemented."
     )
-    assert len(electronics_graphs) == len(mechanical_states), (
+    assert len(electronics_graphs) == len(mechanical_state), (
         "Electronics graphs and mechanical states must have the same length."
     )
-
-    # Validate that mechanical_states are actually PhysicalState objects
-    for i, state in enumerate(mechanical_states):
-        assert isinstance(state, PhysicalState), (
-            f"Expected PhysicalState object at index {i}, got {type(state)}"
-        )
-
-        # Validate dataclass fields - check that all expected keys exist and tensor shapes are consistent
-        state_dict = state.__dict__
-        expected_keys = PhysicalState.__dataclass_fields__.keys() + (
-            "_tensordict",
-            "_non_tensordict",
-        )
-
-        actual_keys = set(state_dict.keys())
-        assert expected_keys == actual_keys, (
-            f"PhysicalState at index {i} has mismatched keys.\n"
-            f"Missing: {expected_keys - actual_keys}\n"
-            f"Extra: {actual_keys - expected_keys}"
-        )
-
-        # Validate tensor shapes are consistent within the state
-        if len(state.position) > 0:
-            assert state.position.shape[0] == state.quat.shape[0], (
-                f"Position and quat tensors must have same batch size at index {i}"
-            )
-            assert state.position.shape[0] == state.fixed.shape[0], (
-                f"Position and fixed tensors must have same batch size at index {i}"
-            )
-
-        if len(state.fasteners_pos) > 0:
-            assert state.fasteners_pos.shape[0] == state.fasteners_quat.shape[0], (
-                f"Fastener position and quat tensors must have same batch size at index {i}"
-            )
-
+            
     batch_dim = len(electronics_graphs)
     repairs_sim_state = RepairsSimState(batch_dim)
     repairs_sim_state.electronics_state = [
@@ -266,7 +232,7 @@ def reconstruct_sim_state(
         for graph in electronics_graphs
     ]
     # Use the PhysicalState objects directly - no need to rebuild from graphs
-    repairs_sim_state.physical_state = mechanical_states
+    repairs_sim_state.physical_state = mechanical_state
 
     repairs_sim_state.tool_state = [
         ToolState.rebuild_from_saved(indices) for indices in tool_data
