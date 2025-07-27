@@ -81,10 +81,6 @@ def translate_state_to_genesis_scene(
         #     surface = gs.surfaces.Plastic(color=get_color_by_type(part_type))
         surface = gs.surfaces.Plastic(color=(1, 1, 1, 1))
 
-        pos = physical_state.fasteners.position[body_idx]
-        quat = physical_state.fasteners.quat[body_idx]
-        count_fasteners_held = physical_state.fasteners.count_fasteners_held[body_idx]
-
         mesh_or_mjcf_path = str(mesh_file_names[body_name])
 
         if part_type == "solid" or part_type == "fixed_solid":
@@ -425,30 +421,30 @@ def translate_compound_to_sim_state(
     ):
         for env_idx in range(n_envs):
             ps = sim_state.physical_state[env_idx]
-            
+
             # Get tensor-based connector positions for this environment
             male_positions = ps.male_connector_positions
             female_positions = ps.female_connector_positions
-            
+
             if male_positions.numel() > 0 and female_positions.numel() > 0:
                 # Find connections using the updated check_connections function
                 connection_indices = connectors.check_connections(
                     male_positions, female_positions
                 )
-                
+
                 # Clear existing connections
                 sim_state.electronics_state[env_idx].clear_connections()
-                
+
                 # Add new connections using body indices to get connector names
                 for male_idx, female_idx in connection_indices.tolist():
                     # Get connector names from indices
                     male_body_idx = ps.male_connector_batch[male_idx].item()
                     female_body_idx = ps.female_connector_batch[female_idx].item()
-                    
+
                     # Convert body indices back to connector names
                     male_name = ps.inverse_body_indices[male_body_idx]
                     female_name = ps.inverse_body_indices[female_body_idx]
-                    
+
                     # Connect using string names for electronics_state compatibility
                     sim_state.electronics_state[env_idx].connect(male_name, female_name)
 

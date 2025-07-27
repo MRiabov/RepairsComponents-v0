@@ -22,7 +22,7 @@ class RepairsSimState(SimState):
 
     # the main states.
     electronics_state: list[ElectronicsState] = field(default_factory=list)
-    physical_state: list[PhysicalState] = field(default_factory=list)
+    physical_state: PhysicalState = field(default_factory=PhysicalState)  # Single TensorClass instance
     fluid_state: list[FluidState] = field(default_factory=list)
     tool_state: list[ToolState] = field(default_factory=list)
 
@@ -35,7 +35,9 @@ class RepairsSimState(SimState):
         super().__init__()
         self.scene_batch_dim = batch_dim
         self.electronics_state = [ElectronicsState() for _ in range(batch_dim)]
-        self.physical_state = [PhysicalState() for _ in range(batch_dim)]
+        # Use the simpler approach: create list and stack
+        self.physical_state = torch.stack([PhysicalState() for _ in range(batch_dim)])
+        # note: to avoid complex instantiation logic.
         self.fluid_state = [FluidState() for _ in range(batch_dim)]
         self.tool_state = [ToolState() for _ in range(batch_dim)]
 
@@ -56,8 +58,11 @@ class RepairsSimState(SimState):
             )
             electronics_diffs.append(electronics_diff)
             electronics_diff_counts.append(electronics_diff_count)
-            physical_diff, physical_diff_count = self.physical_state[i].diff(
-                other.physical_state[i]
+            # For TensorClass, we need to slice to get individual batch elements
+            self_physical_i = self.physical_state[i:i+1]  # Get slice for batch element i
+            other_physical_i = other.physical_state[i:i+1]
+            physical_diff, physical_diff_count = self_physical_i.diff(
+                other_physical_i
             )
             physical_diffs.append(physical_diff)
             physical_diff_counts.append(physical_diff_count)
@@ -116,18 +121,19 @@ class RepairsSimState(SimState):
         mech_graph_path, elec_graph_path = get_graph_save_paths(
             path, scene_id, init=init
         )
-        physical_states = [self.physical_state[env_id] for env_id in env_idx]
+        # For TensorClass, slice the batch dimension to get the required environments
+        physical_states = self.physical_state[env_idx]
         electronics_graphs = [
             self.electronics_state[env_id].graph for env_id in env_idx
         ]
         # Validation: check that saved data is within bounds
-        for state in physical_states:
-            if len(state.position) > 0:
-                assert (torch.max(state.position) < 1).all(), (
-                    "Saved data is out of bounds"
-                )
 
-        torch.save(torch.stack(physical_states), mech_graph_path)
+        if physical_states.position.shape[0] > 0:
+            assert (torch.max(physical_states.position) < 1).all(), (
+                "Saved data is out of bounds"
+            )
+
+        torch.save(physical_states, mech_graph_path)
         torch.save(Batch.from_data_list(electronics_graphs), elec_graph_path)
 
         torch.save(
@@ -157,13 +163,14 @@ def get_graph_save_paths(base_dir: Path, scene_id: int, init: bool):
 
 def merge_global_states(state_list: list[RepairsSimState]):
     assert len(state_list) > 0, "State list can not be zero."
-    repairs_sim_state = RepairsSimState(len(state_list))
+    total_batch_dim = sum(state.scene_batch_dim for state in state_list)
+    repairs_sim_state = RepairsSimState(total_batch_dim)
     repairs_sim_state.electronics_state = [
         elec for state in state_list for elec in state.electronics_state
     ]
-    repairs_sim_state.physical_state = [
-        phys for state in state_list for phys in state.physical_state
-    ]
+    # For TensorClass, concatenate the physical states along batch dimension
+    physical_states_to_concat = [state.physical_state for state in state_list]
+    repairs_sim_state.physical_state = torch.cat(physical_states_to_concat, dim=0)
     repairs_sim_state.fluid_state = [
         fluid for state in state_list for fluid in state.fluid_state
     ]
@@ -195,6 +202,7 @@ def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
 
     for new_id, old_id in enumerate(old_idx):
         old_state.electronics_state[old_id] = new_state.electronics_state[new_id]
+        # For TensorClass, update the specific batch indices
         old_state.physical_state[old_id] = new_state.physical_state[new_id]
         old_state.fluid_state[old_id] = new_state.fluid_state[new_id]
         old_state.tool_state[old_id] = new_state.tool_state[new_id]
@@ -216,7 +224,6 @@ def reconstruct_sim_state(
     """Load a single simulation state from PhysicalState objects and electronics graphs (i.e. from the offline dataset)"""
     from repairs_components.training_utils.sim_state_global import RepairsSimState
     from repairs_components.processing.translation import update_hole_locs
-    from repairs_components.logic.physical_state import PhysicalState
 
     assert fluid_data_placeholder is None, NotImplementedError(
         "Fluid data reconstruction is not implemented."
@@ -224,14 +231,14 @@ def reconstruct_sim_state(
     assert len(electronics_graphs) == len(mechanical_state), (
         "Electronics graphs and mechanical states must have the same length."
     )
-            
+
     batch_dim = len(electronics_graphs)
     repairs_sim_state = RepairsSimState(batch_dim)
     repairs_sim_state.electronics_state = [
         ElectronicsState.rebuild_from_graph(graph, electronics_indices)
         for graph in electronics_graphs
     ]
-    # Use the PhysicalState objects directly - no need to rebuild from graphs
+    # Use the PhysicalState object directly - it should already be a single TensorClass instance
     repairs_sim_state.physical_state = mechanical_state
 
     repairs_sim_state.tool_state = [

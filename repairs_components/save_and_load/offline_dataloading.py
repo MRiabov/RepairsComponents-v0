@@ -245,7 +245,7 @@ class OfflineDataloader:
                 self.data_dir, scene_id, init=False
             )
 
-            # Load mechanical data (now PhysicalState lists)
+            # Load mechanical data (now a single PhysicalState)
             assert mech_graph_init_path.exists(), (
                 f"Mechanical file not found at {mech_graph_init_path}"
             )
@@ -265,37 +265,40 @@ class OfflineDataloader:
 
             # validate physical state
             assert isinstance(mech_init_states, PhysicalState), (
-                f"Expected PhysicalState object at index {i}, got {type(state)}"
+                f"Expected PhysicalState object during load, got {type(mech_init_states)}"
             )
 
             # Validate dataclass fields - check that all expected keys exist and tensor shapes are consistent
-            init_state_dict = mech_init_states.__dict__
-            des_state_dict = mech_des_states.__dict__
-            expected_keys = set(PhysicalState.__dataclass_fields__.keys()) | {
-                "_tensordict",
-                "_non_tensordict",
-            }
+            expected_keys = set(PhysicalState.__dataclass_fields__.keys())
 
-            actual_keys = set(init_state_dict.keys())
-            assert expected_keys == actual_keys, (
-                f"PhysicalState at index {i} has mismatched keys.\n"
-                f"Missing: {expected_keys - actual_keys}\n"
-                f"Extra: {actual_keys - expected_keys}"
+            init_actual_keys = set(mech_init_states._tensordict.keys())
+            des_actual_keys = set(mech_des_states._tensordict.keys())
+            assert expected_keys == init_actual_keys, (
+                f"PhysicalState has mismatched keys.\n"
+                f"Missing: {expected_keys - init_actual_keys}\n"
+                f"Extra: {init_actual_keys - expected_keys}"
+            )
+            assert expected_keys == des_actual_keys, (
+                f"PhysicalState has mismatched keys.\n"
+                f"Missing: {expected_keys - des_actual_keys}\n"
+                f"Extra: {des_actual_keys - expected_keys}"
             )
 
             # Validate tensor shapes are consistent within the state
-            if len(state.position) > 0:
-                assert state.position.shape[0] == state.quat.shape[0], (
-                    f"Position and quat tensors must have same batch size at index {i}"
-                )
-                assert state.position.shape[0] == state.fixed.shape[0], (
-                    f"Position and fixed tensors must have same batch size at index {i}"
-                )
+            if len(mech_init_states.position) > 0:
+                assert (
+                    mech_init_states.position.shape[0] == mech_init_states.quat.shape[0]
+                ), f"Position and quat tensors must have same batch size"
+                assert (
+                    mech_init_states.position.shape[0]
+                    == mech_init_states.fixed.shape[0]
+                ), f"Position and fixed tensors must have same batch size"
 
-            if len(state.fasteners_pos) > 0:
-                assert state.fasteners_pos.shape[0] == state.fasteners_quat.shape[0], (
-                    f"Fastener position and quat tensors must have same batch size at index {i}"
-                )
+            if len(mech_init_states.fasteners_pos) > 0:
+                assert (
+                    mech_init_states.fasteners_pos.shape[0]
+                    == mech_init_states.fasteners_quat.shape[0]
+                ), "Fastener position and quat tensors must have same batch size"
 
             # Load electronics data (still graph batches)
             assert elec_graph_init_path.exists(), (

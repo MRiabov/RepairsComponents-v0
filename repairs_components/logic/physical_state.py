@@ -14,7 +14,7 @@ import torch
 from repairs_components.geometry.fasteners import Fastener
 from torch_geometric.data import Data
 from dataclasses import dataclass, field
-from tensordict import tensorclass
+from tensordict import TensorClass
 from repairs_components.processing.geom_utils import (
     are_quats_within_angle,
     euler_deg_to_quat_wxyz,
@@ -24,15 +24,16 @@ from repairs_components.processing.geom_utils import (
 )
 
 
-@tensorclass
-class PhysicalState:
+# @tensorclass # complains for some reason.
+class PhysicalState(TensorClass):
     # device: torch.device = field(
     #     default_factory=lambda: torch.device(
     #         "cuda" if torch.cuda.is_available() else "cpu"
     #     )
     # ) #already included in tensordict
-
     # Node attributes (previously in graph)
+
+    # TODO: batch size field?
     position: torch.Tensor = field(
         default_factory=lambda: torch.empty((0, 3), dtype=torch.float32)
     )
@@ -58,7 +59,15 @@ class PhysicalState:
     edge_attr: torch.Tensor = field(
         default_factory=lambda: torch.empty((0, 12), dtype=torch.float32)
     )
-    """Edge attributes (fastener connections) [num_edges, edge_feature_dim]"""
+    """Edge attributes (fastener connections) [num_edges, edge_feature_dim]
+    Includes:
+    - fastener diameter (1)
+    - fastener length (1)
+    - fastener position (3)
+    - fastener quaternion (4)
+    - is_connected_a/b (2)
+
+    """
     # FIXME: where does 12 come from? Probably valid, because I copied it from previous init, but I don't remember now.
     # possibly: xyz(3)+quat(4)+connected_to_1(1)+connected_to_2(1)... what else?
     # note: edge_attr is not used for learning. Use export_graph() instead.
@@ -148,22 +157,25 @@ class PhysicalState:
 
     def __post_init__(self):
         # Handle batched states where body_indices is a list of dicts
+        assert isinstance(self.body_indices, (list, dict)), (
+            "Expected list or dict for body_indices"
+        )
         if isinstance(self.body_indices, list):
             # For batched states, use the first dict as reference
             # (assuming all batches have the same structure)
-            if len(self.body_indices) > 0:
-                first_item = self.body_indices[0]
-                if isinstance(first_item, dict):
-                    self.inverse_body_indices = {v: k for k, v in first_item.items()}
-                else:
-                    self.inverse_body_indices = {}
-            else:
-                self.inverse_body_indices = {}
-        elif isinstance(self.body_indices, dict):
+            assert len(self.body_indices) == self.batch_size[0], (
+                f"batch dim mismatch! Got {len(self.body_indices)}, expected {self.batch_size}"
+            )
+            first_item = self.body_indices[0]
+            assert len(first_item) == self.fixed.shape[1], (
+                f"Dim mismatch! Got {len(first_item)}, expected {self.fixed.shape[0]}"
+            )
+            # ^ note: this could be batch dim there, so if it is, set to shape[1]
+            assert isinstance(first_item, dict)
+            self.inverse_body_indices = {v: k for k, v in first_item.items()}
+        else:
             # For single states, use the dict directly
             self.inverse_body_indices = {v: k for k, v in self.body_indices.items()}
-        else:
-            raise ValueError("body_indices must be a dict or a list of dicts")
 
     def export_graph(self):
         """Export the graph to a torch_geometric Data object usable by ML."""
@@ -179,8 +191,8 @@ class PhysicalState:
             ],
             dim=-1,
         )
-        edge_attr = torch.cat([])
-        # FIXME: no edge attr???
+        edge_attr = self._build_fastener_edge_attr()
+        # how would I handle batchsizes in all of this? e.g. here logic would need to cat differently based on batch dim present or not.
 
         graph = Data(  # expected len of x - 8.
             x=torch.cat(
@@ -329,7 +341,7 @@ class PhysicalState:
         - count_holes: Number of holes in the batch. If None, uses the number of holes in the batch (necessary during initial population)
         """
         assert fastener.name not in self.body_indices, (
-            f"Fasteners can't be registered as bodies!"
+            f"Fasteners can't be registered as bodies! Attempted at {fastener.name}"
         )
         assert self.part_hole_batch is not None, (
             "Part hole batch must be set before registering fasteners."
@@ -341,13 +353,14 @@ class PhysicalState:
 
         if fastener.initial_hole_id_a is not None:
             assert 0 <= fastener.initial_hole_id_a < self.part_hole_batch.shape[0], (
-                f"Hole ID {fastener.initial_hole_id_a} is out of range. Available holes: 0-{self.part_hole_batch.shape[0] - 1}"
+                f"Hole ID {fastener.initial_hole_id_a} is out of range. Num holes: {self.part_hole_batch.shape[0]}"
             )
             body_idx_a = int(self.part_hole_batch[fastener.initial_hole_id_a].item())
             initial_body_a = self.inverse_body_indices[body_idx_a]
 
         if fastener.initial_hole_id_b is not None:
             assert 0 <= fastener.initial_hole_id_b < self.part_hole_batch.shape[0], (
+                f"Hole ID {fastener.initial_hole_id_b} is out of range. Num holes: {self.part_hole_batch.shape[0]}"
                 f"Hole ID {fastener.initial_hole_id_b} is out of range. Available holes: 0-{self.part_hole_batch.shape[0] - 1}"
             )
             body_idx_b = int(self.part_hole_batch[fastener.initial_hole_id_b].item())
@@ -702,6 +715,20 @@ class PhysicalState:
                         connector_pos.unsqueeze(0),
                     ]
                 )
+
+    def _build_fastener_edge_attr(self):
+        # cat shapes: 1,1,3,4,2 = 11
+        # expected shape: [num_fasteners, 11]
+        return torch.cat(
+            [
+                self.fasteners_diam.unsqueeze(-1),  #
+                self.fasteners_length.unsqueeze(-1),
+                self.fasteners_pos,
+                self.fasteners_quat,
+                (self.fasteners_attached_to != -1).float(),  # if attached at a or b.
+            ],
+            dim=1,
+        )
 
 
 def _diff_body_features(
