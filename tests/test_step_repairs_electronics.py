@@ -1,13 +1,7 @@
 import pytest
 import genesis as gs
 from repairs_components.geometry.connectors.models.europlug import Europlug
-from repairs_components.geometry.fasteners import Fastener
 from repairs_components.training_utils.sim_state_global import RepairsSimState
-from repairs_components.logic.physical_state import PhysicalState
-from repairs_components.logic.electronics.electronics_state import ElectronicsState
-from repairs_components.logic.tools.screwdriver import Screwdriver
-from repairs_sim_step import step_electronics
-from genesis.engine.entities import RigidEntity
 
 
 @pytest.fixture(scope="module")
