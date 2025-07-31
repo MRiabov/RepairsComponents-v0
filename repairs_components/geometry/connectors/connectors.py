@@ -171,8 +171,10 @@ class Connector(ElectricalComponent):
             geom_male = Rotation(self.connected_at_angle) * geom_male
 
             # NOTE: translate the CHILDREN, not just the parent.
+            # note: but why? was this before I knew of global_location? anyway, this works.
             geom_male = Compound(
-                children=[child.rotate(Axis.Z, 180) for child in geom_male.children]
+                children=[child.rotate(Axis.Z, 180) for child in geom_male.children],
+                label=geom_male.label,
             )
 
             male_connector_collision_detection_position = geom_male.children[-1].center(

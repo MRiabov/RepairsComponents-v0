@@ -53,8 +53,10 @@ class TestEnv(EnvSetup):
             europlug_male,
             europlug_female,
         ]
-
-        return Compound(children=all_parts, joints={"fastener_joint_a": hole_joint})
+        debug_compound = Compound(
+            children=all_parts, joints={"fastener_joint_a": hole_joint}
+        )
+        return debug_compound
 
     def linked_groups(self) -> dict[str, tuple[list[str]]]:
         return {}  # TODO link e.g. solid with fixed solid.
