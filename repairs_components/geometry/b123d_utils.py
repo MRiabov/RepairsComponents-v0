@@ -7,7 +7,9 @@ import os
 import numpy as np
 
 
-def fastener_hole(radius: float, depth: float | None, id: int):
+def fastener_hole(
+    radius: float, depth: float | None, id: int, build_part: BuildPart | None = None
+):
     """
     Create a fastener hole with a specified radius and depth, and optionally attach a revolute joint.
     It creates a collision point with which a prospective fastener can intersect and allows for a joint.
@@ -16,34 +18,50 @@ def fastener_hole(radius: float, depth: float | None, id: int):
         radius (float): The radius of the hole in mm.
         depth (float | None): The depth of the hole in mm. If None, the hole is through.
         id (int): The unique id of the hole.
+        build_part: context of the build_part. If depth is None, necessary for checking of actual depth.
 
     Returns:
         Tuple: A tuple containing the created Hole object and its location.
     """
+    if depth is None:
+        # depth = fastener_hole.vertices().sort_by(Axis.Z).first.Z
+        # TODO: check if this is absolute or relative.
+        assert build_part is not None, (
+            "build_part must be provided if depth is None (hole is through)"
+        )
+        # export depth - this is the depth we are using to calculate connection depth.
+        export_depth = np.linalg.norm(
+            np.array(
+                tuple(
+                    Axis.Z.intersect(build_part.part).vertices().sort_by(Axis.Z).first
+                )
+            )
+            - np.array((tuple(Locations((0, 0, 0)).locations[0].position))),
+        )  # the distance between the starting pos of the hole and it's end.
+    else:
+        assert depth > 0, "Depth must be positive."
+        export_depth = depth
 
     # make a hole
     fastener_hole = Hole(radius=radius, depth=depth)
     fastener_loc = Locations((0, 0, 0))
     # (0, 0, -radius) -radius was a bug I understand.
     is_through = depth is None
-    if depth is None:
-        depth = fastener_hole.vertices().sort_by(Axis.Z).first.Z
-        # TODO: check if this is absolute or relative.
-    else:
-        assert depth > 0, "Depth must be positive."
 
     joint = RigidJoint(
-        label=fastener_hole_joint_name(id, depth, is_through),
+        label=fastener_hole_joint_name(id, export_depth, is_through),
         joint_location=fastener_loc.locations[0],
     )
 
     return fastener_hole, fastener_loc, joint  # TODO - add joint axis?
 
 
-def fastener_hole_joint_name(id: int, depth: float, is_through: bool):
-    assert depth is not None and depth > 0, "Depth must be a positive float."
+def fastener_hole_joint_name(id: int, connection_depth: float, is_through: bool):
+    assert connection_depth is not None and connection_depth > 0, (
+        "Depth must be a positive float."
+    )
     hole_type = "through" if is_through else "blind"
-    return f"fastener_hole_{id}#{depth}#{hole_type}"
+    return f"fastener_hole_{id}#{connection_depth}#{hole_type}"
     # note: new convention: "#" in labels means parameter. param.
 
 
