@@ -27,6 +27,11 @@ class TenHoles(EnvSetup):
         fasteners = []
         for i, loc in enumerate(grid_locs.locations):
             moved_fastener = start_fastener.located(loc)
+            #^NOTE: quite likely incorrect - for when the base body is moved.
+            # The correct version is something like moved_fastener = fastener_geom.located(solid_with_hole.location*hole_joint.location).location
+            # and then add the joint.
+
+
             # moved_fastener = copy.copy(start_fastener) # for whichever reason puts all fasteners one last hole.
             # Probably due to references...
             moved_fastener.joints["fastener_joint_a"].connect_to(joints[i])

@@ -698,7 +698,7 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
                     )
                     fastener_hole_pos[id] = (
                         torch.tensor(tuple(joint.location.position)) / 1000
-                    )
+                    ) # note: could also use joint.relative_location.
                     fastener_hole_quat[id] = euler_deg_to_quat_wxyz(
                         torch.tensor(tuple(joint.location.orientation))
                     )
