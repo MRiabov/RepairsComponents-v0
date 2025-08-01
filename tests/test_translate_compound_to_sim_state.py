@@ -1,10 +1,14 @@
 from build123d import *
 import torch
-from repairs_components.geometry.b123d_utils import fastener_hole
+from repairs_components.geometry.b123d_utils import (
+    connect_fastener_to_joint,
+    fastener_hole,
+)
 from repairs_components.geometry.connectors.models.europlug import Europlug
 import pytest
 
 from repairs_components.geometry.fasteners import Fastener
+from repairs_components.logic.physical_state import compound_pos_to_sim_pos
 from repairs_components.processing.translation import translate_compound_to_sim_state
 from repairs_components.training_utils.env_setup import EnvSetup
 from ocp_vscode import show
@@ -25,25 +29,27 @@ class TestEnv(EnvSetup):
                     radius=3, depth=None, id=0, build_part=solid_with_hole
                 )
 
-        solid = solid.part.located(Pos(120, 0, 30))
-        fixed_solid = fixed_solid.part.located(Pos(150, 0, 30))
-        solid_with_hole = solid_with_hole.part.located(Pos(75, 75, 30))
+        solid = solid.part.locate(
+            Pos(120, 30, 30)
+        )  # locate, not located to avoid copy and label issues.
+        fixed_solid = fixed_solid.part.locate(Pos(150, 30, 30))
+        solid_with_hole = solid_with_hole.part.locate(Pos(75, 75, 30))
 
-        # solid = solid.part
-        # fixed_solid = fixed_solid.part
-        # solid_with_hole = solid_with_hole.part
+        # Set labels before creating connections
+        solid.label = "test_solid@solid"
+        fixed_solid.label = "test_fixed_solid@fixed_solid"
+        solid_with_hole.label = "test_solid_with_hole@solid"
+
         europlug_male, connector_def, europlug_female, _ = Europlug(0).bd_geometry(
             (60, 30, 30)
         )
         fastener = Fastener(initial_hole_id_b=0)
         fastener_geom = fastener.bd_geometry()
-        fastener_geom = fastener_geom.located(
-            solid_with_hole.global_location * fastener_loc.locations[0]
-        )  # must do relocation and connection.
-        fastener_geom.joints["fastener_joint_a"].connect_to(hole_joint)
-        solid.label = "test_solid@solid"
-        fixed_solid.label = "test_fixed_solid@fixed_solid"
-        solid_with_hole.label = "test_solid_with_hole@solid"
+        # # fastener_geom.label = "test_fastener@fastener" # labeled at bd_geometry.
+        # fastener_geom = fastener_geom.locate(
+        #     solid_with_hole.global_location * fastener_loc.locations[0]
+        # )  # must do relocation and connection.
+        connect_fastener_to_joint(fastener_geom, hole_joint)
 
         all_parts = [
             solid,
@@ -58,6 +64,7 @@ class TestEnv(EnvSetup):
         )
         return debug_compound
 
+    @property
     def linked_groups(self) -> dict[str, tuple[list[str]]]:
         return {}  # TODO link e.g. solid with fixed solid.
 
@@ -121,7 +128,9 @@ def test_translate_compound_to_sim_state(test_env_geom):
         "europlug_0_female@connector",
     }
     assert phys_state.position.allclose(
-        torch.tensor([[[0, 0, 0]], [[75, 75, 75]], [[75, 30, 30]], [[60, 30, 30]]])
+        compound_pos_to_sim_pos(
+            torch.tensor([[[0, 0, 30]], [[75, 75, 75]], [[75, 30, 30]], [[60, 30, 30]]])
+        )
     )  # note: expected incorrect X value in the 4th as it is calculated dynamically.
     assert phys_state.quat.allclose(
         torch.tensor([[[1, 0, 0, 0]], [[1, 0, 0, 0]], [[1, 0, 0, 0]], [[1, 0, 0, 0]]])

@@ -103,6 +103,29 @@ def export_obj(part: Part, obj_path: Path, glb_path: Path | None = None) -> Path
     mesh.export(obj_path, file_type="obj")
 
 
+def connect_fastener_to_joint(
+    fastener_geom, hole_joint, fastener_joint_name: str = "fastener_joint_a"
+):
+    assert fastener_geom.label and hole_joint.parent.label, (
+        f"Connected fastener and joint parent labels are not set. Fastener: {fastener_geom.label}, joint parent: {hole_joint.parent.label}"
+    )
+    assert fastener_geom.label.endswith("@fastener"), (
+        f"Fastener label does not end with '@fastener'. Fastener: {fastener_geom.label}"
+    )
+    assert hole_joint.parent.label.endswith(("@solid", "@fixed_solid")), (
+        f"Joint parent label does not end with '@solid' or '@fixed_solid'. Parent: {hole_joint.parent.label}"
+    )
+    assert fastener_joint_name in fastener_geom.joints, (
+        f"Fastener joint name {fastener_joint_name} not found in fastener geometry."
+    )
+    fastener_geom = fastener_geom.locate(
+        hole_joint.parent.global_location
+        * hole_joint.location  # local location? to test.
+    )  # must do relocation and connection.
+    fastener_geom.joints[fastener_joint_name].connect_to(hole_joint)
+    # TODO: assert that hole depth is not too big.
+
+
 ###debug utils:
 
 

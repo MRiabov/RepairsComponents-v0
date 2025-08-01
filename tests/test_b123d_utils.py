@@ -7,8 +7,10 @@ from repairs_components.geometry.b123d_utils import (
     fastener_hole,
     fastener_hole_joint_name,
     fastener_hole_info_from_joint_name,
+    connect_fastener_to_joint,
     filtered_intersection_check,
 )
+from repairs_components.geometry.fasteners import Fastener
 
 
 class TestFastenerHole:
@@ -211,7 +213,7 @@ class TestFastenerHoleJointNameRoundTrip:
 
 
 class TestFilteredIntersectionCheck:
-    def test_has_intersection(self):
+    def test_has_intersection_flat(self):
         with BuildPart() as build_part:
             Box(10, 10, 10)
         with BuildPart() as build_part2:
@@ -228,7 +230,7 @@ class TestFilteredIntersectionCheck:
         assert parts == (build_part.part, build_part2.part)
         assert np.isclose(intersect_volume, build_part.part.volume, atol=1e-3)
 
-    def test_no_intersection(self):
+    def test_no_intersection_flat(self):
         with BuildPart() as build_part:
             Box(10, 10, 10)
         with BuildPart() as build_part2:
@@ -247,7 +249,7 @@ class TestFilteredIntersectionCheck:
         assert parts == (None, None)
         assert np.isclose(intersect_volume, 0, atol=1e-3)
 
-    def test_filter_labels(self):
+    def test_filter_labels_in_compound(self):
         with BuildPart() as build_part:
             Box(10, 10, 10)
 
@@ -281,7 +283,131 @@ class TestFilteredIntersectionCheck:
         assert not has_invalid_intersection
         assert parts == (None, None)
         assert np.isclose(intersect_volume, 0, atol=1e-3)
-        # note: it does not work as expected. I don't know why.
+        # note: I expect this to work, but for some reason, compound.do_children_intersect() intersects children with their children. Why, I don't know.
+        # the test should pass otherwise.
+
+
+class TestConnectFastenerToJoint:
+    """Test the connect_fastener_to_joint function."""
+
+    def test_connect_fastener_to_joint_basic(self):
+        """Test connecting a fastener to a hole joint in a box."""
+        # Create a BuildPart with a Box(10,10,10) and add a fastener hole
+        with BuildPart() as build_part:
+            Box(10, 10, 10)
+
+            # Add fastener hole on top face with depth of 6
+            with Locations(build_part.faces().filter_by(Axis.Z).sort_by(Axis.Z).last):
+                hole, hole_loc, hole_joint = fastener_hole(
+                    radius=2.5, depth=6, id=1, build_part=build_part
+                )
+        build_part.part.label = "test_box@solid"  # Required label format
+
+        # Create a fastener with proper label
+        fastener = Fastener(length=15.0, diameter=5.0, initial_hole_id_a=1)
+        fastener_geom = fastener.bd_geometry()
+
+        # Move the box to a different position to test positioning
+        moved_box = build_part.part.locate(Pos(10, 5, 0))  # move it.
+        # debug #sanity check - should not edit parts label.
+        assert moved_box.label == build_part.part.label
+        # /debug
+
+        # Get initial fastener position
+        initial_fastener_pos = tuple(fastener_geom.center(CenterOf.BOUNDING_BOX))
+
+        # Connect the fastener to the joint
+        connect_fastener_to_joint(fastener_geom, hole_joint, "fastener_joint_a")
+
+        # Verify the fastener has been moved to the hole position
+        # The fastener should now be positioned relative to the hole joint location
+        final_fastener_pos = tuple(fastener_geom.center(CenterOf.BOUNDING_BOX))
+
+        # The fastener should have moved from its initial position
+        assert not np.allclose(initial_fastener_pos, final_fastener_pos), (
+            "Fastener position should have changed after connecting to joint"
+        )
+
+        # Verify the joint connection was made
+        assert "fastener_joint_a" in fastener_geom.joints
+        fastener_joint = fastener_geom.joints["fastener_joint_a"]
+        assert fastener_joint.connected_to == hole_joint
+
+    def test_connect_fastener_to_joint_assertions(self):
+        """Test that connect_fastener_to_joint raises proper assertions."""
+        # Create a basic fastener and hole setup
+        with BuildPart() as build_part:
+            Box(10, 10, 10)
+
+            with Locations(build_part.faces().filter_by(Axis.Z).sort_by(Axis.Z).last):
+                hole, hole_loc, hole_joint = fastener_hole(
+                    radius=2.5, depth=6, id=1, build_part=build_part
+                )
+        build_part.part.label = "test_box@solid"
+
+        fastener = Fastener(length=15.0, diameter=5.0)
+        fastener_geom = fastener.bd_geometry()
+
+        # Test assertion for missing fastener label
+        fastener_geom.label = None
+        with pytest.raises(
+            AssertionError,
+            match="Connected fastener and joint parent labels are not set",
+        ):
+            connect_fastener_to_joint(fastener_geom, hole_joint, "fastener_joint_a")
+
+        # Test assertion for wrong fastener label format
+        fastener_geom.label = "wrong_label"
+        with pytest.raises(
+            AssertionError, match="Fastener label does not end with '@fastener'"
+        ):
+            connect_fastener_to_joint(fastener_geom, hole_joint, "fastener_joint_a")
+
+        # Fix fastener label
+        fastener_geom.label = "test_fastener@fastener"
+
+        # Test assertion for wrong joint parent label format
+        hole_joint.parent.label = "wrong_label"
+        with pytest.raises(
+            AssertionError,
+            match="Joint parent label does not end with '@solid' or '@fixed_solid'",
+        ):
+            connect_fastener_to_joint(fastener_geom, hole_joint, "fastener_joint_a")
+
+        # Fix joint parent label
+        hole_joint.parent.label = "test_box@solid"
+
+        # Test assertion for missing fastener joint
+        with pytest.raises(
+            AssertionError,
+            match="Fastener joint name nonexistent_joint not found in fastener geometry",
+        ):
+            connect_fastener_to_joint(fastener_geom, hole_joint, "nonexistent_joint")
+
+    def test_connect_fastener_to_joint_with_fixed_solid(self):
+        """Test connecting fastener to joint with @fixed_solid label."""
+        # Create a BuildPart with a Box(10,10,10) and add a fastener hole
+        with BuildPart() as build_part:
+            Box(10, 10, 10)
+
+            # Add fastener hole on top face with depth of 6
+            with Locations(build_part.faces().filter_by(Axis.Z).sort_by(Axis.Z).last):
+                hole, hole_loc, hole_joint = fastener_hole(
+                    radius=2.5, depth=6, id=1, build_part=build_part
+                )
+        build_part.part.label = "test_box@fixed_solid"  # Test @fixed_solid label
+
+        # Create a fastener with proper label
+        fastener = Fastener(length=15.0, diameter=5.0)
+        fastener_geom = fastener.bd_geometry()
+
+        # This should not raise an assertion error with @fixed_solid label
+        connect_fastener_to_joint(fastener_geom, hole_joint, "fastener_joint_a")
+
+        # Verify the joint connection was made
+        assert "fastener_joint_a" in fastener_geom.joints
+        fastener_joint = fastener_geom.joints["fastener_joint_a"]
+        assert fastener_joint.connected_to == hole_joint
 
 
 if __name__ == "__main__":
