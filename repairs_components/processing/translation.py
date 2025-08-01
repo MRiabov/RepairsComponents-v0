@@ -291,14 +291,15 @@ def translate_compound_to_sim_state(
         (env_size_compound[0], env_size_compound[1], env_size_compound[2])
     )
 
-    # Collect body and fastener data organized by environment
-    env_names = []  # [B, N_bodies_per_env]
-    env_positions = []  # [B, N_bodies_per_env, 3]
-    env_rotations = []  # [B, N_bodies_per_env, 4]
-    env_fixed = []  # [B, N_bodies_per_env]
-    env_connector_positions_relative = []  # [B, N_bodies_per_env, 3]
-    env_connector_mask = []  # [B, N_bodies_per_env]
-    env_fasteners = []  # [B, N_fasteners_per_env]
+    # Collect body and fastener data for batch processing
+    all_names = []
+    all_positions = []
+    all_rotations = []
+    all_fixed = []
+    all_connector_positions_relative = []
+    all_connector_mask = []
+    all_fasteners = []
+    body_to_env = []  # Track which environment each body belongs to
 
     for env_idx in range(n_envs):
         b123d_compound = batch_b123d_compounds[env_idx]
@@ -353,7 +354,9 @@ def translate_compound_to_sim_state(
                     position_raw.unsqueeze(0)
                 ).squeeze(0)
                 rotation_quat = euler_deg_to_quat_wxyz(
-                    torch.tensor(tuple(part.global_location.orientation), dtype=torch.float32)
+                    torch.tensor(
+                        tuple(part.global_location.orientation), dtype=torch.float32
+                    )
                 )
 
                 all_names.append(part.label)
@@ -439,21 +442,21 @@ def translate_compound_to_sim_state(
             fixed = fixed_tensor[i]
             connector_position = connector_positions_tensor[i]
             is_connector = connector_mask_tensor[i]
-            
+
             # Create batched tensors for this body across all environments
             batch_positions = torch.zeros((n_envs, 3))
             batch_rotations = torch.zeros((n_envs, 4))
             batch_fixed = torch.zeros(n_envs, dtype=torch.bool)
             batch_connector_positions = torch.zeros((n_envs, 3))
             batch_is_connector = torch.zeros(n_envs, dtype=torch.bool)
-            
+
             # Set values for the environment this body belongs to
             batch_positions[env_idx] = position
             batch_rotations[env_idx] = rotation
             batch_fixed[env_idx] = fixed
             batch_connector_positions[env_idx] = connector_position
             batch_is_connector[env_idx] = is_connector
-            
+
             # Register this body across all environments
             sim_state.physical_state = register_bodies_batch(
                 sim_state.physical_state,
@@ -464,7 +467,7 @@ def translate_compound_to_sim_state(
                 batch_connector_positions,
                 batch_is_connector,
             )
-        
+
         # Set part_hole_batch for all environments
         for env_idx in range(n_envs):
             sim_state.physical_state[env_idx].part_hole_batch = part_hole_batch
@@ -523,10 +526,11 @@ def translate_compound_to_sim_state(
     # however this won't mean they will be returned in export_graph.
 
     # assert out # absolute because it's normalized and equal to both sides.
-    max_pos = (sim_state.physical_state[0].position).abs().max(dim=0).values
+    assert physical_state.positions.shape[0] > 0, "Positions were not registered."
+    max_pos = physical_state.positions.abs().max(dim=0).values
     assert (
         max_pos <= (torch.tensor(env_size_compound, device=max_pos.device) / 2 / 1000)
-    ).all(), f"massive out of bounds, at env_id 0, max_pos {max_pos}"
+    ).all(), f"massive out of bounds, at env_id {max_pos.indices[0]}, max_pos {max_pos}"
     return sim_state, starting_holes
 
 
@@ -698,7 +702,7 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
                     )
                     fastener_hole_pos[id] = (
                         torch.tensor(tuple(joint.location.position)) / 1000
-                    ) # note: could also use joint.relative_location.
+                    )  # note: could also use joint.relative_location.
                     fastener_hole_quat[id] = euler_deg_to_quat_wxyz(
                         torch.tensor(tuple(joint.location.orientation))
                     )

@@ -22,7 +22,9 @@ class RepairsSimState(SimState):
 
     # the main states.
     electronics_state: list[ElectronicsState] = field(default_factory=list)
-    physical_state: PhysicalState = field(default_factory=PhysicalState)  # Single TensorClass instance
+    physical_state: PhysicalState = field(
+        default_factory=PhysicalState
+    )  # Single TensorClass instance
     fluid_state: list[FluidState] = field(default_factory=list)
     tool_state: list[ToolState] = field(default_factory=list)
 
@@ -30,13 +32,17 @@ class RepairsSimState(SimState):
     has_electronics: bool = False
     has_fluid: bool = False
     # has_fasteners: bool = False # maybe add (non-priority)
+    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # note: device is a temporary mock until migration to sim_state.
 
     def __init__(self, batch_dim: int):
         super().__init__()
         self.scene_batch_dim = batch_dim
         self.electronics_state = [ElectronicsState() for _ in range(batch_dim)]
         # Use the simpler approach: create list and stack
-        self.physical_state = torch.stack([PhysicalState() for _ in range(batch_dim)])
+        self.physical_state = torch.stack(
+            [PhysicalState(device=self.device) for _ in range(batch_dim)]
+        )
         # note: to avoid complex instantiation logic.
         self.fluid_state = [FluidState() for _ in range(batch_dim)]
         self.tool_state = [ToolState() for _ in range(batch_dim)]
@@ -59,11 +65,11 @@ class RepairsSimState(SimState):
             electronics_diffs.append(electronics_diff)
             electronics_diff_counts.append(electronics_diff_count)
             # For TensorClass, we need to slice to get individual batch elements
-            self_physical_i = self.physical_state[i:i+1]  # Get slice for batch element i
-            other_physical_i = other.physical_state[i:i+1]
-            physical_diff, physical_diff_count = self_physical_i.diff(
-                other_physical_i
-            )
+            self_physical_i = self.physical_state[
+                i : i + 1
+            ]  # Get slice for batch element i
+            other_physical_i = other.physical_state[i : i + 1]
+            physical_diff, physical_diff_count = self_physical_i.diff(other_physical_i)
             physical_diffs.append(physical_diff)
             physical_diff_counts.append(physical_diff_count)
             fluid_diff, fluid_diff_count = self.fluid_state[i].diff(
