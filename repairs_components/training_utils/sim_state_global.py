@@ -43,6 +43,7 @@ class RepairsSimState(SimState):
         self.physical_state = torch.stack(
             [PhysicalState(device=self.device) for _ in range(batch_dim)]
         )
+        self.physical_state.__post_init__()
         # note: to avoid complex instantiation logic.
         self.fluid_state = [FluidState() for _ in range(batch_dim)]
         self.tool_state = [ToolState() for _ in range(batch_dim)]

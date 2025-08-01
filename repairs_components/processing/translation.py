@@ -267,13 +267,18 @@ def translate_compound_to_sim_state(
     first_compound = batch_b123d_compounds[0]
     first_body_indices = {}
 
-    # Build body indices for the first compound to get hole data
+    # Build body indices for the first compound to get hole data and init tensors
     body_idx = 0
+    fastener_count = 0
     for part in first_compound.leaves:
         part_name, part_type = part.label.split("@", 1)
         if part_type in ("solid", "fixed_solid", "connector"):
             first_body_indices[part.label] = body_idx
             body_idx += 1
+        elif part_type == "fastener":
+            fastener_count += 1
+
+    count_bodies = body_idx
 
     # Get hole data to populate part_hole_batch # it's recomputed but nobody cares.
     starting_holes = get_starting_part_holes(first_compound, first_body_indices)
@@ -292,15 +297,12 @@ def translate_compound_to_sim_state(
     )
 
     # Collect body and fastener data for batch processing
-    all_names = []
-    all_positions = []
-    all_rotations = []
-    all_fixed = []
-    all_connector_positions_relative = []
-    all_connector_mask = []
-    all_fasteners = []
-    body_to_env = []  # Track which environment each body belongs to
+    all_body_names = []
+    all_positions = torch.zeros((n_envs, count_bodies, 3), dtype=torch.float32)
+    all_rotations = torch.zeros((n_envs, count_bodies, 4), dtype=torch.float32)
+    fixed = torch.zeros((count_bodies), dtype=torch.bool)
 
+    # gather data upfront.
     for env_idx in range(n_envs):
         b123d_compound = batch_b123d_compounds[env_idx]
         assert (
@@ -325,26 +327,12 @@ def translate_compound_to_sim_state(
             assert part.volume > 0, "Part must have a volume."
 
             part_name, part_type = part.label.split("@", 1)
+            body_idx = 0
 
             # Collect body data
             if part_type in ("solid", "fixed_solid", "connector"):
-                fixed = part_type == "fixed_solid"
-                connector_position_relative_to_center = torch.zeros(3)
-                is_connector = part_type == "connector"
-
-                if is_connector:
-                    # get the connector def position
-                    connector = Connector.from_name(part.label)
-                    if part_name.endswith("_male"):
-                        connector_position_relative_to_center = torch.tensor(
-                            connector.connector_pos_relative_to_center_male / 1000,
-                            dtype=torch.float32,
-                        )
-                    elif part_name.endswith("_female"):
-                        connector_position_relative_to_center = torch.tensor(
-                            connector.connector_pos_relative_to_center_female / 1000,
-                            dtype=torch.float32,
-                        )
+                if env_idx == 0:
+                    fixed[body_idx] = part_type == "fixed_solid"
 
                 # Convert position and rotation to tensors
                 position_raw = torch.tensor(
@@ -359,61 +347,10 @@ def translate_compound_to_sim_state(
                     )
                 )
 
-                all_names.append(part.label)
-                all_positions.append(position_sim)
-                all_rotations.append(rotation_quat)
-                all_fixed.append(fixed)
-                all_connector_positions_relative.append(
-                    connector_position_relative_to_center
-                )
-                all_connector_mask.append(is_connector)
-                body_to_env.append(env_idx)
-
-            # Collect fastener data for later processing
-            elif part_type == "fastener":
-                # collect constraints, get labels of bodies,
-                assert "fastener_joint_a" in part.joints, (
-                    "Fastener must have a joint a."
-                )
-                assert "fastener_joint_b" in part.joints, (
-                    "Fastener must have a joint b."
-                )
-                assert "fastener_joint_tip" in part.joints, (
-                    "Fastener must have a tip joint."
-                )
-
-                joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
-                joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
-                # joint_tip is not used but required for validation
-                _ = part.joints["fastener_joint_tip"]
-
-                # check if constraint_a and constraint_b are active
-                constraint_a_active = joint_a.connected_to is not None
-                constraint_b_active = joint_b.connected_to is not None
-
-                # if active, get hole IDs from connected joint labels
-                initial_hole_id_a = None
-                initial_hole_id_b = None
-
-                if constraint_a_active:
-                    # Extract hole ID from the connected joint label
-                    joint_label = joint_a.connected_to.label
-                    assert joint_label.startswith("fastener_hole_")
-                    hole_id, _, _ = fastener_hole_info_from_joint_name(joint_label)
-                    initial_hole_id_a = hole_id
-
-                if constraint_b_active:
-                    # Extract hole ID from the connected joint label
-                    joint_label = joint_b.connected_to.label
-                    assert joint_label.startswith("fastener_hole_")
-                    hole_id, _, _ = fastener_hole_info_from_joint_name(joint_label)
-                    initial_hole_id_b = hole_id
-
-                fastener = Fastener(
-                    initial_hole_id_a=initial_hole_id_a,
-                    initial_hole_id_b=initial_hole_id_b,
-                )
-                all_fasteners.append(fastener)
+                all_body_names.append(part.label)
+                all_positions[env_idx, body_idx] = position_sim
+                all_rotations[env_idx, body_idx] = rotation_quat
+                body_idx += 1
 
             elif part_type == "liquid":
                 raise NotImplementedError("Liquid is not handled yet.")
@@ -421,62 +358,101 @@ def translate_compound_to_sim_state(
                 raise NotImplementedError("Buttons are not handled yet.")
             elif part_type == "connector_def":
                 continue  # connector def is already registered in connectors.
+            elif part_type == "fastener":
+                continue  # would be handled in the next loop.
             else:
                 raise NotImplementedError(
                     f"Part type {part_type} not implemented. Raise from part.label: {part.label}"
                 )
 
     # Convert lists to tensors for batch processing
-    if all_names:
-        positions_tensor = torch.stack(all_positions)
-        rotations_tensor = torch.stack(all_rotations)
-        fixed_tensor = torch.tensor(all_fixed, dtype=torch.bool)
-        connector_positions_tensor = torch.stack(all_connector_positions_relative)
-        connector_mask_tensor = torch.tensor(all_connector_mask, dtype=torch.bool)
+    assert all_body_names, "Expected to find bodies."
 
-        # Register bodies using batch processing - one body at a time across all environments
-        for i, name in enumerate(all_names):
-            env_idx = body_to_env[i]
-            position = positions_tensor[i]
-            rotation = rotations_tensor[i]
-            fixed = fixed_tensor[i]
-            connector_position = connector_positions_tensor[i]
-            is_connector = connector_mask_tensor[i]
+    # Register bodies using batch processing - one body at a time across environments batch
+    for i, name in enumerate(all_body_names):
+        body_positions = all_positions[:, i]
+        body_rotations = all_rotations[:, i]
+        body_fixed = name.endswith("@fixed_solid")
+        connector_position_relative_to_center = None
+        if name.endswith("@connector"):
+            # get the connector def position
+            connector = Connector.from_name(name)
+            if name.endswith("_male"):
+                connector_position_relative_to_center = torch.tensor(
+                    connector.connector_pos_relative_to_center_male / 1000,
+                    dtype=torch.float32,
+                )
+            elif name.endswith("_female"):
+                connector_position_relative_to_center = torch.tensor(
+                    connector.connector_pos_relative_to_center_female / 1000,
+                    dtype=torch.float32,
+                )
+        # Register this body across all environments
+        sim_state.physical_state = register_bodies_batch(
+            sim_state.physical_state,
+            name,
+            body_positions,
+            body_rotations,
+            body_fixed,
+            connector_position_relative_to_center,
+        )
 
-            # Create batched tensors for this body across all environments
-            batch_positions = torch.zeros((n_envs, 3))
-            batch_rotations = torch.zeros((n_envs, 4))
-            batch_fixed = torch.zeros(n_envs, dtype=torch.bool)
-            batch_connector_positions = torch.zeros((n_envs, 3))
-            batch_is_connector = torch.zeros(n_envs, dtype=torch.bool)
+    # Set part_hole_batch for all environments
+    sim_state.physical_state.part_hole_batch = part_hole_batch.tile((sim_state.physical_state.batch_size[0],1))
 
-            # Set values for the environment this body belongs to
-            batch_positions[env_idx] = position
-            batch_rotations[env_idx] = rotation
-            batch_fixed[env_idx] = fixed
-            batch_connector_positions[env_idx] = connector_position
-            batch_is_connector[env_idx] = is_connector
-
-            # Register this body across all environments
-            sim_state.physical_state = register_bodies_batch(
-                sim_state.physical_state,
-                name,
-                batch_positions,
-                batch_rotations,
-                batch_fixed,
-                batch_connector_positions,
-                batch_is_connector,
+    for part in b123d_compound.leaves:
+        part_name, part_type = part.label.split("@", 1)
+        # Collect fastener data for later processing
+        if part_type == "fastener":
+            fastener_pos = torch.tensor(
+                tuple(part.global_location.position), dtype=torch.float32
+            )
+            fastener_quat = euler_deg_to_quat_wxyz(
+                torch.tensor(
+                    tuple(part.global_location.orientation), dtype=torch.float32
+                )
+            )
+            # collect constraints, get labels of bodies,
+            assert "fastener_joint_a" in part.joints, "Fastener must have a joint a."
+            assert "fastener_joint_b" in part.joints, "Fastener must have a joint b."
+            assert "fastener_joint_tip" in part.joints, (
+                "Fastener must have a tip joint."
             )
 
-        # Set part_hole_batch for all environments
-        for env_idx in range(n_envs):
-            sim_state.physical_state[env_idx].part_hole_batch = part_hole_batch
+            joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
+            joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
+            # joint_tip is not used but required for validation
+            _ = part.joints["fastener_joint_tip"]
 
-    # Register fasteners using batch processing
-    if all_fasteners:
-        for fastener in all_fasteners:
+            # check if constraint_a and constraint_b are active
+            constraint_a_active = joint_a.connected_to is not None
+            constraint_b_active = joint_b.connected_to is not None
+
+            # if active, get hole IDs from connected joint labels
+            initial_hole_id_a = None
+            initial_hole_id_b = None
+
+            if constraint_a_active:
+                # Extract hole ID from the connected joint label
+                joint_label = joint_a.connected_to.label
+                assert joint_label.startswith("fastener_hole_")
+                hole_id, _, _ = fastener_hole_info_from_joint_name(joint_label)
+                initial_hole_id_a = hole_id
+
+            if constraint_b_active:
+                # Extract hole ID from the connected joint label
+                joint_label = joint_b.connected_to.label
+                assert joint_label.startswith("fastener_hole_")
+                hole_id, _, _ = fastener_hole_info_from_joint_name(joint_label)
+                initial_hole_id_b = hole_id
+
+            fastener = Fastener(
+                initial_hole_id_a=initial_hole_id_a, initial_hole_id_b=initial_hole_id_b
+            )
+
+            # Register this body across all environments
             sim_state.physical_state = register_fasteners_batch(
-                sim_state.physical_state, fastener
+                sim_state.physical_state, fastener, fastener_pos, fastener_quat
             )
 
     # NOTE: connectors and connector_defs other solid bodies are not encoded in electronics, only functional components and their connections are encoded.
@@ -526,8 +502,10 @@ def translate_compound_to_sim_state(
     # however this won't mean they will be returned in export_graph.
 
     # assert out # absolute because it's normalized and equal to both sides.
-    assert physical_state.positions.shape[0] > 0, "Positions were not registered."
-    max_pos = physical_state.positions.abs().max(dim=0).values
+    assert sim_state.physical_state.position.shape[0] > 0, (
+        "Positions were not registered."
+    )
+    max_pos = sim_state.physical_state.position.abs().max(dim=0).values
     assert (
         max_pos <= (torch.tensor(env_size_compound, device=max_pos.device) / 2 / 1000)
     ).all(), f"massive out of bounds, at env_id {max_pos.indices[0]}, max_pos {max_pos}"
