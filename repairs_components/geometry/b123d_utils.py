@@ -126,23 +126,33 @@ def recenter_part(part: Part):
 
 
 def filtered_intersection_check(
-    compound: Compound, filter_labels=("connector_def",), assertion=True
+    compound: Compound, ignored_labels=("connector_def",), assertion=True
 ):
-    any_intersect, parts, intersect_volume = compound.do_children_intersect()
+    assert len(compound.children) > 1, (
+        "filtered_intersection_check requires at least two children in compound"
+    )
+    any_intersect, intersecting_components, intersect_volume = (
+        compound.do_children_intersect()
+    )
     # Check if there's any intersection that's not just between connector_defs
+
+    # Logic: any_intersect is true if *any* children intersect. Then check if
+    # *all* intersecting components are ignored labels with the same volume as the
+    # intersecting volume. If so, then there's no invalid intersection.
     has_invalid_intersection = any_intersect and not all(
         any(
-            child.label.endswith(filter_labels)
+            child.label.endswith(ignored_labels)
             and np.isclose(intersect_volume, child.volume)
-            for child in part.children
+            for child in component.children
         )
-        if part.children
+        if component.children
         else False
-        for part in parts
+        for component in intersecting_components
     )
+
     if assertion:
         assert not has_invalid_intersection, (
-            f"Non-connector parts intersect. Intersecting parts: {[(part.label, part.volume) for part in parts]}. "
+            f"Non-connector parts intersect. Intersecting parts: {[(part.label, part.volume) for part in intersecting_components]}. "
             f"Intersecting volume: {intersect_volume}."
         )
-    return has_invalid_intersection, parts, intersect_volume
+    return has_invalid_intersection, intersecting_components, intersect_volume
