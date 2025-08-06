@@ -1,0 +1,30 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+## numpy==1.26.4
+git+https://github.com/Genesis-Embodied-AI/Genesis.git # genesis.
+torch==2.5.1+cpu
+
+torch_geometric
+torchrl
+## build123d==0.9.1
+ocp_vscode
+vtk
+libigl==2.5.1
+trimesh # note: not used in voxelization, but required for genesis.
+gymnasium
+ompl
+ruff
+## pyrender  #how was it not installed before?
+pytest
+## git+https://github.com/mit-han-lab/torchsparse.git
+
+## torch_scatter # note: something fails in uv, install separately.
+
+# if does not work - uv pip install torch-scatter -f https://data.pyg.org/whl/torch-2.5.1+cu124.html
+
+#also `sudo apt install libgl1-mesa-dev`
+
+ipython  # For HTML display in notebooks
+# webbrowser  # For opening visualizations in the default browser
+
+#note: installing repairs-components like this: /home/mriabov/anaconda3/envs/repairs/bin/python -m pip install --force-reinstall --no-cache-dir -e .
+#constrained as of 2025-06-01
