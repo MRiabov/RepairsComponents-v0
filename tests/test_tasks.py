@@ -30,7 +30,7 @@ def test_perturb_initial_state(bd_test_compound):
         new_compound = task.perturb_initial_state(bd_test_compound, env_size)
 
         assert (
-            np.array(new_compound.bounding_box().size.to_tuple()) < np.array(env_size)
+            tuple(np.array(new_compound.bounding_box().size)) < np.array(env_size)
         ).all(), "Parts are not within bounds."
         filtered_intersection_check(new_compound, assertion=True)
 
@@ -81,7 +81,7 @@ def test_perturb_desired_state():
 
     # Store the original position for verification
     original_bbox = box.bounding_box()
-    original_min = np.array(original_bbox.min.to_tuple())
+    original_min = np.array(tuple(original_bbox.min))
 
     # Perturb the desired state
     env_size = (640, 640, 640)  # Large enough environment
@@ -89,8 +89,8 @@ def test_perturb_desired_state():
 
     # Verify the result
     result_bbox = result.bounding_box()
-    result_min = np.array(result_bbox.min.to_tuple())
-    result_max = np.array(result_bbox.max.to_tuple())
+    result_min = np.array(tuple(result_bbox.min))
+    result_max = np.array(tuple(result_bbox.max))
 
     # The box should be moved in XY and have Z-min at 0
     assert np.allclose(result_min[2], 0), f"Z-min should be 0, got {result_min[2]}"

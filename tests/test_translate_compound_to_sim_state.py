@@ -41,8 +41,10 @@ class TestEnv(EnvSetup):
         solid_with_hole.label = "test_solid_with_hole@solid"
 
         europlug_male, connector_def, europlug_female, _ = Europlug(0).bd_geometry(
-            (60, 30, 30)
+            (60, 70, 30)
         )
+        europlug_male = europlug_male.move(Pos(60, 70, 30))
+        europlug_female = europlug_female.move(Pos(60, 70, 30))
         fastener = Fastener(initial_hole_id_b=0)
         fastener_geom = fastener.bd_geometry()
         # # fastener_geom.label = "test_fastener@fastener" # labeled at bd_geometry.

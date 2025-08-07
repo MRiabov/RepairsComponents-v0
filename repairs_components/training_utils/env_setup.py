@@ -59,7 +59,7 @@ class EnvSetup(ABC):
         # check bounding box
         aabb = geom.bounding_box()
         assert (
-            np.array(aabb.size.to_tuple()) <= np.array(self.STANDARD_ENV_SIZE)
+            np.array(tuple(aabb.size)) <= np.array(self.STANDARD_ENV_SIZE)
         ).all(), (
             f"Compound must be within the environment. Current AABB size {aabb.size} with: {aabb.min} to {aabb.max}. Environment size: {self.STANDARD_ENV_SIZE}."
         )  # note: was min>=0 and max<=STANDARD_ENV_SIZE no point constraining myself though

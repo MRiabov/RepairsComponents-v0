@@ -20,7 +20,7 @@ def fastener_hole(radius: float, depth: float):
     # make a hole
     fastener_hole1 = Hole(radius=radius, depth=depth)
     fastener_loc = Locations((0, 0, -radius))  # why `-radius` though?
-    # tuple_pos=[loc.position.to_tuple() for loc in fastener_loc.locations]
+    # tuple_pos = [tuple(loc.position) for loc in fastener_loc.locations]
 
     return fastener_hole1, fastener_loc
 
@@ -45,7 +45,7 @@ with BuildPart() as test:
 
             additional_locs = GridLocations(20, 20, 20, 20).locations
     for loc in fastener_locs.locations + additional_locs:
-        print(loc.position.to_tuple())
+        print(tuple(loc.position))
 
 test_part = test.part
 test_part.label = "test"
