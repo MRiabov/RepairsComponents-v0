@@ -233,8 +233,8 @@ class PhysicalState(TensorClass):
         rot_as_quat: bool = False,  # mostly for convenience in testing
         _expect_unnormalized_coordinates: bool = True,  # mostly for tests...
         connector_position_relative_to_center: torch.Tensor | None = None,
-        max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64], device="cuda"),
-        min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0], device="cuda"),
+        max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64]),
+        min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0]),
     ):
         assert name not in self.body_indices, f"Body {name} already registered"
         assert name.endswith(("@solid", "@connector", "@fixed_solid")), (
@@ -912,10 +912,15 @@ def register_fasteners_batch(
     Args:
         physical_states: Batched PhysicalState to update
         fastener: Fastener object to register across all environments
+        fastener_pos: Tensor of positions [B, num_fasteners, 3] for this fastener across environments
+        fastener_quat: Tensor of quaternions [B, num_fasteners, 4] for this fastener across environments
     """
     # Determine batch size from physical_states
     assert (
         physical_states.batch_size is not None and len(physical_states.batch_size) >= 1
+    )
+    assert fastener_pos.shape[:2] == fastener_quat.shape[:2], (
+        f"Expected fastener_pos shape [{physical_states.batch_size[0]}, num_fasteners, 3], got {fastener_pos.shape} and {fastener_quat.shape}"
     )
 
     device = physical_states.device if hasattr(physical_states, "device") else "cuda"

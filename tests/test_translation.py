@@ -18,14 +18,7 @@ from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.gym_env import RepairsEnv
 import pytest
 from pathlib import Path
-
-
-@pytest.fixture
-def data_dir():
-    path = Path("/workspace/test_data/")
-    if not path.exists():
-        path.mkdir(parents=True, exist_ok=True)
-    return path
+from global_test_config import init_gs
 
 
 @pytest.fixture
@@ -102,12 +95,12 @@ def io_cfg(data_dir, env_setups_two_connectors):
 
 
 @pytest.fixture(autouse=True)
-def cleanup_after_test(request, scene_franka_and_two_cubes):
+def cleanup_after_test(request, scene_franka_and_two_cubes, base_data_dir):
     yield
     test_name = request.node.name
     scene, entities = scene_franka_and_two_cubes
     scene.visualizer.cameras[0].stop_recording(
-        save_to_filename=f"/workspace/RepairsComponents-v0/video_{test_name}.mp4",
+        save_to_filename=str(base_data_dir / f"test_videos/video_{test_name}.mp4"),
         fps=60,
     )
     scene.reset()
@@ -164,9 +157,14 @@ def assembly_task_geoms_two_connectors(env_setups_two_connectors):
 # "will init" test skipped, since all of the downstream will use it.
 @pytest.fixture
 def two_connectors_env(
-    env_setups_two_connectors, env_cfg, obs_cfg, io_cfg, reward_cfg, command_cfg
+    env_setups_two_connectors,
+    env_cfg,
+    obs_cfg,
+    io_cfg,
+    reward_cfg,
+    command_cfg,
+    init_gs,
 ):
-    gs.init()
     env = RepairsEnv(
         ml_batch_dim=1,
         env_setups=env_setups_two_connectors,

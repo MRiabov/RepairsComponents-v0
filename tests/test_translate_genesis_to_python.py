@@ -12,15 +12,13 @@ from repairs_components.processing.translation import translate_genesis_to_pytho
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.geometry.connectors.models.europlug import Europlug
+from global_test_config import init_gs
 
 
 @pytest.fixture
-def scene_with_entities():
+def scene_with_entities(init_gs):
     """Create a real Genesis scene with various entity types."""
-    if not gs._initialized:
-        gs.init(
-            logging_level="error"
-        )  # note: logging_level="error" to not spam console.
+
 
     scene = gs.Scene(
         sim_options=gs.options.SimOptions(dt=0.01),

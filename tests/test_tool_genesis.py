@@ -14,16 +14,11 @@ from repairs_components.geometry.fasteners import (
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import attach_tool_to_arm, detach_tool_from_arm
 from repairs_components.processing.geom_utils import get_connector_pos
+from global_test_config import init_gs
 
 
 @pytest.fixture(scope="module")
-def scene_franka_and_two_cubes():
-    ########################## init ##########################
-    if not gs._initialized:
-        gs.init(
-            backend=gs.gpu, logging_level="error"
-        )  # note: logging_level="error" to not spam console.
-
+def scene_franka_and_two_cubes(init_gs):
     ########################## create a scene ##########################
     scene = gs.Scene(
         sim_options=gs.options.SimOptions(
@@ -97,12 +92,12 @@ def fingers_dof():
 
 
 @pytest.fixture(autouse=True)
-def cleanup_after_test(request, scene_franka_and_two_cubes):
+def cleanup_after_test(request, scene_franka_and_two_cubes, base_data_dir):
     yield
     test_name = request.node.name
     scene, entities = scene_franka_and_two_cubes
     scene.visualizer.cameras[0].stop_recording(
-        save_to_filename=f"/workspace/RepairsComponents-v0/tests/test_videos/video_{test_name}.mp4",
+        save_to_filename=str(base_data_dir / f"test_videos/video_{test_name}.mp4"),
         fps=60,
     )
     scene.reset()

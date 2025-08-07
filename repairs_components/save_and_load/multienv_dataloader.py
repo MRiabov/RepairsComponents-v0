@@ -224,7 +224,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         save_to_disk: bool | None = False,
         # offline
         env_setup_ids: List[int] | None = None,
-        offline_data_dir: str | Path | None = "/workspace/data",
+        offline_data_dir: str | Path | None = None,
     ):
         """
         Repairs environment dataloader that prefetches scene data.

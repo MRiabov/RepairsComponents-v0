@@ -17,17 +17,13 @@ from repairs_components.geometry.fasteners import (
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from tests.test_tool_genesis import move_franka_to_pos
 from genesis.engine.entities import RigidEntity
+from global_test_config import init_gs
 
 
 @pytest.fixture(scope="module")
-def scene_with_fastener_screwdriver_and_two_parts():
+def scene_with_fastener_screwdriver_and_two_parts(init_gs):
     from repairs_components.logic.tools.screwdriver import Screwdriver
     from repairs_components.logic.tools.tool import attach_tool_to_arm
-
-    ########################## init ##########################
-    if not gs._initialized:
-        gs.init(backend=gs.gpu, logging_level="error")
-        # note: logging_level="error" to not spam console.
 
     ########################## create a scene ##########################
     scene = gs.Scene(
@@ -113,12 +109,14 @@ def scene_with_fastener_screwdriver_and_two_parts():
 
 
 @pytest.fixture(autouse=True)
-def cleanup_after_test(request, scene_with_fastener_screwdriver_and_two_parts):
+def cleanup_after_test(
+    request, scene_with_fastener_screwdriver_and_two_parts, base_data_dir
+):
     yield
     test_name = request.node.name
     scene, entities = scene_with_fastener_screwdriver_and_two_parts
     scene.visualizer.cameras[0].stop_recording(
-        save_to_filename=f"/workspace/RepairsComponents-v0/tests/test_videos/video_{test_name}.mp4",
+        save_to_filename=str(base_data_dir / f"test_videos/video_{test_name}.mp4"),
         fps=60,
     )
     scene.reset()

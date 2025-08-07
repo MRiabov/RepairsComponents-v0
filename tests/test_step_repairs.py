@@ -21,6 +21,7 @@ from repairs_components.logic.tools.gripper import Gripper
 from genesis.engine.entities import RigidEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 import numpy as np
+from global_test_config import init_gs
 
 
 @pytest.fixture
@@ -40,12 +41,6 @@ def fastener():
 @pytest.fixture
 def bd_geometry(fastener):
     return fastener.bd_geometry()
-
-
-@pytest.fixture(scope="session")
-def init_gs():
-    if not gs._initialized:
-        gs.init(backend=gs.gpu, logging_level="error")
 
 
 @pytest.fixture(scope="module")
