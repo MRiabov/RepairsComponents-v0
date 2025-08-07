@@ -455,6 +455,12 @@ class ElectronicsState(SimState):
     #     "Register components of body A to bodies B"
     def connect(self, name: str, other_name: str):
         "Connect two components"
+        assert not name.endswith(("@connector")), (
+            f"Connectors should not be registered or connected in electrical state (yet). Failed at {name}."
+        )
+        assert not other_name.endswith(("@connector")), (
+            f"Connectors should not be registered or connected in electrical state (yet). Failed at {other_name}."
+        )
         self.components[name].connect(self.components[other_name])
         self.components[other_name].connect(self.components[name])
         self._graph_built = False

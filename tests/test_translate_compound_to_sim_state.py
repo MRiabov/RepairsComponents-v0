@@ -99,27 +99,29 @@ def test_translate_compound_to_sim_state(test_env_geom):
         expected_num_fasteners,
         4,
     )
-    assert phys_state.fasteners_diam.shape == (expected_num_fasteners,)
-    assert phys_state.fasteners_length.shape == (expected_num_fasteners,)
-    assert phys_state.fasteners_attached_to_body.shape == (
+    assert phys_state.fasteners_diam.shape == (
         expected_batch_dim,
         expected_num_fasteners,
     )
-    assert len(phys_state.body_indices) == (expected_num_solids,)
-    assert len(phys_state.inverse_body_indices) == (expected_num_solids,)
+    assert phys_state.fasteners_length.shape == (
+        expected_batch_dim,
+        expected_num_fasteners,
+    )
+    assert phys_state.fasteners_attached_to_body.shape == (
+        expected_batch_dim,
+        expected_num_fasteners,
+        2,
+    )
+    assert len(phys_state.body_indices) == expected_num_solids
+    assert len(phys_state.inverse_body_indices) == expected_num_solids
 
     assert phys_state.hole_positions.shape == (
         expected_batch_dim,
         expected_num_holes,
         3,
     )
-    assert phys_state.hole_quats.shape == (
-        expected_batch_dim,
-        expected_num_holes,
-        4,
-    )
-    assert phys_state.part_hole_batch.shape == (expected_num_holes,)
-    assert phys_state.part_hole_batch.shape == (expected_num_holes,)
+    assert phys_state.hole_quats.shape == (expected_batch_dim, expected_num_holes, 4)
+    assert phys_state.part_hole_batch.shape == (expected_batch_dim, expected_num_holes)
 
     # assert values.
     assert set(phys_state.body_indices.keys()) == {
@@ -158,35 +160,20 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
     # assert all shapes for batched data
     assert phys_state.batch_size == (batch_dim,)
 
-    assert phys_state.fasteners_pos.shape == (
-        batch_dim,
-        expected_num_fasteners,
-        3,
-    )
-    assert phys_state.fasteners_quat.shape == (
-        batch_dim,
-        expected_num_fasteners,
-        4,
-    )
+    assert phys_state.fasteners_pos.shape == (batch_dim, expected_num_fasteners, 3)
+    assert phys_state.fasteners_quat.shape == (batch_dim, expected_num_fasteners, 4)
     assert phys_state.fasteners_diam.shape == (batch_dim, expected_num_fasteners)
     assert phys_state.fasteners_length.shape == (batch_dim, expected_num_fasteners)
     assert phys_state.fasteners_attached_to_body.shape == (
         batch_dim,
         expected_num_fasteners,
+        2,
     )
-    assert len(phys_state.body_indices) == (expected_num_solids,)
-    assert len(phys_state.inverse_body_indices) == (expected_num_solids,)
+    assert len(phys_state.body_indices) == expected_num_solids
+    assert len(phys_state.inverse_body_indices) == expected_num_solids
 
-    assert phys_state.hole_positions.shape == (
-        batch_dim,
-        expected_num_holes,
-        3,
-    )
-    assert phys_state.hole_quats.shape == (
-        batch_dim,
-        expected_num_holes,
-        4,
-    )
+    assert phys_state.hole_positions.shape == (batch_dim, expected_num_holes, 3)
+    assert phys_state.hole_quats.shape == (batch_dim, expected_num_holes, 4)
     assert phys_state.part_hole_batch.shape == (batch_dim, expected_num_holes)
 
     # assert values for batched data

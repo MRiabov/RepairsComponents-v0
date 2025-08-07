@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from repairs_components.logic.physical_state import PhysicalState, register_fasteners_batch
+from repairs_components.logic.physical_state import PhysicalState, register_fasteners_batch, register_bodies_batch
 from repairs_components.geometry.fasteners import get_fastener_singleton_name
 
 
@@ -463,6 +463,349 @@ class TestRegisterFastenersBatch:
         # Verify tensors are on the correct device
         assert result_state.fasteners_pos.device == target_device
         assert result_state.fasteners_quat.device == target_device
+
+
+class TestRegisterBodiesBatch:
+    """Test suite for register_bodies_batch function."""
+
+    def setup_method(self):
+        """Set up test fixtures before each test method."""
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+    def create_empty_batched_physical_state(self, batch_size: int = 2):
+        """Create an empty batched PhysicalState."""
+        # Create a simple single state
+        single_state = PhysicalState(device=self.device)
+        
+        # Initialize empty tensors
+        single_state.position = torch.empty((0, 3), device=self.device)
+        single_state.quat = torch.empty((0, 4), device=self.device)
+        single_state.fixed = torch.empty((0,), dtype=torch.bool, device=self.device)
+        single_state.count_fasteners_held = torch.empty((0,), dtype=torch.int8, device=self.device)
+        single_state.male_connector_positions = torch.empty((0, 3), device=self.device)
+        single_state.female_connector_positions = torch.empty((0, 3), device=self.device)
+        single_state.male_connector_batch = torch.empty((0,), dtype=torch.long, device=self.device)
+        single_state.female_connector_batch = torch.empty((0,), dtype=torch.long, device=self.device)
+        single_state.connector_indices_from_name = {}
+        
+        # Stack to create batched state
+        states = [single_state for _ in range(batch_size)]
+        batched_state: PhysicalState = torch.stack(states)  # type: ignore
+        
+        return batched_state
+
+    def test_register_bodies_batch_basic(self):
+        """Test basic functionality of register_bodies_batch."""
+        batch_size = 2
+        num_bodies = 3
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        # Create test data
+        names = ["body_0@solid", "body_1@fixed_solid", "body_2@solid"]
+        positions = torch.randn(batch_size, num_bodies, 3) * 0.1  # Keep well within bounds
+        positions[:, :, 2] = torch.abs(positions[:, :, 2]) + 0.1  # Ensure z > 0 and within bounds
+        rotations = torch.randn(batch_size, num_bodies, 4)
+        rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True)  # Normalize
+        fixed = torch.tensor([False, True, False])  # [num_bodies]
+        
+        # Register bodies
+        result_state = register_bodies_batch(
+            physical_state,
+            names,
+            positions,
+            rotations,
+            fixed,
+        )
+        
+        # Verify body indices were updated
+        assert len(result_state.body_indices) == num_bodies
+        for i, name in enumerate(names):
+            assert name in result_state.body_indices
+            assert result_state.body_indices[name] == i
+            assert result_state.inverse_body_indices[i] == name
+        
+        # Verify tensors were updated
+        assert result_state.position.shape == (batch_size, num_bodies, 3)
+        assert result_state.quat.shape == (batch_size, num_bodies, 4)
+        assert result_state.fixed.shape == (batch_size, num_bodies)
+        assert result_state.count_fasteners_held.shape == (batch_size, num_bodies)
+        
+        # Verify fixed values are correct
+        expected_fixed = fixed.unsqueeze(0).expand(batch_size, num_bodies)
+        assert torch.equal(result_state.fixed, expected_fixed)
+        
+        # Verify positions and rotations match
+        assert torch.allclose(result_state.position, positions)
+        assert torch.allclose(result_state.quat, rotations)
+
+    def test_register_bodies_batch_with_connectors(self):
+        """Test register_bodies_batch with connector bodies."""
+        batch_size = 2
+        num_bodies = 2
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        # Create test data with connectors
+        names = ["connector_male@connector", "connector_female@connector"]
+        positions = torch.randn(batch_size, num_bodies, 3) * 0.1
+        positions[:, :, 2] = torch.abs(positions[:, :, 2]) + 0.1
+        rotations = torch.randn(batch_size, num_bodies, 4)
+        rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True)
+        fixed = torch.tensor([False, False])
+        
+        # Create connector relative positions
+        connector_positions_relative = torch.tensor([
+            [0.1, 0.0, 0.05],  # male connector
+            [-0.1, 0.0, 0.05]  # female connector
+        ])
+        
+        # Register bodies
+        result_state = register_bodies_batch(
+            physical_state,
+            names,
+            positions,
+            rotations,
+            fixed,
+            connector_positions_relative,
+        )
+        
+        # Verify body indices were updated
+        assert len(result_state.body_indices) == num_bodies
+        for i, name in enumerate(names):
+            assert name in result_state.body_indices
+        
+        # Verify connector positions were calculated
+        # We should have one male and one female connector
+        assert result_state.male_connector_positions.shape == (batch_size, 1, 3)
+        assert result_state.female_connector_positions.shape == (batch_size, 1, 3)
+
+    def test_register_bodies_batch_mixed_connectors(self):
+        """Test register_bodies_batch with mixed connector and non-connector bodies."""
+        batch_size = 2
+        num_bodies = 3
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        # Create test data with mixed body types
+        names = ["body_0@solid", "connector_male@connector", "body_2@fixed_solid"]
+        positions = torch.randn(batch_size, num_bodies, 3) * 0.1
+        positions[:, :, 2] = torch.abs(positions[:, :, 2]) + 0.1
+        rotations = torch.randn(batch_size, num_bodies, 4)
+        rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True)
+        fixed = torch.tensor([False, False, True])
+        
+        # Create connector relative positions (NaN for non-connectors)
+        connector_positions_relative = torch.tensor([
+            [float('nan'), float('nan'), float('nan')],  # non-connector
+            [0.1, 0.0, 0.05],  # connector
+            [float('nan'), float('nan'), float('nan')]   # non-connector
+        ])
+        
+        # Register bodies
+        result_state = register_bodies_batch(
+            physical_state,
+            names,
+            positions,
+            rotations,
+            fixed,
+            connector_positions_relative,
+        )
+        
+        # Verify body indices were updated
+        assert len(result_state.body_indices) == num_bodies
+        
+        # Verify connector positions were calculated only for connector (index 1)
+        # We should have one male connector and no female connectors
+        assert result_state.male_connector_positions.shape == (batch_size, 1, 3)  # Only one male connector
+        assert result_state.female_connector_positions.shape == (batch_size, 0, 3)  # No female connectors
+
+    def test_register_bodies_batch_input_validation(self):
+        """Test input validation for register_bodies_batch."""
+        batch_size = 2
+        num_bodies = 2
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        names = ["body_0@solid", "body_1@solid"]
+        positions = torch.randn(batch_size, num_bodies, 3) * 0.1
+        positions[:, :, 2] = torch.abs(positions[:, :, 2]) + 0.1
+        rotations = torch.randn(batch_size, num_bodies, 4)
+        rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True)
+        fixed = torch.tensor([False, False])
+        
+        # Test wrong positions shape
+        with pytest.raises(AssertionError, match="Expected positions shape"):
+            register_bodies_batch(
+                physical_state,
+                names,
+                positions[:, :1],  # Wrong num_bodies dimension
+                rotations,
+                fixed,
+            )
+        
+        # Test wrong rotations shape
+        with pytest.raises(AssertionError, match="Expected rotations shape"):
+            register_bodies_batch(
+                physical_state,
+                names,
+                positions,
+                rotations[:, :, :3],  # Wrong quaternion dimension
+                fixed,
+            )
+        
+        # Test wrong fixed shape
+        with pytest.raises(ValueError, match="Expected fixed shape"):
+            register_bodies_batch(
+                physical_state,
+                names,
+                positions,
+                rotations,
+                torch.tensor([False]),  # Wrong number of bodies
+            )
+
+    def test_register_bodies_batch_name_validation(self):
+        """Test name format validation."""
+        batch_size = 1
+        num_bodies = 1
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        positions = torch.randn(batch_size, num_bodies, 3) * 0.1
+        positions[:, :, 2] = torch.abs(positions[:, :, 2]) + 0.1
+        rotations = torch.randn(batch_size, num_bodies, 4)
+        rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True)
+        fixed = torch.tensor([False])
+        
+        # Test invalid name format
+        with pytest.raises(AssertionError, match="Body name must end with"):
+            register_bodies_batch(
+                physical_state,
+                ["invalid_name"],
+                positions,
+                rotations,
+                fixed,
+            )
+
+    def test_register_bodies_batch_duplicate_names(self):
+        """Test that duplicate body names are rejected."""
+        batch_size = 1
+        num_bodies = 1
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        # Add a body first
+        physical_state.body_indices["body_0@solid"] = 0
+        
+        positions = torch.randn(batch_size, num_bodies, 3) * 0.1
+        positions[:, :, 2] = torch.abs(positions[:, :, 2]) + 0.1
+        rotations = torch.randn(batch_size, num_bodies, 4)
+        rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True)
+        fixed = torch.tensor([False])
+        
+        # Test duplicate name
+        with pytest.raises(AssertionError, match="already registered"):
+            register_bodies_batch(
+                physical_state,
+                ["body_0@solid"],  # Duplicate name
+                positions,
+                rotations,
+                fixed,
+            )
+
+    def test_register_bodies_batch_connector_validation(self):
+        """Test connector-specific validation."""
+        batch_size = 1
+        num_bodies = 1
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        names = ["connector_male@connector"]
+        positions = torch.randn(batch_size, num_bodies, 3) * 0.1
+        positions[:, :, 2] = torch.abs(positions[:, :, 2]) + 0.1
+        rotations = torch.randn(batch_size, num_bodies, 4)
+        rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True)
+        fixed = torch.tensor([False])
+        
+        # Test NaN connector position for connector body
+        connector_positions_relative = torch.tensor([
+            [float('nan'), float('nan'), float('nan')]
+        ])
+        
+        with pytest.raises(AssertionError, match="must have valid connector_position_relative_to_center"):
+            register_bodies_batch(
+                physical_state,
+                names,
+                positions,
+                rotations,
+                fixed,
+                connector_positions_relative,
+            )
+
+    def test_register_bodies_batch_fixed_tensor_shapes(self):
+        """Test different shapes for fixed tensor."""
+        batch_size = 2
+        num_bodies = 2
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        names = ["body_0@solid", "body_1@fixed_solid"]
+        positions = torch.randn(batch_size, num_bodies, 3) * 0.1
+        positions[:, :, 2] = torch.abs(positions[:, :, 2]) + 0.1
+        rotations = torch.randn(batch_size, num_bodies, 4)
+        rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True)
+        
+        # Test with [num_bodies] shape
+        fixed_1d = torch.tensor([False, True])
+        result_state = register_bodies_batch(
+            physical_state,
+            names,
+            positions,
+            rotations,
+            fixed_1d,
+        )
+        expected_fixed = fixed_1d.unsqueeze(0).expand(batch_size, num_bodies)
+        assert torch.equal(result_state.fixed, expected_fixed)
+        
+        # Reset state
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        # Test with [B, num_bodies] shape
+        fixed_2d = torch.tensor([[False, True], [True, False]])
+        result_state = register_bodies_batch(
+            physical_state,
+            names,
+            positions,
+            rotations,
+            fixed_2d,
+        )
+        assert torch.equal(result_state.fixed, fixed_2d)
+
+    def test_register_bodies_batch_device_handling(self):
+        """Test that tensors are moved to the correct device."""
+        batch_size = 1
+        num_bodies = 1
+        physical_state = self.create_empty_batched_physical_state(batch_size=batch_size)
+        
+        target_device = torch.device("cpu")
+        
+        names = ["body_0@solid"]
+        positions = torch.randn(batch_size, num_bodies, 3) * 0.1
+        positions[:, :, 2] = torch.abs(positions[:, :, 2]) + 0.1
+        rotations = torch.randn(batch_size, num_bodies, 4)
+        rotations = rotations / torch.norm(rotations, dim=-1, keepdim=True)
+        fixed = torch.tensor([False])
+        
+        # Create tensors on different device (if CUDA available)
+        if torch.cuda.is_available():
+            positions = positions.to("cuda")
+            rotations = rotations.to("cuda")
+            fixed = fixed.to("cuda")
+        
+        result_state = register_bodies_batch(
+            physical_state,
+            names,
+            positions,
+            rotations,
+            fixed,
+        )
+        
+        # Verify tensors are on the correct device
+        assert result_state.position.device == target_device
+        assert result_state.quat.device == target_device
+        assert result_state.fixed.device == target_device
 
 
 if __name__ == "__main__":

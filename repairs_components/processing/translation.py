@@ -316,6 +316,7 @@ def translate_compound_to_sim_state(
             f"\nAABBs of all parts: { {p.label: p.bounding_box() for p in b123d_compound.leaves} }"
         )
 
+        body_idx = 0  # Track body index for this environment
         for part in (
             b123d_compound.leaves
         ):  # leaves, not children. children will have compounds.
@@ -327,11 +328,11 @@ def translate_compound_to_sim_state(
             assert part.volume > 0, "Part must have a volume."
 
             part_name, part_type = part.label.split("@", 1)
-            body_idx = 0
 
             # Collect body data
             if part_type in ("solid", "fixed_solid", "connector"):
                 if env_idx == 0:
+                    all_body_names.append(part.label)
                     fixed[body_idx] = part_type == "fixed_solid"
 
                 # Convert position and rotation to tensors
@@ -347,7 +348,6 @@ def translate_compound_to_sim_state(
                     )
                 )
 
-                all_body_names.append(part.label)
                 all_positions[env_idx, body_idx] = position_sim
                 all_rotations[env_idx, body_idx] = rotation_quat
                 body_idx += 1
@@ -368,39 +368,59 @@ def translate_compound_to_sim_state(
     # Convert lists to tensors for batch processing
     assert all_body_names, "Expected to find bodies."
 
-    # Register bodies using batch processing - one body at a time across environments batch
+    # Prepare connector data for all bodies
+    connector_positions_relative = torch.full(
+        (count_bodies, 3), float("nan"), dtype=torch.float32
+    )
+
     for i, name in enumerate(all_body_names):
-        body_positions = all_positions[:, i]
-        body_rotations = all_rotations[:, i]
-        body_fixed = name.endswith("@fixed_solid")
-        connector_position_relative_to_center = None
         if name.endswith("@connector"):
             # get the connector def position
             connector = Connector.from_name(name)
-            if name.endswith("_male"):
-                connector_position_relative_to_center = torch.tensor(
+            if name.endswith("_male@connector"):
+                connector_positions_relative[i] = torch.tensor(
                     connector.connector_pos_relative_to_center_male / 1000,
                     dtype=torch.float32,
                 )
-            elif name.endswith("_female"):
-                connector_position_relative_to_center = torch.tensor(
+            elif name.endswith("_female@connector"):
+                connector_positions_relative[i] = torch.tensor(
                     connector.connector_pos_relative_to_center_female / 1000,
                     dtype=torch.float32,
                 )
-        # Register this body across all environments
-        sim_state.physical_state = register_bodies_batch(
-            sim_state.physical_state,
-            name,
-            body_positions,
-            body_rotations,
-            body_fixed,
-            connector_position_relative_to_center,
-        )
+
+    # Register all bodies at once using batch processing
+    sim_state.physical_state = register_bodies_batch(
+        sim_state.physical_state,
+        all_body_names,
+        all_positions,
+        all_rotations,
+        fixed,
+        connector_positions_relative,
+    )
 
     # Set part_hole_batch for all environments
     sim_state.physical_state.part_hole_batch = part_hole_batch.tile(
         (sim_state.physical_state.batch_size[0], 1)
     )
+    
+    # Initialize hole positions and quaternions for all environments
+    num_holes = len(_part_holes_pos)
+    if num_holes > 0:
+        # Tile hole data for all environments
+        sim_state.physical_state.hole_positions = _part_holes_pos.unsqueeze(0).tile(
+            (sim_state.physical_state.batch_size[0], 1, 1)
+        )
+        sim_state.physical_state.hole_quats = _part_holes_quat.unsqueeze(0).tile(
+            (sim_state.physical_state.batch_size[0], 1, 1)
+        )
+    else:
+        # No holes - initialize empty tensors with correct batch dimensions
+        sim_state.physical_state.hole_positions = torch.empty(
+            (sim_state.physical_state.batch_size[0], 0, 3), dtype=torch.float32
+        )
+        sim_state.physical_state.hole_quats = torch.empty(
+            (sim_state.physical_state.batch_size[0], 0, 4), dtype=torch.float32
+        )
 
     fastener_positions = torch.zeros(
         (sim_state.physical_state.batch_size[0], fastener_count, 3), dtype=torch.float32
@@ -493,41 +513,41 @@ def translate_compound_to_sim_state(
     # however, during export they will be removed and component nodes will be connected
     # directly. # or should I? why not encode connectors? the model will need the type of connectors, I presume.
 
-    # Check for connections using tensor-based connector positions
-    if (
-        len(sim_state.physical_state[0].male_connector_positions) > 0
-        and len(sim_state.physical_state[0].female_connector_positions) > 0
-    ):
-        for env_idx in range(n_envs):
-            ps = sim_state.physical_state[env_idx]
+    # # Check for connections using tensor-based connector positions
+    # unnecessary yet because connectors are not encoded in electronics state.
+    # if (
+    #     len(sim_state.physical_state[0].male_connector_positions) > 0
+    #     and len(sim_state.physical_state[0].female_connector_positions) > 0
+    # ):
+    #     for env_idx in range(n_envs):
+    #         ps = sim_state.physical_state[env_idx]
 
-            # Get tensor-based connector positions for this environment
-            male_positions = ps.male_connector_positions
-            female_positions = ps.female_connector_positions
+    #         # Get tensor-based connector positions for this environment
+    #         male_positions = ps.male_connector_positions
+    #         female_positions = ps.female_connector_positions
 
-            if male_positions.numel() > 0 and female_positions.numel() > 0:
-                # Find connections using the updated check_connections function
-                connection_indices = connectors.check_connections(
-                    male_positions, female_positions
-                )
+    #         if male_positions.numel() > 0 and female_positions.numel() > 0:
+    #             # Find connections using the updated check_connections function
+    #             connection_indices = connectors.check_connections(
+    #                 male_positions, female_positions
+    #             )
 
-                # Clear existing connections
-                sim_state.electronics_state[env_idx].clear_connections()
+    #             # Clear existing connections
+    #             sim_state.electronics_state[env_idx].clear_connections()
 
-                # Add new connections using body indices to get connector names
-                for male_idx, female_idx in connection_indices.tolist():
-                    # Get connector names from indices
-                    male_body_idx = ps.male_connector_batch[male_idx].item()
-                    female_body_idx = ps.female_connector_batch[female_idx].item()
+    #             # Add new connections using body indices to get connector names
+    #             for male_idx, female_idx in connection_indices.tolist():
+    #                 # Get connector names from indices
+    #                 male_body_idx = ps.male_connector_batch[male_idx].item()
+    #                 female_body_idx = ps.female_connector_batch[female_idx].item()
 
-                    # Convert body indices back to connector names
-                    male_name = ps.inverse_body_indices[male_body_idx]
-                    female_name = ps.inverse_body_indices[female_body_idx]
+    #                 # Convert body indices back to connector names
+    #                 male_name = ps.inverse_body_indices[male_body_idx]
+    #                 female_name = ps.inverse_body_indices[female_body_idx]
 
-                    # Connect using string names for electronics_state compatibility
-                    sim_state.electronics_state[env_idx].connect(male_name, female_name)
-
-        sim_state.physical_state[env_idx] = ps
+    #                 # Connect using string names for electronics_state compatibility
+    #                 sim_state.electronics_state[env_idx].connect(male_name, female_name)
+    #       sim_state.physical_state[env_idx] = ps
 
     # TODO I'll do this later.
     # possibly (reasonably) we can encode XYZ and quat of connector def positions into electronics state features.
