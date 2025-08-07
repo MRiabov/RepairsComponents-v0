@@ -235,7 +235,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     )
     fastener_entity = gs_entities["0@fastener"]
     physical_state = repairs_sim_state.physical_state[0]
-    graph_device = physical_state.fasteners_attached_to.device
+    graph_device = physical_state.fasteners_attached_to_body.device
 
     screwdriver = Screwdriver(
         picked_up_fastener_name="0@fastener",
@@ -250,7 +250,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
         scene, gs_entities, repairs_sim_state, actions
     )
     assert (
-        physical_state.fasteners_attached_to
+        physical_state.fasteners_attached_to_body
         == torch.tensor(
             [[connected_part_id, -1]],
             device=graph_device,
@@ -273,7 +273,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
         scene, gs_entities, repairs_sim_state, actions
     )
     assert (
-        physical_state.fasteners_attached_to
+        physical_state.fasteners_attached_to_body
         == torch.tensor(
             [[-1, -1]],
             device=graph_device,
@@ -293,7 +293,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     )
     fastener_entity = gs_entities["0@fastener"]
     physical_state = repairs_sim_state.physical_state[0]
-    graph_device = physical_state.fasteners_attached_to.device
+    graph_device = physical_state.fasteners_attached_to_body.device
     screwdriver = Screwdriver(
         picked_up_fastener_tip_position=physical_state.hole_positions[0],
         picked_up_fastener_name="0@fastener",
@@ -309,7 +309,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
         scene, gs_entities, repairs_sim_state, actions
     )
     assert (
-        physical_state.fasteners_attached_to
+        physical_state.fasteners_attached_to_body
         == torch.tensor([[connected_part_1_id, -1]], device=graph_device)
     ).all(), "Fastener is expected to be marked as attached to a part"
     assert (fastener_entity.get_pos(0) == physical_state.hole_positions[0]).all(), (
@@ -332,7 +332,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
         scene, gs_entities, repairs_sim_state, actions
     )
     assert (
-        repairs_sim_state.physical_state[0].fasteners_attached_to
+        repairs_sim_state.physical_state[0].fasteners_attached_to_body
         == torch.tensor(
             [[connected_part_1_id, connected_part_2_id]], device=graph_device
         )
@@ -351,7 +351,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
         scene, gs_entities, repairs_sim_state, actions
     )
     assert (
-        repairs_sim_state.physical_state[0].fasteners_attached_to
+        repairs_sim_state.physical_state[0].fasteners_attached_to_body
         == torch.tensor([[-1, -1]], device=graph_device)
     ).all(), "Fastener is expected to be marked as detached from both parts"
     # TODO: when genesis implements constraints checks, assert that fastener is not attached to a part
@@ -371,7 +371,7 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
     )
     fastener_entity = gs_entities["0@fastener"]
     physical_state = repairs_sim_state.physical_state[0]
-    graph_device = physical_state.fasteners_attached_to.device
+    graph_device = physical_state.fasteners_attached_to_body.device
     repairs_sim_state.tool_state[0].current_tool = Screwdriver(
         picked_up_fastener_name="0@fastener",
         picked_up_fastener_tip_position=physical_state.hole_positions[0],
@@ -386,7 +386,7 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
         scene, gs_entities, repairs_sim_state, actions
     )
     assert (
-        repairs_sim_state.physical_state[0].fasteners_attached_to
+        repairs_sim_state.physical_state[0].fasteners_attached_to_body
         == torch.tensor([[connected_part_1_id, -1]], device=graph_device)
     ).all(), "Fastener is expected to be marked as attached to first part"
 
@@ -421,7 +421,7 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
     ].current_tool.picked_up_fastener_tip_quat = large_angle_quat
 
     # Store the state before attempting to screw in
-    fasteners_attached_before = physical_state.fasteners_attached_to.clone()
+    fasteners_attached_before = physical_state.fasteners_attached_to_body.clone()
     fastener_pos_before = fastener_entity.get_pos(0).clone()
     fastener_quat_before = fastener_entity.get_quat(0).clone()
 
@@ -433,7 +433,7 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
 
     # Assert that the fastener attachment state did not change (still only attached to first part)
     assert torch.equal(
-        repairs_sim_state.physical_state[0].fasteners_attached_to,
+        repairs_sim_state.physical_state[0].fasteners_attached_to_body,
         fasteners_attached_before,
     ), "Fastener attachment should not change when angle is too large"
 

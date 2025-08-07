@@ -114,10 +114,10 @@ def translate_state_to_genesis_scene(
     singleton_fastener_morphs = {}  # cache to reduce load times.
 
     for fastener_id, attached_to in enumerate(
-        sim_state.physical_state[0].fasteners_attached_to
+        sim_state.physical_state.fasteners_attached_to_body[0]
     ):
-        fastener_d = sim_state.physical_state[0].fasteners_diam[fastener_id]
-        fastener_h = sim_state.physical_state[0].fasteners_length[fastener_id]
+        fastener_d = sim_state.physical_state.fasteners_diam[0, fastener_id]
+        fastener_h = sim_state.physical_state.fasteners_length[0, fastener_id]
 
         fastener_name = get_fastener_singleton_name(
             float(fastener_d), float(fastener_h)
@@ -398,62 +398,94 @@ def translate_compound_to_sim_state(
         )
 
     # Set part_hole_batch for all environments
-    sim_state.physical_state.part_hole_batch = part_hole_batch.tile((sim_state.physical_state.batch_size[0],1))
+    sim_state.physical_state.part_hole_batch = part_hole_batch.tile(
+        (sim_state.physical_state.batch_size[0], 1)
+    )
 
-    for part in b123d_compound.leaves:
-        part_name, part_type = part.label.split("@", 1)
-        # Collect fastener data for later processing
-        if part_type == "fastener":
-            fastener_pos = torch.tensor(
-                tuple(part.global_location.position), dtype=torch.float32
-            )
-            fastener_quat = euler_deg_to_quat_wxyz(
-                torch.tensor(
-                    tuple(part.global_location.orientation), dtype=torch.float32
+    fastener_positions = torch.zeros(
+        (sim_state.physical_state.batch_size[0], fastener_count, 3), dtype=torch.float32
+    )
+    fastener_rotations = torch.zeros(
+        (sim_state.physical_state.batch_size[0], fastener_count, 4), dtype=torch.float32
+    )
+    fastener_init_hole_a = torch.full(
+        (sim_state.physical_state.batch_size[0], fastener_count), -1, dtype=torch.int32
+    )
+    fastener_init_hole_b = torch.full(
+        (sim_state.physical_state.batch_size[0], fastener_count), -1, dtype=torch.int32
+    )
+
+    # FIXME 6.8.25: across env ids
+    # it seems the logic above was also unfinished.
+    for env_id in range(sim_state.physical_state.batch_size[0]):
+        fastener_idx = 0
+        fastener_names = []
+        for part in b123d_compound.leaves:
+            part_name, part_type = part.label.split("@", 1)
+            # Collect fastener data for later processing
+            if part_type == "fastener":
+                fastener_positions[env_id, fastener_idx] = torch.tensor(
+                    tuple(part.global_location.position), dtype=torch.float32
                 )
-            )
-            # collect constraints, get labels of bodies,
-            assert "fastener_joint_a" in part.joints, "Fastener must have a joint a."
-            assert "fastener_joint_b" in part.joints, "Fastener must have a joint b."
-            assert "fastener_joint_tip" in part.joints, (
-                "Fastener must have a tip joint."
-            )
+                fastener_rotations[env_id, fastener_idx] = euler_deg_to_quat_wxyz(
+                    torch.tensor(
+                        tuple(part.global_location.orientation), dtype=torch.float32
+                    )
+                )
+                # collect constraints, get labels of bodies,
+                assert "fastener_joint_a" in part.joints, (
+                    "Fastener must have a joint a."
+                )
+                assert "fastener_joint_b" in part.joints, (
+                    "Fastener must have a joint b."
+                )
+                assert "fastener_joint_tip" in part.joints, (
+                    "Fastener must have a tip joint."
+                )
 
-            joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
-            joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
-            # joint_tip is not used but required for validation
-            _ = part.joints["fastener_joint_tip"]
+                joint_a: RevoluteJoint = part.joints["fastener_joint_a"]
+                joint_b: RevoluteJoint = part.joints["fastener_joint_b"]
+                # joint_tip is not used but required for validation
+                _ = part.joints["fastener_joint_tip"]
 
-            # check if constraint_a and constraint_b are active
-            constraint_a_active = joint_a.connected_to is not None
-            constraint_b_active = joint_b.connected_to is not None
+                # check if constraint_a and constraint_b are active
+                constraint_a_active = joint_a.connected_to is not None
+                constraint_b_active = joint_b.connected_to is not None
 
-            # if active, get hole IDs from connected joint labels
-            initial_hole_id_a = None
-            initial_hole_id_b = None
+                # if active, get hole IDs from connected joint labels
+                initial_hole_id_a = -1
+                initial_hole_id_b = -1
 
-            if constraint_a_active:
-                # Extract hole ID from the connected joint label
-                joint_label = joint_a.connected_to.label
-                assert joint_label.startswith("fastener_hole_")
-                hole_id, _, _ = fastener_hole_info_from_joint_name(joint_label)
-                initial_hole_id_a = hole_id
+                if constraint_a_active:
+                    # Extract hole ID from the connected joint label
+                    joint_label = joint_a.connected_to.label
+                    assert joint_label.startswith("fastener_hole_")
+                    initial_hole_id_a, _, _ = fastener_hole_info_from_joint_name(
+                        joint_label
+                    )
 
-            if constraint_b_active:
-                # Extract hole ID from the connected joint label
-                joint_label = joint_b.connected_to.label
-                assert joint_label.startswith("fastener_hole_")
-                hole_id, _, _ = fastener_hole_info_from_joint_name(joint_label)
-                initial_hole_id_b = hole_id
+                if constraint_b_active:
+                    # Extract hole ID from the connected joint label
+                    joint_label = joint_b.connected_to.label
+                    assert joint_label.startswith("fastener_hole_")
+                    initial_hole_id_b, _, _ = fastener_hole_info_from_joint_name(
+                        joint_label
+                    )
 
-            fastener = Fastener(
-                initial_hole_id_a=initial_hole_id_a, initial_hole_id_b=initial_hole_id_b
-            )
+                fastener_init_hole_a[env_id, fastener_idx] = initial_hole_id_a
+                fastener_init_hole_b[env_id, fastener_idx] = initial_hole_id_b
+                fastener_names.append(part_name)
+                fastener_idx += 1
 
-            # Register this body across all environments
-            sim_state.physical_state = register_fasteners_batch(
-                sim_state.physical_state, fastener, fastener_pos, fastener_quat
-            )
+    # Register this body across all environments
+    sim_state.physical_state = register_fasteners_batch(
+        sim_state.physical_state,
+        fastener_positions,
+        fastener_rotations,
+        fastener_init_hole_a,
+        fastener_init_hole_b,
+        fastener_names,
+    )
 
     # NOTE: connectors and connector_defs other solid bodies are not encoded in electronics, only functional components and their connections are encoded.
     # so check_connections will remain, however it will simply be an intermediate before the actual export graph.
@@ -545,13 +577,15 @@ def create_constraints_based_on_graph(
     connections: dict[tuple[int, int], list[int]] = {}
 
     for env_id in env_idx.tolist():
-        state = env_state.physical_state[env_id]
+        state = env_state.physical_state
         # FIXME: this kind of works but does not account for fastener constraint
         # should actually be linked to a fastener, and fastener is linked to another body.
 
         # genesis supports constraints on per-scene basis.
 
-        for fastener_id, connected_to in enumerate(state.fasteners_attached_to):
+        for fastener_id, connected_to in enumerate(
+            state.fasteners_attached_to_body[env_id]
+        ):
             fastener_entity = gs_entities[
                 Fastener.fastener_name_in_simulation(fastener_id)
             ]
@@ -563,7 +597,7 @@ def create_constraints_based_on_graph(
                     # Fastener not attached to anything in this position
                     continue
 
-                body_name = env_state.physical_state[env_id].inverse_body_indices[
+                body_name = env_state.physical_state.inverse_body_indices[
                     body_id.item()
                 ]
                 body_base_link_idx = all_base_links[body_name]
@@ -578,10 +612,10 @@ def create_constraints_based_on_graph(
         # Deduplicate env_ids to be safe
         unique_env_ids = sorted(set(env_ids))  # why sorted?
         rigid_solver.add_weld_constraint(
-            torch.tensor(fastener_idx).unsqueeze(0).cuda().contiguous(),
-            torch.tensor(body_idx).unsqueeze(0).cuda().contiguous(),
-            envs_idx=torch.tensor(unique_env_ids).cuda().contiguous(),
-        )  # move to cuda because some error.
+            torch.tensor(fastener_idx, device=state.device).unsqueeze(0).contiguous(),
+            torch.tensor(body_idx, device=state.device).unsqueeze(0).contiguous(),
+            envs_idx=torch.tensor(unique_env_ids, device=state.device).contiguous(),
+        )
         # NOTE: unsqueeze(0) is a workaround for len of 0d tensor bug.
 
 

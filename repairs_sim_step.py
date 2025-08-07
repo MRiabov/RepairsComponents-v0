@@ -200,7 +200,7 @@ def step_screw_in_or_out(
     # note:if there are more tools, create an interface, I guess.
 
     fastener_connected_to = torch.stack(
-        [phys_state.fasteners_attached_to for phys_state in physical_state],
+        [phys_state.fasteners_attached_to_body for phys_state in physical_state],
     ).to(actions.device)
     fastener_connected_to_hole = torch.stack(
         [
@@ -339,7 +339,7 @@ def step_screw_in_or_out(
             fastener_id = int(
                 fastener_name.split("@")[0]
             )  # fasteners have naming as "{id}@fastener"
-            fastener_body_indices = physical_state[env_id].fasteners_attached_to[
+            fastener_body_indices = physical_state[env_id].fasteners_attached_to_body[
                 fastener_id
             ]
             for body_idx in fastener_body_indices:

@@ -84,7 +84,7 @@ class PhysicalState(TensorClass):
         default_factory=lambda: torch.empty((0, 4), dtype=torch.float32)
     )
     """Fastener quaternions [num_fasteners, 4]"""
-    fasteners_attached_to: torch.Tensor = field(
+    fasteners_attached_to_body: torch.Tensor = field(
         default_factory=lambda: torch.empty((0, 2), dtype=torch.int8)
     )
     """Which bodies fasteners are attached to [num_fasteners, 2] (-1 for unattached)"""
@@ -193,12 +193,12 @@ class PhysicalState(TensorClass):
         """Export the graph to a torch_geometric Data object usable by ML."""
 
         # only export fasteners which aren not attached to nothing.
-        global_feat_mask = (self.fasteners_attached_to == -1).any(dim=-1)
+        global_feat_mask = (self.fasteners_attached_to_body == -1).any(dim=-1)
         global_feat_export = torch.cat(
             [
                 self.fasteners_pos[global_feat_mask],
                 self.fasteners_quat[global_feat_mask],
-                (self.fasteners_attached_to[global_feat_mask] == -1).float(),
+                (self.fasteners_attached_to_body[global_feat_mask] == -1).float(),
                 # export which are attached and which not, but not their ids.
             ],
             dim=-1,
@@ -404,13 +404,13 @@ class PhysicalState(TensorClass):
             ],
             dim=0,
         )
-        self.fasteners_attached_to = torch.cat(
+        self.fasteners_attached_to_body = torch.cat(
             [
-                self.fasteners_attached_to,
+                self.fasteners_attached_to_body,
                 torch.full((1, 2), -1, device=self.device),
             ],
             dim=0,
-        )  # note: technically fasteners_attached_to is a junk value as it simply repeats fasteners_attached_to_hole except with part IDs.
+        )  # note: technically fasteners_attached_to_body is a junk value as it simply repeats fasteners_attached_to_hole except with part IDs.
         self.fasteners_attached_to_hole = torch.cat(
             [
                 self.fasteners_attached_to_hole,
@@ -428,14 +428,14 @@ class PhysicalState(TensorClass):
     def connect_fastener_to_one_body(self, fastener_id: int, body_name: str):
         """Connect a fastener to a body. Used during screw-in and initial construction."""
         # FIXME: but where to get/store fastener ids I'll need to think.
-        assert (self.fasteners_attached_to[fastener_id] == -1).any(), (
+        assert (self.fasteners_attached_to_body[fastener_id] == -1).any(), (
             "Fastener is already connected to two bodies."
         )
         free_slot = (
-            self.fasteners_attached_to[fastener_id][0] == -1
+            self.fasteners_attached_to_body[fastener_id][0] == -1
         ).int()  # 0 or 1 # bad syntax, but incidentally it works.
 
-        self.fasteners_attached_to[fastener_id][free_slot] = self.body_indices[
+        self.fasteners_attached_to_body[fastener_id][free_slot] = self.body_indices[
             body_name
         ]
 
@@ -444,11 +444,11 @@ class PhysicalState(TensorClass):
     def disconnect(self, fastener_id: int, disconnected_body: str):
         body_id = self.body_indices[disconnected_body]
 
-        # if (self.fasteners_attached_to[fastener_id]>0).all():
+        # if (self.fasteners_attached_to_body[fastener_id]>0).all():
         #     # both slots are occupied, so we need to remove the edge.
         # NOTE: let us not have edge index before export at all. it is unnecessary.
 
-        matching_mask = self.fasteners_attached_to[fastener_id] == body_id
+        matching_mask = self.fasteners_attached_to_body[fastener_id] == body_id
         assert matching_mask.any(), (
             f"Body {disconnected_body} not attached to fastener {fastener_id}"
         )
@@ -456,7 +456,7 @@ class PhysicalState(TensorClass):
             f"Body {disconnected_body} attached to both slots of fastener {fastener_id}, which can not happen"
         )
         # ^ actually it can, but should not
-        self.fasteners_attached_to[fastener_id][matching_mask] = -1
+        self.fasteners_attached_to_body[fastener_id][matching_mask] = -1
         return self
 
     def diff(self, other: "PhysicalState") -> tuple[Data, int]:
@@ -735,7 +735,9 @@ class PhysicalState(TensorClass):
                 self.fasteners_length.unsqueeze(-1),
                 self.fasteners_pos,
                 self.fasteners_quat,
-                (self.fasteners_attached_to != -1).float(),  # if attached at a or b.
+                (
+                    self.fasteners_attached_to_body != -1
+                ).float(),  # if attached at a or b.
             ],
             dim=1,
         )
@@ -749,9 +751,9 @@ def _diff_body_features(
 ) -> tuple[dict, int]:
     """Return per-node diffs (static shape) and changed indices/count."""
     # Position diff
-    pos_raw = data_b.position - data_a.position  # [N, 3]
-    pos_dist = torch.linalg.norm(pos_raw, dim=1)
-    pos_mask = pos_dist > pos_threshold  # [N]
+    pos_raw = data_b.position - data_a.position  # [B, N, 3]
+    pos_dist = torch.linalg.norm(pos_raw, dim=2)
+    pos_mask = pos_dist > pos_threshold  # [B, N]
     pos_diff = torch.zeros_like(pos_raw)
     pos_diff[pos_mask] = pos_raw[pos_mask]
 
@@ -781,11 +783,12 @@ def _diff_fastener_features(
 ) -> tuple[dict, int]:
     """Compare fastener features between two PhysicalState instances."""
 
-    # FIXME: does this not check for feature value differences?
+    # FIXME: this does not check for (graph) edge feature difference.
     # Stack edge pairs for easy comparison
     def to_sorted_tuple_tensor(edge_index):
         sorted_idx = edge_index.sort(dim=0)[0]
-        return sorted_idx.t()
+        return sorted_idx.transpose(-2, -1)
+
 
     edges_a = to_sorted_tuple_tensor(data_a.edge_index)
     edges_b = to_sorted_tuple_tensor(data_b.edge_index)
@@ -903,96 +906,107 @@ def register_bodies_batch(
 
 def register_fasteners_batch(
     physical_states: "PhysicalState",
-    fastener: Fastener,
     fastener_pos: torch.Tensor,
     fastener_quat: torch.Tensor,
+    fastener_init_hole_a: torch.Tensor,
+    fastener_init_hole_b: torch.Tensor,
+    fastener_compound_names: list[str],
 ) -> "PhysicalState":
     """Register a single fastener across multiple environments using tensor operations.
 
     Args:
         physical_states: Batched PhysicalState to update
-        fastener: Fastener object to register across all environments
         fastener_pos: Tensor of positions [B, num_fasteners, 3] for this fastener across environments
         fastener_quat: Tensor of quaternions [B, num_fasteners, 4] for this fastener across environments
+        fastener_init_hole_a: hole A of fasteners [B, num_fasteners]
+        fastener_init_hole_b: hole B of fasteners [B, num_fasteners]
+        fastener_compound_names: List of compound names for this fastener across environments
     """
+    B = physical_states.batch_size[0]
     # Determine batch size from physical_states
+    assert B is not None and len(physical_states.batch_size) >= 1
+    num_fasteners = len(fastener_compound_names)
+    num_bodies = len(physical_states.body_indices)
+    assert fastener_pos.shape == (B, num_fasteners, 3), (
+        f"Expected fastener_pos shape [batch_size, num_fasteners, 3], got {fastener_pos.shape}"
+    )
+    assert fastener_quat.shape == (B, num_fasteners, 4), (
+        f"Expected fastener_quat shape [batch_size, num_fasteners, 4], got {fastener_quat.shape}"
+    )
+    assert fastener_init_hole_a.shape == (B, num_fasteners), (
+        f"Expected fastener_init_hole_a shape [batch_size, num_fasteners], got {fastener_init_hole_a.shape}"
+    )
+    assert fastener_init_hole_b.shape == (B, num_fasteners), (
+        f"Expected fastener_init_hole_b shape [batch_size, num_fasteners], got {fastener_init_hole_b.shape}"
+    )
     assert (
-        physical_states.batch_size is not None and len(physical_states.batch_size) >= 1
-    )
-    assert fastener_pos.shape[:2] == fastener_quat.shape[:2], (
-        f"Expected fastener_pos shape [{physical_states.batch_size[0]}, num_fasteners, 3], got {fastener_pos.shape} and {fastener_quat.shape}"
-    )
+        (fastener_init_hole_a != fastener_init_hole_b)
+        | ((fastener_init_hole_a == -1) & (fastener_init_hole_b == -1))
+    ).all(), "Fastener init holes must be different or empty (-1)."
 
     device = physical_states.device if hasattr(physical_states, "device") else "cuda"
-    fastener_pos = fastener_pos.to(device)
-    fastener_quat = fastener_quat.to(device)
-    diameter, length = get_fastener_params_from_name(fastener.name)
-
-    # Process each environment
+    physical_states.fasteners_diam = torch.full(
+        (B, num_fasteners), fill_value=-1.0, dtype=torch.float32
+    )
+    physical_states.fasteners_length = torch.full(
+        (B, num_fasteners), fill_value=-1.0, dtype=torch.float32
+    )  # fill with -1 just in case
+    for i, name in enumerate(fastener_compound_names):
+        diam, length = get_fastener_params_from_name(name)
+        physical_states.fasteners_diam[:, i] = diam
+        physical_states.fasteners_length[:, i] = length
 
     assert physical_states.part_hole_batch is not None, (
         "Part hole batch must be set before registering fasteners."
     )
-    assert fastener.name not in physical_states.body_indices, (
-        f"Fasteners can't be registered as bodies! Attempted at {fastener.name}"
+    assert all(
+        name not in physical_states.body_indices for name in fastener_compound_names
+    ), (
+        f"Fasteners can't be registered as bodies! Fastener (compound!) names: {fastener_compound_names}"
     )
 
-    diam = torch.tensor([diameter], device=device)
-    length = torch.tensor([length], device=device)
-    hole_attachment = torch.full((1, 2), -1, device=device)
-    attachment = torch.full((1, 2), -1, device=device)
-
-    # Handle hole connections
-    if fastener.initial_hole_id_a is not None:
-        assert (
-            0 <= fastener.initial_hole_id_a < physical_states.part_hole_batch.shape[0]
-        ), (
-            f"Hole ID {fastener.initial_hole_id_a} is out of range. Num holes: {physical_states.part_hole_batch.shape[0]}"
-        )
-        body_idx_a = int(
-            physical_states.part_hole_batch[fastener.initial_hole_id_a].item()
-        )
-        attachment[0, 0] = body_idx_a
-        hole_attachment[0, 0] = fastener.initial_hole_id_a
-
-    if fastener.initial_hole_id_b is not None:
-        assert (
-            0 <= fastener.initial_hole_id_b < physical_states.part_hole_batch.shape[0]
-        ), (
-            f"Hole ID {fastener.initial_hole_id_b} is out of range. Num holes: {physical_states.part_hole_batch.shape[0]}"
-        )
-        body_idx_b = int(
-            physical_states.part_hole_batch[fastener.initial_hole_id_b].item()
-        )
-        attachment[0, 1] = body_idx_b
-        hole_attachment[0, 1] = fastener.initial_hole_id_b
+    assert (
+        (fastener_init_hole_a >= -1)
+        & (fastener_init_hole_a < physical_states.part_hole_batch.shape[1])
+    ).all(), (
+        f"fastener_init_hole_a are out of range. Num holes: {physical_states.part_hole_batch.shape[0]}. "
+        f"Min: {physical_states.part_hole_batch.min()}. Max: {physical_states.part_hole_batch.max()}. All: {fastener_init_hole_a}"
+    )
+    assert (
+        (fastener_init_hole_b >= -1)
+        & (fastener_init_hole_b < physical_states.part_hole_batch.shape[1])
+    ).all(), (
+        f"fastener_init_hole_b are out of range. Num holes: {physical_states.part_hole_batch.shape[0]}. "
+        f"Min: {physical_states.part_hole_batch.min()}. Max: {physical_states.part_hole_batch.max()}. All: {fastener_init_hole_b}"
+    )
 
     # Update PhysicalState tensors for this environment
-    physical_states.fasteners_pos = torch.cat(
-        [physical_states.fasteners_pos, fastener_pos.unsqueeze(1)], dim=1
+    physical_states.fasteners_pos = fastener_pos.to(device)
+    physical_states.fasteners_quat = fastener_quat.to(device)
+    physical_states.fasteners_attached_to_hole = torch.stack(
+        [fastener_init_hole_a, fastener_init_hole_b], dim=-1
     )
-    physical_states.fasteners_quat = torch.cat(
-        [physical_states.fasteners_quat, fastener_quat.unsqueeze(1)], dim=1
-    )
-    physical_states.fasteners_diam = torch.cat(
-        [physical_states.fasteners_diam, diam], dim=0
-    )
-    physical_states.fasteners_length = torch.cat(
-        [physical_states.fasteners_length, length], dim=0
-    )
-    physical_states.fasteners_attached_to = torch.cat(
-        [physical_states.fasteners_attached_to, attachment], dim=0
-    )
-    physical_states.fasteners_attached_to_hole = torch.cat(
-        [physical_states.fasteners_attached_to_hole, hole_attachment], dim=0
-    )
+    empty = physical_states.fasteners_attached_to_hole == -1
+    physical_states.fasteners_attached_to_body = physical_states.part_hole_batch[
+        0, physical_states.fasteners_attached_to_hole
+    ]
+    physical_states.fasteners_attached_to_body[empty] = -1
 
     # Update fastener counts for connected bodies
-    if attachment[0, 0] != -1:
-        body_idx = int(attachment[0, 0].item())
-        physical_states.count_fasteners_held[body_idx] += 1
-    if attachment[0, 1] != -1:
-        body_idx = int(attachment[0, 1].item())
-        physical_states.count_fasteners_held[body_idx] += 1
+    # Count how many fasteners are attached to each body for each batch
+    # physical_states.fasteners_attached_to_body shape: [B, num_fasteners, 2] (body_a, body_b)
+    # Use any() to check if a fastener is attached to each body, then sum to count fasteners
+    physical_states.count_fasteners_held = (
+        (
+            physical_states.fasteners_attached_to_body[:, :, None, :]
+            == torch.arange(num_bodies)[None, None, :, None]
+        )
+        .any(dim=-1)
+        .int()
+        .sum(dim=1)
+    ).to(torch.int8)  # [B, num_bodies]
+    assert (physical_states.count_fasteners_held <= num_fasteners).all(), (
+        "Bodies can't hold more fasteners than there are."
+    )
 
     return physical_states

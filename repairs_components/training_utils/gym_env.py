@@ -84,7 +84,9 @@ class RepairsEnv(gym.Env):
         # Store basic environment parameters
         self.num_actions = env_cfg["num_actions"]
         self.num_obs = obs_cfg["num_obs"]
-        self.device = torch.device("cuda:0")  # can be changed to CPU.
+        self.device = torch.device(
+            "cuda:0" if torch.cuda.is_available() else "cpu"
+        )  # can be changed to CPU.
         self.dt = env_cfg.get("dt", 0.02)  # Default to 50Hz if not specified
         self.tasks = tasks
         self.env_setups = env_setups
@@ -585,7 +587,7 @@ class RepairsEnv(gym.Env):
 
         # Extract cameras from scene data
         cameras = scene_data.scene.visualizer.cameras
-        video_obs = _render_all_cameras(cameras)
+        video_obs = _render_all_cameras(cameras, device=self.device)
 
         # get voxel obs
         sparse_voxel_init = scene_data.vox_init
@@ -685,7 +687,7 @@ class RepairsEnv(gym.Env):
         )
 
 
-def _render_all_cameras(cameras: list[Camera]):
+def _render_all_cameras(cameras: list[Camera], device: torch.device):
     # Process each camera in the scene
     env_obs = []
     for camera in cameras:
@@ -694,7 +696,7 @@ def _render_all_cameras(cameras: list[Camera]):
         )
 
         # Process camera observation
-        camera_obs = obs_to_int8(rgb, depth, normal)  # type: ignore
+        camera_obs = obs_to_int8(rgb, depth, normal, device=device)  # type: ignore
         env_obs.append(camera_obs)
 
     # Stack all cameras for this environment
@@ -702,7 +704,9 @@ def _render_all_cameras(cameras: list[Camera]):
     return video_obs
 
 
-def obs_to_int8(rgb: np.ndarray, depth: np.ndarray, normal: np.ndarray):
+def obs_to_int8(
+    rgb: np.ndarray, depth: np.ndarray, normal: np.ndarray, device: torch.device
+):
     # Normalize and convert to uint8
     rgb_uint8 = (rgb * 255).astype(np.uint8)
     depth_normalized = (depth - depth.min()) / (depth.max() - depth.min() + 1e-6)
@@ -712,7 +716,7 @@ def obs_to_int8(rgb: np.ndarray, depth: np.ndarray, normal: np.ndarray):
     normal_uint8 = normal_normalized.astype(np.uint8)
     return torch.from_numpy(
         np.concatenate([rgb_uint8, depth_uint8, normal_uint8], axis=-1)
-    ).cuda()  # why would I convert it to torch here anyway? well, anyway.
+    ).to(device)  # why would I convert it to torch here anyway? well, anyway.
 
 
 # def num_feat_to_batch(num_feat: torch.Tensor):

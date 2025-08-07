@@ -1,6 +1,6 @@
 from repairs_components.training_utils.sim_state import SimState
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from repairs_components.logic.tools.gripper import Gripper
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum, Tool
@@ -8,7 +8,7 @@ from repairs_components.logic.tools.tool import ToolsEnum, Tool
 
 @dataclass
 class ToolState(SimState):
-    current_tool: Tool = Gripper()
+    current_tool: Tool = field(default_factory=Gripper)
 
     @property
     def current_tool_id(self):

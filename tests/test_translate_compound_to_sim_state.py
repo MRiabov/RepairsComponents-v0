@@ -99,7 +99,7 @@ def test_translate_compound_to_sim_state(test_env_geom):
     )
     assert phys_state.fasteners_diam.shape == (expected_num_fasteners,)
     assert phys_state.fasteners_length.shape == (expected_num_fasteners,)
-    assert phys_state.fasteners_attached_to.shape == (
+    assert phys_state.fasteners_attached_to_body.shape == (
         expected_batch_dim,
         expected_num_fasteners,
     )
@@ -168,7 +168,7 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
     )
     assert phys_state.fasteners_diam.shape == (batch_dim, expected_num_fasteners)
     assert phys_state.fasteners_length.shape == (batch_dim, expected_num_fasteners)
-    assert phys_state.fasteners_attached_to.shape == (
+    assert phys_state.fasteners_attached_to_body.shape == (
         batch_dim,
         expected_num_fasteners,
     )
