@@ -120,7 +120,7 @@ def connect_fastener_to_joint(
     )
     fastener_geom = fastener_geom.locate(
         hole_joint.parent.global_location
-        * hole_joint.location  # local location? to test.
+        * hole_joint.relative_location  # local location? to test.
     )  # must do relocation and connection.
     fastener_geom.joints[fastener_joint_name].connect_to(hole_joint)
     # TODO: assert that hole depth is not too big.

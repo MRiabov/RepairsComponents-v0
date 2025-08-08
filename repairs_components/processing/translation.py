@@ -283,8 +283,8 @@ def translate_compound_to_sim_state(
     # Get hole data to populate part_hole_batch # it's recomputed but nobody cares.
     starting_holes = get_starting_part_holes(first_compound, first_body_indices)
     (
-        _part_holes_pos,
-        _part_holes_quat,
+        part_holes_pos,
+        part_holes_quat,
         _part_hole_depth,
         _hole_is_through,
         part_hole_batch,
@@ -402,25 +402,9 @@ def translate_compound_to_sim_state(
     sim_state.physical_state.part_hole_batch = part_hole_batch.tile(
         (sim_state.physical_state.batch_size[0], 1)
     )
-    
-    # Initialize hole positions and quaternions for all environments
-    num_holes = len(_part_holes_pos)
-    if num_holes > 0:
-        # Tile hole data for all environments
-        sim_state.physical_state.hole_positions = _part_holes_pos.unsqueeze(0).tile(
-            (sim_state.physical_state.batch_size[0], 1, 1)
-        )
-        sim_state.physical_state.hole_quats = _part_holes_quat.unsqueeze(0).tile(
-            (sim_state.physical_state.batch_size[0], 1, 1)
-        )
-    else:
-        # No holes - initialize empty tensors with correct batch dimensions
-        sim_state.physical_state.hole_positions = torch.empty(
-            (sim_state.physical_state.batch_size[0], 0, 3), dtype=torch.float32
-        )
-        sim_state.physical_state.hole_quats = torch.empty(
-            (sim_state.physical_state.batch_size[0], 0, 4), dtype=torch.float32
-        )
+    sim_state = update_hole_locs(
+        sim_state, part_holes_pos, part_holes_quat, part_hole_batch
+    )
 
     fastener_positions = torch.zeros(
         (sim_state.physical_state.batch_size[0], fastener_count, 3), dtype=torch.float32
@@ -653,8 +637,8 @@ def update_hole_locs(
 
     Args:
         current_sim_state (RepairsSimState): The current sim state.
-        starting_hole_positions (torch.Tensor): The starting hole positions. [H, 3]
-        starting_hole_quats (torch.Tensor): The starting hole quats. [H, 4]
+        starting_hole_positions (torch.Tensor): The starting (relative to body) hole positions. [H, 3]
+        starting_hole_quats (torch.Tensor): The starting (relative to body) hole quats. [H, 4]
         part_hole_batch (torch.Tensor): The part hole batch. [H]
 
     Process:
@@ -666,31 +650,28 @@ def update_hole_locs(
     device = starting_hole_positions.device
 
     # will remove when (if) batch RepairsSimStep.
-    part_pos = torch.stack(
-        [phys_state.position for phys_state in current_sim_state.physical_state]
-    ).to(device)  # [B, P, 3]
-    part_quat = torch.stack(
-        [phys_state.quat for phys_state in current_sim_state.physical_state]
-    ).to(device, dtype=torch.float32)  # [B, P, 4]
+    part_pos = current_sim_state.physical_state.position.to(device)  # [B, P, 3]
+    part_quat = current_sim_state.physical_state.quat.to(
+        device, dtype=torch.float32
+    )  # [B, P, 4]
 
-    # duplicate values by batch
+    # duplicate (expand) values by batch
     part_pos_batched = part_pos[:, part_hole_batch]
     part_quat_batched = part_quat[:, part_hole_batch]
 
     # note: not sure get_connector_pos will be usable with batches.
-    hole_pos = get_connector_pos(
+    current_sim_state.physical_state.hole_positions = get_connector_pos(
         part_pos_batched, part_quat_batched, starting_hole_positions.unsqueeze(0)
     )
-    hole_quat = quat_multiply(part_quat_batched, starting_hole_quats)
-    for i, phys_state in enumerate(current_sim_state.physical_state):
-        phys_state.hole_positions = hole_pos[i]
-        phys_state.hole_quats = hole_quat[i]
+    current_sim_state.physical_state.hole_quats = quat_multiply(
+        part_quat_batched, starting_hole_quats
+    )
     return current_sim_state
 
 
 # now in translation (it should be anyway)
 def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
-    """Get the starting part holes as "per part, relative to 0,0,0 position"""
+    """Get the starting part holes as 'per part, relative to 0,0,0 position'"""
     part_holes_pos: torch.Tensor = torch.empty((0, 3))
     part_holes_quat: torch.Tensor = torch.empty((0, 4))
     part_hole_depth: torch.Tensor = torch.empty((0,))
@@ -733,10 +714,10 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
                         f"id: {id}, count: {count_fastener_hole_joints}"
                     )
                     fastener_hole_pos[id] = (
-                        torch.tensor(tuple(joint.location.position)) / 1000
-                    )  # note: could also use joint.relative_location.
+                        torch.tensor(tuple(joint.relative_location.position)) / 1000
+                    )
                     fastener_hole_quat[id] = euler_deg_to_quat_wxyz(
-                        torch.tensor(tuple(joint.location.orientation))
+                        torch.tensor(tuple(joint.relative_location.orientation))
                     )
                     fastener_hole_depths[id] = depth / 1000
                     # FIXME: I explicitly don't need depth when I have it, I need it when the hole is through.

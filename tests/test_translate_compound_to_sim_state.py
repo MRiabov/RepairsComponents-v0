@@ -9,12 +9,18 @@ import pytest
 
 from repairs_components.geometry.fasteners import Fastener
 from repairs_components.logic.physical_state import compound_pos_to_sim_pos
-from repairs_components.processing.translation import translate_compound_to_sim_state
+from repairs_components.processing.translation import (
+    translate_compound_to_sim_state,
+    get_starting_part_holes,
+)
 from repairs_components.training_utils.env_setup import EnvSetup
 from ocp_vscode import show
 
 
 class TestEnv(EnvSetup):
+    _positions: torch.Tensor  # note: it's not official, for test and debug only.
+    _hole_loc: torch.Tensor  # for debug too.
+
     def desired_state_geom(self) -> Compound:
         with BuildPart() as solid:
             Box(10, 10, 10)
@@ -34,6 +40,11 @@ class TestEnv(EnvSetup):
         )  # locate, not located to avoid copy and label issues.
         fixed_solid = fixed_solid.part.locate(Pos(150, 30, 30))
         solid_with_hole = solid_with_hole.part.locate(Pos(75, 75, 30))
+        self._hole_loc = torch.tensor(
+            tuple(
+                (solid_with_hole.global_location * fastener_loc.locations[0]).position
+            )
+        )
 
         # Set labels before creating connections
         solid.label = "test_solid@solid"
@@ -61,9 +72,17 @@ class TestEnv(EnvSetup):
             europlug_male,
             europlug_female,
         ]
+        self._positions = torch.tensor(
+            [
+                tuple(part.global_location.position)
+                for part in all_parts
+                if not part.label.endswith("@fastener")
+            ]
+        )  # filter out fastener.
         debug_compound = Compound(
             children=all_parts, joints={"fastener_joint_a": hole_joint}
         )
+
         return debug_compound
 
     @property
@@ -75,11 +94,12 @@ class TestEnv(EnvSetup):
 def test_env_geom():
     test_env = TestEnv()
     test_env.validate()
-    return test_env.desired_state_geom()
+    return test_env.desired_state_geom(), test_env._positions, test_env._hole_loc
 
 
 def test_translate_compound_to_sim_state(test_env_geom):
-    sim_state, starting_holes = translate_compound_to_sim_state([test_env_geom])
+    compound, positions, hole_loc = test_env_geom
+    sim_state, starting_holes = translate_compound_to_sim_state([compound])
     expected_num_solids = 5  # solid, fixed solid, solid with hole, two connectors. Fastener is not included.
     expected_num_holes = 1
     expected_num_fasteners = 1
@@ -127,31 +147,40 @@ def test_translate_compound_to_sim_state(test_env_geom):
     assert set(phys_state.body_indices.keys()) == {
         "test_solid@solid",
         "test_fixed_solid@fixed_solid",
-        "test_solid_with_hole@solid_with_hole",
+        "test_solid_with_hole@solid",
         "europlug_0_male@connector",
         "europlug_0_female@connector",
     }
     assert phys_state.position.allclose(
-        compound_pos_to_sim_pos(
-            torch.tensor([[[0, 0, 30]], [[75, 75, 75]], [[75, 30, 30]], [[60, 30, 30]]])
-        )
+        compound_pos_to_sim_pos(positions)
     )  # note: expected incorrect X value in the 4th as it is calculated dynamically.
     assert phys_state.quat.allclose(
-        torch.tensor([[[1, 0, 0, 0]], [[1, 0, 0, 0]], [[1, 0, 0, 0]], [[1, 0, 0, 0]]])
+        torch.tensor(
+            [[[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]]],
+            dtype=torch.float,
+        )
     )
-    assert phys_state.hole_quats.allclose(torch.tensor([[[1, 0, 0, 0]]]))
-    assert phys_state.hole_positions.allclose(torch.tensor([[[0, 0, 0]]]))
-    assert phys_state.part_hole_batch == torch.tensor([0])
+    assert phys_state.hole_quats.allclose(
+        torch.tensor([[[1, 0, 0, 0]]], dtype=torch.float)
+    )
+    # Hole expected position = part sim position + local hole offset (identity rotation here)
+    holed_body_idx = phys_state.body_indices["test_solid_with_hole@solid"]
+    local_hole_offset = torch.tensor([[0.0, 0.0, 5.0]]) / 1000.0
+    expected_hole_pos_single = (
+        compound_pos_to_sim_pos(positions)[holed_body_idx : holed_body_idx + 1]
+        + local_hole_offset
+    )
+    assert phys_state.hole_positions.allclose(expected_hole_pos_single.unsqueeze(0))
+    assert phys_state.part_hole_batch == torch.tensor([[holed_body_idx]])
     assert torch.allclose(
-        phys_state.fasteners_diam, torch.tensor([Fastener.diameter / 1000])
+        phys_state.fasteners_diam, torch.tensor([5.0 / 1000])  # default Fastener diameter
     )
 
 
 def test_translate_compound_to_sim_state_batch(test_env_geom):
+    compound, positions, hole_loc = test_env_geom
     batch_dim = 2
-    sim_state, starting_holes = translate_compound_to_sim_state(
-        [test_env_geom] * batch_dim
-    )
+    sim_state, starting_holes = translate_compound_to_sim_state([compound] * batch_dim)
     expected_num_solids = 5  # solid, fixed solid, solid with hole, two connectors. Fastener is not included.
     expected_num_holes = 1
     expected_num_fasteners = 1
@@ -180,29 +209,97 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
     assert set(phys_state.body_indices.keys()) == {
         "test_solid@solid",
         "test_fixed_solid@fixed_solid",
-        "test_solid_with_hole@solid_with_hole",
+        "test_solid_with_hole@solid",
         "europlug_0_male@connector",
         "europlug_0_female@connector",
     }
 
     # Check batched positions and quaternions
-    expected_positions = torch.tensor(
-        [[[0, 0, 0]], [[75, 75, 75]], [[75, 30, 30]], [[60, 30, 30]]]
-    )  # Single environment positions
+    expected_positions = compound_pos_to_sim_pos(positions).expand(batch_dim, -1, -1)
     expected_quats = torch.tensor(
-        [[[1, 0, 0, 0]], [[1, 0, 0, 0]], [[1, 0, 0, 0]], [[1, 0, 0, 0]]]
+        [[[1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0], [1, 0, 0, 0]]]
+        * batch_dim,
+        dtype=torch.float,
     )
 
     # Verify batched data: each batch should have identical values
-    for b in range(batch_dim):
-        assert phys_state.position[b].allclose(expected_positions)
-        assert phys_state.quat[b].allclose(expected_quats)
-        assert phys_state.hole_quats[b].allclose(torch.tensor([[[1, 0, 0, 0]]]))
-        assert phys_state.hole_positions[b].allclose(torch.tensor([[[0, 0, 0]]]))
-        assert phys_state.part_hole_batch[b] == torch.tensor([0])
-        assert torch.allclose(
-            phys_state.fasteners_diam[b], torch.tensor([Fastener.diameter / 1000])
-        )
+    assert phys_state.position.allclose(expected_positions)
+    assert phys_state.quat.allclose(expected_quats)
+    assert phys_state.hole_quats.allclose(
+        torch.tensor([[[1, 0, 0, 0]]], dtype=torch.float).expand(batch_dim, -1, -1)
+    )
+    # check hole translation:
+
+    holed_body_idx = phys_state.body_indices["test_solid_with_hole@solid"]
+    local_hole_offset = torch.tensor([[0.0, 0.0, 5.0]]) / 1000.0
+    expected_hole_pos = (
+        compound_pos_to_sim_pos(positions)[holed_body_idx : holed_body_idx + 1]
+        + local_hole_offset
+    ).expand(batch_dim, -1, -1)
+    assert phys_state.hole_positions.allclose(expected_hole_pos)
+    assert phys_state.part_hole_batch.equal(
+        torch.tensor([[holed_body_idx]]).expand(batch_dim, -1)
+    )
+    assert torch.allclose(
+        phys_state.fasteners_diam,
+        torch.tensor([5.0 / 1000]).expand(batch_dim, -1),  # default diameter
+    )
+
+
+
+
+def test_get_starting_part_holes_origin_and_shift():
+    # Build a solid with a through fastener hole at the top face center (like solid_with_hole)
+    with BuildPart() as p1:
+        b1 = Box(10, 10, 10)
+        with Locations(b1.faces().filter_by(Axis.Z).sort_by(Axis.Z).last):
+            _, _, _ = fastener_hole(radius=3, depth=None, id=0, build_part=p1)
+    part1 = p1.part
+    part1.label = "case1_solid_with_hole@solid"
+
+    # Compound at origin
+    compound1 = Compound(children=[part1])
+    body_indices1 = {part1.label: 0}
+
+    pos1, quat1, depth1, through1, batch1 = get_starting_part_holes(
+        compound1, body_indices1
+    )
+
+    # Expectations: position is local [0, 0, 5] mm -> meters; quat is identity;
+    # depth equals box thickness (10 mm -> 0.01 m); hole is through; batch maps to body index 0
+    assert pos1.shape == (1, 3)
+    assert quat1.shape == (1, 4)
+    assert depth1.shape == (1,)
+    assert through1.shape == (1,)
+    assert batch1.shape == (1,)
+
+    assert torch.allclose(pos1, torch.tensor([[0.0, 0.0, 5.0]]) / 1000, atol=1e-6)
+    assert torch.allclose(quat1, torch.tensor([[1.0, 0.0, 0.0, 0.0]]))
+    assert torch.allclose(depth1, torch.tensor([10.0 / 1000]), atol=1e-6)
+    assert torch.equal(through1, torch.tensor([True]))
+    assert torch.equal(batch1, torch.tensor([0]))
+
+    # Build an identical solid but translate the whole part in world space
+    with BuildPart() as p2:
+        b2 = Box(10, 10, 10)
+        with Locations(b2.faces().filter_by(Axis.Z).sort_by(Axis.Z).last):
+            _, _, _ = fastener_hole(radius=3, depth=None, id=0, build_part=p2)
+    part2 = p2.part.locate(Pos(10, 20, 30))
+    part2.label = "case2_solid_with_hole@solid"
+
+    compound2 = Compound(children=[part2])
+    body_indices2 = {part2.label: 0}
+
+    pos2, quat2, depth2, through2, batch2 = get_starting_part_holes(
+        compound2, body_indices2
+    )
+
+    # The starting hole description is local to the part, so global translation should not change it
+    assert torch.allclose(pos2, pos1, atol=1e-6)
+    assert torch.allclose(quat2, quat1)
+    assert torch.allclose(depth2, depth1)
+    assert torch.equal(through2, through1)
+    assert torch.equal(batch2, torch.tensor([0]))
 
 
 if __name__ == "__main__":

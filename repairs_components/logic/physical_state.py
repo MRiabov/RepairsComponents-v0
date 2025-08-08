@@ -805,13 +805,15 @@ def compound_pos_to_sim_pos(
     compound_pos: torch.Tensor, env_size_mm=(640, 640, 640)
 ) -> torch.Tensor:
     """Convert position in compound to position in sim/sim state."""
-    assert compound_pos.ndim == 2 and compound_pos.shape[1] == 3, (
-        f"compound_pos must be [N, 3], got {compound_pos.shape}"
+    assert compound_pos.ndim >= 2 and compound_pos.shape[-1] == 3, (
+        f"compound_pos must be [N, 3] or [B, N, 3], got {compound_pos.shape}"
     )
-    assert (compound_pos > 0).all(), "compound_pos must be non-negative, including 0."
+    assert (compound_pos > 0).all(), (
+        f"Compound_pos must be non-negative, including 0, got {compound_pos}"
+    )
     env_size_mm = torch.tensor(env_size_mm, device=compound_pos.device)
-    compound_pos_xy = (compound_pos[:, :2] - env_size_mm[:2] / 2) / 1000
-    compound_pos_z = compound_pos[:, 2] / 1000  # z needs not go lower.
+    compound_pos_xy = (compound_pos[..., :2] - env_size_mm[:2] / 2) / 1000
+    compound_pos_z = compound_pos[..., 2] / 1000  # z needs not go lower.
     return torch.cat([compound_pos_xy, compound_pos_z.unsqueeze(1)], dim=1)
 
 
@@ -955,7 +957,9 @@ def register_bodies_batch(
 
             # Set up connector indices and batches
             male_indices = [
-                i for i, name in enumerate(connector_names) if name.endswith("_male@connector")
+                i
+                for i, name in enumerate(connector_names)
+                if name.endswith("_male@connector")
             ]
             female_indices = [
                 i
@@ -1056,15 +1060,21 @@ def register_fasteners_batch(
 
     device = physical_states.device if hasattr(physical_states, "device") else "cuda"
     physical_states.fasteners_diam = torch.full(
-        (B, num_fasteners), fill_value=-1.0, dtype=torch.float32
+        (B, num_fasteners), fill_value=-1.0, dtype=torch.float32, device=device
     )
     physical_states.fasteners_length = torch.full(
-        (B, num_fasteners), fill_value=-1.0, dtype=torch.float32
+        (B, num_fasteners), fill_value=-1.0, dtype=torch.float32, device=device
     )  # fill with -1 just in case
     for i, name in enumerate(fastener_compound_names):
         diam, length = get_fastener_params_from_name(name)
-        physical_states.fasteners_diam[:, i] = diam
-        physical_states.fasteners_length[:, i] = length
+        # get_fastener_params_from_name returns values in millimeters.
+        # Convert to meters for consistency with PhysicalState units.
+        physical_states.fasteners_diam[:, i] = torch.tensor(
+            diam / 1000.0, dtype=torch.float32, device=device
+        )
+        physical_states.fasteners_length[:, i] = torch.tensor(
+            length / 1000.0, dtype=torch.float32, device=device
+        )
 
     assert physical_states.part_hole_batch is not None, (
         "Part hole batch must be set before registering fasteners."
@@ -1189,8 +1199,12 @@ def update_connector_def_pos_batch(
         all_connector_positions[:, i] = connector_pos
 
     # Separate male and female connectors
-    male_indices = [i for i, name in enumerate(names) if name.endswith("_male@connector")]
-    female_indices = [i for i, name in enumerate(names) if name.endswith("_female@connector")]
+    male_indices = [
+        i for i, name in enumerate(names) if name.endswith("_male@connector")
+    ]
+    female_indices = [
+        i for i, name in enumerate(names) if name.endswith("_female@connector")
+    ]
 
     # male_names = [names[i] for i in male_indices]  # Not used in this function
     # female_names = [names[i] for i in female_indices]  # Not used in this function
