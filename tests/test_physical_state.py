@@ -1,7 +1,12 @@
 import pytest
 import torch
 
-from repairs_components.logic.physical_state import PhysicalState, register_fasteners_batch, register_bodies_batch
+from repairs_components.logic.physical_state import (
+    PhysicalState,
+    register_fasteners_batch,
+    register_bodies_batch,
+    update_bodies_batch,
+)
 from repairs_components.geometry.fasteners import get_fastener_singleton_name
 
 
@@ -808,6 +813,145 @@ class TestRegisterBodiesBatch:
         assert result_state.quat.device == target_device
         assert result_state.fixed.device == target_device
 
+
+class TestUpdateBodiesBatch:
+    """Tests for update_bodies_batch function."""
+
+    def setup_method(self):
+        self.device = torch.device("cpu")
+
+    def create_registered_state(self, batch_size: int = 2, include_connectors: bool = False):
+        """Create a batched state with registered bodies (optionally connectors)."""
+        # Empty batched state
+        single_state = PhysicalState(device=self.device)
+        single_state.position = torch.empty((0, 3), device=self.device)
+        single_state.quat = torch.empty((0, 4), device=self.device)
+        single_state.fixed = torch.empty((0,), dtype=torch.bool, device=self.device)
+        single_state.count_fasteners_held = torch.empty((0,), dtype=torch.int8, device=self.device)
+        single_state.male_connector_positions = torch.empty((0, 3), device=self.device)
+        single_state.female_connector_positions = torch.empty((0, 3), device=self.device)
+        single_state.male_connector_batch = torch.empty((0,), dtype=torch.long, device=self.device)
+        single_state.female_connector_batch = torch.empty((0,), dtype=torch.long, device=self.device)
+        single_state.connector_indices_from_name = {}
+
+        states = [single_state for _ in range(batch_size)]
+        batched_state: PhysicalState = torch.stack(states)  # type: ignore
+
+        if include_connectors:
+            names = [
+                "body_0@solid",
+                "connector_male@connector",
+                "connector_female@connector",
+            ]
+            num_bodies = len(names)
+        else:
+            names = ["body_0@solid", "body_1@fixed_solid", "body_2@solid"]
+            num_bodies = len(names)
+
+        # Initial positions/rotations
+        positions = torch.zeros(batch_size, num_bodies, 3)
+        # Identity quaternions for simplicity
+        rotations = torch.zeros(batch_size, num_bodies, 4)
+        rotations[..., 0] = 1.0
+
+        if include_connectors:
+            fixed = torch.tensor([False, False, False])
+            connector_rel = torch.tensor([
+                [float("nan"), float("nan"), float("nan")],
+                [0.10, 0.00, 0.05],
+                [-0.10, 0.00, 0.05],
+            ])
+            register_bodies_batch(
+                batched_state, names, positions, rotations, fixed, connector_rel
+            )
+        else:
+            fixed = torch.tensor([False, True, False])
+            register_bodies_batch(
+                batched_state, names, positions, rotations, fixed
+            )
+
+        return batched_state, names
+
+    def test_update_bodies_batch_basic_and_fixed(self):
+        batch_size = 2
+        state, names = self.create_registered_state(batch_size=batch_size, include_connectors=False)
+        num_update = len(names)
+        # New positions within bounds; body_1 is fixed and must not update
+        new_positions = torch.randn(batch_size, num_update, 3) * 0.05
+        new_positions[:, :, 2] = torch.abs(new_positions[:, :, 2]) + 0.05
+        new_rots = torch.zeros(batch_size, num_update, 4)
+        new_rots[..., 0] = 1.0
+
+        updated = update_bodies_batch(state, names, new_positions, new_rots)
+
+        # body_0 and body_2 update; body_1 stays unchanged (zeros)
+        assert torch.allclose(updated.position[:, [0, 2], :], new_positions[:, [0, 2], :])
+        assert torch.allclose(updated.quat[:, [0, 2], :], new_rots[:, [0, 2], :])
+        assert torch.all(updated.position[:, 1, :] == 0)
+        assert torch.all(updated.quat[:, 1, 0] == 1.0)
+        assert torch.all(updated.quat[:, 1, 1:] == 0)
+
+    def test_update_bodies_batch_bounds_validation(self):
+        batch_size = 1
+        state, names = self.create_registered_state(batch_size=batch_size, include_connectors=False)
+        num_update = len(names)
+        # Create out-of-bounds z
+        positions = torch.zeros(batch_size, num_update, 3)
+        positions[..., 2] = 10.0  # way out of bounds
+        rotations = torch.zeros(batch_size, num_update, 4)
+        rotations[..., 0] = 1.0
+
+        with pytest.raises(AssertionError, match="out of bounds"):
+            update_bodies_batch(state, names, positions, rotations)
+
+    def test_update_bodies_batch_connectors_update(self):
+        batch_size = 2
+        state, names = self.create_registered_state(batch_size=batch_size, include_connectors=True)
+        num_update = len(names)
+
+        # Move all by a known delta; identity rotations
+        delta = torch.tensor([0.02, -0.03, 0.04])
+        positions = torch.zeros(batch_size, num_update, 3)
+        positions += delta
+        positions[..., 2] = torch.abs(positions[..., 2]) + 0.05
+        rotations = torch.zeros(batch_size, num_update, 4)
+        rotations[..., 0] = 1.0
+
+        connector_rel = torch.tensor([
+            [float("nan"), float("nan"), float("nan")],
+            [0.10, 0.00, 0.05],  # male
+            [-0.10, 0.00, 0.05],  # female
+        ])
+
+        updated = update_bodies_batch(state, names, positions, rotations, connector_rel)
+
+        # Expected connector positions with identity rotations: pos + rel
+        # Names order: [body_0, male, female]; male array contains only male connectors in that order
+        expected_male = positions[:, 1:2, :] + connector_rel[1:2, :]
+        expected_female = positions[:, 2:3, :] + connector_rel[2:3, :]
+
+        assert torch.allclose(updated.male_connector_positions, expected_male)
+        assert torch.allclose(updated.female_connector_positions, expected_female)
+
+    def test_update_bodies_batch_device_handling(self):
+        batch_size = 1
+        state, names = self.create_registered_state(batch_size=batch_size, include_connectors=False)
+        num_update = len(names)
+
+        positions = torch.randn(batch_size, num_update, 3) * 0.05
+        positions[..., 2] = torch.abs(positions[..., 2]) + 0.05
+        rotations = torch.zeros(batch_size, num_update, 4)
+        rotations[..., 0] = 1.0
+
+        if torch.cuda.is_available():
+            positions = positions.to("cuda")
+            rotations = rotations.to("cuda")
+
+        updated = update_bodies_batch(state, names, positions, rotations)
+
+        # Verify tensors are on CPU (state.device)
+        assert updated.position.device.type == "cpu"
+        assert updated.quat.device.type == "cpu"
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -25,6 +25,7 @@ from repairs_components.processing.geom_utils import (
     quaternion_delta,
     sanitize_quaternion,
 )
+from typing_extensions import deprecated
 
 
 # @tensorclass # complains for some reason.
@@ -224,6 +225,7 @@ class PhysicalState(TensorClass):
         # print("debug: graph global feat shape", graph.global_feat.shape)
         return graph
 
+    @deprecated("Use register_bodies_batch instead.")
     def register_body(
         self,
         name: str,
@@ -301,6 +303,7 @@ class PhysicalState(TensorClass):
             )
         return self
 
+    @deprecated("Use update_bodies_batch instead.")
     def update_body(
         self,
         name: str,
@@ -348,6 +351,7 @@ class PhysicalState(TensorClass):
 
         return self  # maybe that would fix view issues.
 
+    @deprecated("Use register_fasteners_batch instead.")
     def register_fastener(self, fastener: Fastener):
         """A fastener method to register fasteners and add all necessary components.
         Handles constraining to bodies and adding to graph.
@@ -425,6 +429,7 @@ class PhysicalState(TensorClass):
             self.connect_fastener_to_one_body(fastener_id, initial_body_b)
         return self  # maybe that would fix view issues.
 
+    #TODO deprecate and set to functions
     def connect_fastener_to_one_body(self, fastener_id: int, body_name: str):
         """Connect a fastener to a body. Used during screw-in and initial construction."""
         # FIXME: but where to get/store fastener ids I'll need to think.
@@ -441,6 +446,7 @@ class PhysicalState(TensorClass):
 
         return self
 
+    #TODO deprecate and set to functions
     def disconnect(self, fastener_id: int, disconnected_body: str):
         body_id = self.body_indices[disconnected_body]
 
@@ -1014,6 +1020,136 @@ def register_bodies_batch(
                 physical_states.female_connector_batch = torch.empty(
                     (B, 0), dtype=torch.long, device=device
                 )
+
+    return physical_states
+
+
+def update_bodies_batch(
+    physical_states: "PhysicalState",
+    names: list[str],
+    positions: torch.Tensor,  # [B, num_update, 3]
+    rotations: torch.Tensor,  # [B, num_update, 4]
+    connector_position_relative_to_center: torch.Tensor | None = None,  # [num_update, 3] with NaNs for non-connectors
+    max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64]),
+    min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0]),
+) -> "PhysicalState":
+    """Update multiple bodies across multiple environments in batch.
+
+    - Applies updates only where bodies are not fixed (per-environment).
+    - Validates bounds and quaternion normalization.
+    - Updates connector positions in-place for the updated connectors.
+
+    Args:
+        physical_states: Batched PhysicalState to update.
+        names: List of body names to update.
+        positions: [B, num_update, 3]
+        rotations: [B, num_update, 4]
+        connector_position_relative_to_center: [num_update, 3] relative positions; NaN for non-connectors.
+        max_bounds, min_bounds: Bounds for normalized coordinates.
+
+    Returns:
+        Updated PhysicalState.
+    """
+    assert positions.ndim == 3 and positions.shape[-1] == 3, (
+        f"Expected positions shape [B, num_update, 3], got {positions.shape}"
+    )
+    assert rotations.ndim == 3 and rotations.shape[-1] == 4, (
+        f"Expected rotations shape [B, num_update, 4], got {rotations.shape}"
+    )
+    B, num_update, _ = positions.shape
+
+    # Sanity checks for names
+    assert len(names) == num_update, (
+        f"Got {len(names)} names but positions/rotations have {num_update} bodies"
+    )
+    assert len(set(names)) == len(names), "Duplicate names in update list are not allowed"
+    for name in names:
+        assert name in physical_states.body_indices, (
+            f"Body {name} not registered. Registered: {list(physical_states.body_indices.keys())}"
+        )
+
+    device = physical_states.device
+    positions = positions.to(device)
+    rotations = rotations.to(device)
+    max_bounds = max_bounds.to(device)
+    min_bounds = min_bounds.to(device)
+
+    # Validate bounds and rotations
+    assert (positions >= min_bounds).all() and (positions <= max_bounds).all(), (
+        f"Some positions are out of bounds [{min_bounds.tolist()}, {max_bounds.tolist()}]"
+    )
+    sanitize_quaternion(rotations)
+
+    # Map names -> body indices
+    idxs = torch.tensor([physical_states.body_indices[n] for n in names], dtype=torch.long, device=device)
+
+    # Update positions/quaternions where not fixed
+    not_fixed = ~physical_states.fixed[:, idxs]  # [B, num_update]
+    # Positions
+    cur_pos = physical_states.position[:, idxs, :]
+    upd_pos = torch.where(not_fixed.unsqueeze(-1), positions, cur_pos)
+    physical_states.position[:, idxs, :] = upd_pos
+    # Rotations
+    cur_quat = physical_states.quat[:, idxs, :]
+    upd_quat = torch.where(not_fixed.unsqueeze(-1), rotations, cur_quat)
+    physical_states.quat[:, idxs, :] = upd_quat
+
+    # Handle connectors: recompute positions for connectors among the updated names
+    connector_indices_local = [i for i, n in enumerate(names) if n.endswith("@connector")]
+    if connector_indices_local:
+        assert (
+            connector_position_relative_to_center is not None
+        ), "Updated connectors must provide connector_position_relative_to_center"
+        assert connector_position_relative_to_center.shape == (num_update, 3), (
+            f"Expected connector_position_relative_to_center shape [{num_update}, 3], got {connector_position_relative_to_center.shape}"
+        )
+
+        connector_names = [names[i] for i in connector_indices_local]
+        connector_rel = connector_position_relative_to_center[connector_indices_local].to(device)
+
+        # Validate connector rel positions for the connectors
+        for i, cname in enumerate(connector_names):
+            if cname.endswith(("_male@connector", "_female@connector")):
+                assert not torch.isnan(connector_rel[i]).any(), (
+                    f"Connector {cname} must have valid connector_position_relative_to_center, got NaN"
+                )
+        assert (connector_rel.abs() < 5).all(), (
+            "Likely dimension error: it is unlikely that a connector is further than 5m from the center of the part."
+        )
+
+        # Use updated state tensors (with fixed masking applied) to recompute connector positions
+        body_idxs_for_connectors = idxs[connector_indices_local]
+        conn_positions = physical_states.position[:, body_idxs_for_connectors, :]  # [B, Nc, 3]
+        conn_rotations = physical_states.quat[:, body_idxs_for_connectors, :]      # [B, Nc, 4]
+
+        male_pos_new, female_pos_new = update_connector_def_pos_batch(
+            conn_positions, conn_rotations, connector_rel, connector_names
+        )
+
+        # Write back into preallocated connector position tensors using stored indices
+        # Note: connector_indices_from_name is stored per-batch element
+        male_indices_local = [i for i, n in enumerate(connector_names) if n.endswith("_male@connector")]
+        female_indices_local = [i for i, n in enumerate(connector_names) if n.endswith("_female@connector")]
+
+        # Update male connector positions
+        if male_indices_local:
+            # male_pos_new corresponds to the male subset order
+            for b in range(B):
+                name_to_idx = physical_states[b].connector_indices_from_name
+                for j, local_i in enumerate(male_indices_local):
+                    cname = connector_names[local_i]
+                    assert cname in name_to_idx, f"Connector {cname} not found in state mapping"
+                    dst_idx = name_to_idx[cname]
+                    physical_states.male_connector_positions[b, dst_idx, :] = male_pos_new[b, j, :]
+        # Update female connector positions
+        if female_indices_local:
+            for b in range(B):
+                name_to_idx = physical_states[b].connector_indices_from_name
+                for j, local_i in enumerate(female_indices_local):
+                    cname = connector_names[local_i]
+                    assert cname in name_to_idx, f"Connector {cname} not found in state mapping"
+                    dst_idx = name_to_idx[cname]
+                    physical_states.female_connector_positions[b, dst_idx, :] = female_pos_new[b, j, :]
 
     return physical_states
 
