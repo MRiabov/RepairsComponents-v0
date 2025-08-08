@@ -189,8 +189,8 @@ def step_screw_in_or_out(
     gs_entities: dict[str, RigidEntity],
     current_sim_state: RepairsSimState,
     actions: torch.Tensor,
-    holes_depth: torch.Tensor,
-    holes_is_through: torch.Tensor,
+    hole_depths: torch.Tensor,
+    hole_is_through: torch.Tensor,
 ):
     "A method to update fastener attachments based on actions and proximity."
     tool_state = current_sim_state.tool_state
@@ -215,24 +215,33 @@ def step_screw_in_or_out(
         actions
     )  # [B]
 
-    # check if fastener is already connected to two parts
-    fastener_disconnected_mask = physical_state.fasteners_attached_to_body == -1
-    fastener_fully_connected_mask = ~fastener_disconnected_mask[
+    # connection status masks for the picked-up fastener in each env
+    fastener_disconnected_mask = (
+        physical_state.fasteners_attached_to_body == -1
+    )  # [B, F, 2]
+    picked_mask = fastener_disconnected_mask[
         torch.arange(scene.n_envs), picked_up_fastener_ids
-    ].any(dim=-1)  # [B]  # neither of connections is -1
-    fastener_partially_connected_mask = fastener_disconnected_mask[
-        torch.arange(scene.n_envs), picked_up_fastener_ids
-    ].any(dim=-1)  # [B]  # any of connections is -1
-    # ^ this is incorrect logic.
+    ]  # [B, 2]
+    # fully connected => neither slot is -1
+    fastener_fully_connected_mask = ~picked_mask.any(dim=-1)  # [B]
+    # connected to at least one body (covers both partial and full)
+    fastener_connected_to_any_mask = ~picked_mask.all(dim=-1)  # [B]
 
     # check if the fastener is already in blind hole
     fastener_in_blind_hole_mask = (
-        ~holes_is_through[physical_state.fasteners_attached_to_hole]
-    ).any(-1)
+        ~hole_is_through[  # expected 1 fastener per env.
+            torch.arange(scene.n_envs),
+            physical_state.fasteners_attached_to_hole[
+                torch.arange(scene.n_envs), picked_up_fastener_ids
+            ],
+        ]
+    ).any(-1)  # expected [B]
     # TODO: untested; expected that this will be equal to screw_in_desired_mask.shape
-    ### debug
-    assert fastener_in_blind_hole_mask.shape == screw_in_desired_mask.shape
-    ###/debug
+    # ### debug
+    # assert fastener_in_blind_hole_mask.shape == screw_in_desired_mask.shape, (
+    #     f"fastener_in_blind_hole_mask.shape != screw_in_desired_mask.shape: {fastener_in_blind_hole_mask.shape} != {screw_in_desired_mask.shape}"
+    # )
+    # ###/debug
 
     # where they actually happen
     has_fastener_and_desired_in = (
@@ -245,7 +254,7 @@ def step_screw_in_or_out(
     has_fastener_and_desired_out = (
         has_picked_up_fastener_mask
         & screw_out_desired_mask
-        & fastener_partially_connected_mask  # can't screw out where it's not connected anywhere
+        & fastener_connected_to_any_mask  # can screw out when connected to at least one body
     )
 
     # step screw insertion
@@ -259,7 +268,6 @@ def step_screw_in_or_out(
             .values
         )  # because ignore_hole_idx is a tensor of shape [2], with always values of either [-1, -1], [-1, value], [value, -1],
         # we can take max to get the value or -1.
-
         part_idx, hole_idx = check_fastener_possible_insertion(
             active_fastener_tip_position=torch.stack(
                 [
@@ -271,7 +279,12 @@ def step_screw_in_or_out(
             part_hole_quats=physical_state.hole_quats[env_ids],
             part_hole_batch=physical_state.part_hole_batch[env_ids],
             # as fastener quat is equal to screwdriver quat, we can pass it here
-            active_fastener_quat=gs_entities["screwdriver@control"].get_quat(env_ids),
+            active_fastener_quat=torch.stack(
+                [
+                    tool_state[env_id].current_tool.picked_up_fastener_quat
+                    for env_id in env_ids
+                ]
+            ),
             ignore_part_idx=ignore_part_idx,
             # note: ignore hole idx could be moved out to get -1s separately but idgaf.
         )  # [B] int or -1
@@ -280,14 +293,19 @@ def step_screw_in_or_out(
             hole_id = hole_idx[env_id]
             # when fastener is already inserted to a hole, we need to pass the hole's (top hole's) depth to the function
             already_inserted_hole_id = (
-                physical_state.fasteners_attached_to_hole[env_id].max(-1).values
+                physical_state.fasteners_attached_to_hole[
+                    torch.arange(scene.n_envs), picked_up_fastener_ids
+                ]
+                .max(-1)
+                .values
             )
             hole_pos = physical_state.hole_positions[env_id, hole_id]
             hole_quat = physical_state.hole_quats[env_id, hole_id]
             fastener_name = tool_state[env_id].current_tool.picked_up_fastener_name
             fastener_id = int(fastener_name.split("@")[0])
             part_id = part_idx[env_id]
-            part_name = physical_state.inverse_body_indices[part_id]
+            part_name = physical_state.inverse_body_indices[part_id.item()]
+            already_inserted_into_a_hole = already_inserted_hole_id != -1
             # note: fasteners that are already connected are ignored in check_fastener_possible_insertion
             # FIXME: body_idx should be gettable from fastener_hole_positions
             attach_fastener_to_part(
@@ -295,26 +313,24 @@ def step_screw_in_or_out(
                 fastener_entity=gs_entities[fastener_name],
                 inserted_into_hole_pos=hole_pos,
                 inserted_into_hole_quat=hole_quat,
-                inserted_to_hole_depth=physical_state.hole_depths[env_id, hole_id],
-                inserted_into_hole_is_through=physical_state.hole_is_through[
-                    env_id, hole_id
-                ],
+                inserted_to_hole_depth=hole_depths[env_id, hole_id],
+                inserted_into_hole_is_through=hole_is_through[env_id, hole_id],
                 inserted_into_part_entity=gs_entities[part_name],
                 fastener_length=physical_state.fasteners_length[env_id, fastener_id],
-                top_hole_is_through=physical_state.hole_is_through[
-                    env_id, already_inserted_hole_id
-                ],
+                top_hole_is_through=hole_is_through[env_id, already_inserted_hole_id],
                 envs_idx=torch.tensor([env_id]),
-                already_inserted_into_one_hole=already_inserted_hole_id != -1,
-                top_hole_depth=physical_state.hole_depths[
-                    env_id, already_inserted_hole_id
-                ],
+                already_inserted_into_one_hole=already_inserted_into_a_hole,
+                top_hole_depth=torch.where(
+                    already_inserted_into_a_hole,
+                    hole_depths[env_id, already_inserted_hole_id],
+                    torch.zeros_like(hole_depths[env_id, already_inserted_hole_id]),
+                ),
             )
             # future: assert (prevent) more than two connections.
 
             ##Design choice: don't remove connection after screw in to allow ML to constrain two parts more easily.
 
-            physical_state[env_id].connect(fastener_name, part_name, None)
+            physical_state.connect_fastener_to_one_body(fastener_id, part_name, env_id)
 
     if has_fastener_and_desired_out.any():
         for env_id in (
@@ -340,20 +356,25 @@ def step_screw_in_or_out(
                         envs_idx=torch.tensor([env_id], device=actions.device),
                     )
 
-            screwdriver_grip_pos = get_connector_pos(
-                gs_entities["screwdriver@control"].get_pos(env_id),
-                gs_entities["screwdriver@control"].get_quat(env_id),
-                Screwdriver.fastener_connector_pos_relative_to_center().unsqueeze(0),
+            # update graph-state to reflect detachment from all bodies/holes in this env
+            physical_state.fasteners_attached_to_body[env_id, fastener_id] = (
+                torch.tensor(
+                    [-1, -1], device=physical_state.fasteners_attached_to_body.device
+                )
+            )
+            physical_state.fasteners_attached_to_hole[env_id, fastener_id] = (
+                torch.tensor(
+                    [-1, -1], device=physical_state.fasteners_attached_to_hole.device
+                )
             )
 
             attach_fastener_to_screwdriver(  # reattach the fastener to hand.
                 scene,
                 fastener_entity=gs_entities[fastener_name],
                 screwdriver_entity=gs_entities["franka@control"],
-                screwdriver_grip_xyz=screwdriver_grip_pos,
-                env_id=env_id,
                 tool_state_to_update=tool_state[env_id].current_tool,
                 fastener_id=fastener_id,
+                env_id=env_id,
             )
 
     print(f"has_fastener_and_desired_in {has_fastener_and_desired_in}")

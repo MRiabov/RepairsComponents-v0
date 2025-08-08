@@ -269,6 +269,9 @@ def translate_genesis_to_python(  # translate to sim state, really.
             sim_state.tool_state[
                 env_id
             ].current_tool.picked_up_fastener_tip_position = tip_pos
+            sim_state.tool_state[
+                env_id
+            ].current_tool.picked_up_fastener_quat = fastener_quat
 
     # update holes
     sim_state = update_hole_locs(

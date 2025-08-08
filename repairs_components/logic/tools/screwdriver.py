@@ -11,6 +11,7 @@ class Screwdriver(Tool):
     id: int = ToolsEnum.SCREWDRIVER.value
     picked_up_fastener_name: str | None = None
     picked_up_fastener_tip_position: torch.Tensor | None = None
+    picked_up_fastener_quat: torch.Tensor | None = None
 
     @property
     def has_picked_up_fastener(self):
@@ -79,6 +80,7 @@ class Screwdriver(Tool):
     def on_tool_release(self):
         self.picked_up_fastener_name = None
         self.picked_up_fastener_tip_position = None
+        self.picked_up_fastener_quat = None
 
 
 def receive_screw_in_action(

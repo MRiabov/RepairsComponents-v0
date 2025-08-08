@@ -73,7 +73,7 @@ def scene_with_entities(init_gs):
     )  # note: not @connector. However everything else should use @connector.
 
     # Create entities dict with proper naming conventions
-    entities = {
+    entities: dict[str, RigidEntity] = {
         "part_1@solid": part_1,
         "part_2@solid": part_2,
         "0@fastener": fastener,
@@ -87,6 +87,7 @@ def scene_with_entities(init_gs):
     sim_state.tool_state[0].current_tool = Screwdriver(
         picked_up_fastener_name="0@fastener",
         picked_up_fastener_tip_position=torch.tensor([-1.0, -1.0, -1.0]),
+        picked_up_fastener_quat=torch.tensor([1.0, 0.0, 0.0, 0.0]),
         # ^ note: the expected is 0,0,0, so this is predictably incorrect.
         # it is expected to change.
     )
@@ -294,7 +295,9 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
 
     # connector_def pos should be at their positions too.
     # Get male connector index and position from tensor-based structure
-    male_connector_idx = sim_state.physical_state[0].connector_indices_from_name[male_name]
+    male_connector_idx = sim_state.physical_state[0].connector_indices_from_name[
+        male_name
+    ]
     connector_def_actual_m = sim_state.physical_state.male_connector_positions[
         0, male_connector_idx
     ].to(gs_device)
@@ -369,3 +372,8 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     assert torch.allclose(fastener_tip_actual, fastener_tip_expected, atol=0.1), (
         f"Fastener tip position in state {fastener_tip_actual} != expected {fastener_tip_expected}"
     )
+    assert torch.allclose(
+        sim_state.tool_state[0].current_tool.picked_up_fastener_quat,
+        entities["0@fastener"].get_quat(0),
+        atol=0.1,
+    ), "Fastener tip quaternion in state != expected"

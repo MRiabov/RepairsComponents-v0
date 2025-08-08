@@ -45,7 +45,7 @@ class Fastener(Component):
         - initial_hole_id_b: ID of the hole for constraint B
         - expected_body_name_a: Optional(!) Name of the body for constraint A. If provided, constraint mechanism can check that id of holes corresponds to ids of bodies, and those to names.
         - expected_body_name_b: Optional(!) Name of the body for constraint B. If provided, constraint mechanism can check that id of holes corresponds to ids of bodies, and those to names.
-        """#maybe TODO: expected_body_name_a and b.
+        """  # maybe TODO: expected_body_name_a and b.
         # assert initial_hole_id_a is not None, "initial_hole_id_a must be provided"
         assert head_diameter > diameter, (
             "head_diameter of a fastener must be greater than diameter"
@@ -205,16 +205,19 @@ def check_fastener_possible_insertion(
     """
     from repairs_components.processing.geom_utils import are_quats_within_angle
 
-    assert part_hole_positions.shape[1] == part_hole_batch.shape[0], (
+    assert part_hole_positions.shape[:2] == part_hole_batch.shape, (
         f"part_hole_positions, part_hole_batch must have the same batch and hole counts.\n"
         f"part_hole_positions: {part_hole_positions.shape}, part_hole_batch: {part_hole_batch.shape}"
     )
-    assert part_hole_batch.ndim == 1, (
-        f"part_hole_batch must be a 1D tensor of shape [H], got {part_hole_batch.shape}"
+    assert part_hole_batch.ndim == 2, (
+        f"part_hole_batch must be a 2D tensor of shape [B, H], got {part_hole_batch.shape}"
     )
+    part_hole_batch = part_hole_batch[
+        0
+    ]  # since they are equal over the batch, simplify by [0]
     dist = torch.norm(
         part_hole_positions - active_fastener_tip_position, dim=-1
-    )  # [B,H]
+    )  # [B, H]
     # ignore holes that this fastener is already attached to
     if ignore_part_idx is not None:
         assert ignore_part_idx.shape == (part_hole_positions.shape[0],), (
@@ -286,6 +289,7 @@ def attach_fastener_to_screwdriver(
     )  # works is genesis's examples.
     assert isinstance(tool_state_to_update, Screwdriver), "Tool must be a Screwdriver"
     tool_state_to_update.picked_up_fastener_tip_position = screwdriver_grip_xyz
+    tool_state_to_update.picked_up_fastener_quat = screwdriver_quat
     tool_state_to_update.picked_up_fastener_name = Fastener.fastener_name_in_simulation(
         fastener_id
     )
@@ -309,6 +313,7 @@ def detach_fastener_from_screwdriver(
     assert isinstance(tool_state_to_update, Screwdriver), "Tool must be a Screwdriver"
     tool_state_to_update.picked_up_fastener_name = None
     tool_state_to_update.picked_up_fastener_tip_position = None
+    tool_state_to_update.picked_up_fastener_quat = None
 
 
 def attach_fastener_to_part(
@@ -330,13 +335,19 @@ def attach_fastener_to_part(
 
     Note: all arguments that are passed are passed in filtered. So equal to env_idx.shape[0] in batch shape."""
     assert (top_hole_is_through[already_inserted_into_one_hole]).all(), (
-        "Where already inserted, must be inserted into a through hole (can't insert when the top hole is blind)."
+        f"Where already inserted, must be inserted into a through hole (can't insert when the top hole is blind).\n"
+        f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_is_through: {top_hole_is_through}"
     )
     assert (already_inserted_into_one_hole == (top_hole_depth > 0)).all(), (
-        "Where marked as uninserted, top hole depth must be 0, and where inserted, >0"
+        f"Where marked as uninserted, top hole depth must be 0, and where inserted, >0.\n"
+        f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_depth: {top_hole_depth}"
     )
-    assert fastener_length > 0, "Fastener length must be positive."
-    assert inserted_to_hole_depth > 0, "Inserted to hole depth must be positive."
+    assert fastener_length > 0, (
+        f"Fastener length must be positive. Fastener_length: {fastener_length}"
+    )
+    assert inserted_to_hole_depth > 0, (
+        f"Inserted to hole depth must be positive. Inserted_to_hole_depth: {inserted_to_hole_depth}"
+    )
 
     # TODO: make fastener insertion more smooth.
     rigid_solver = scene.sim.rigid_solver

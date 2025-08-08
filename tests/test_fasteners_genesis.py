@@ -163,6 +163,10 @@ def test_attach_and_detach_fastener_to_screwdriver(
     assert torch.isclose(
         screwdriver.picked_up_fastener_tip_position, screwdriver_pos + fastener_grip_pos
     ).all()
+    assert torch.isclose(
+        screwdriver.picked_up_fastener_quat,
+        entities["screwdriver@tool"].get_quat(),
+    ).all()
     assert screwdriver.picked_up_fastener_name == "0@fastener"
 
     # detach fastener from screwdriver and assert they fall down.
@@ -177,6 +181,7 @@ def test_attach_and_detach_fastener_to_screwdriver(
     # assert tool state
     assert screwdriver.has_picked_up_fastener == False
     assert screwdriver.picked_up_fastener_tip_position is None
+    assert screwdriver.picked_up_fastener_quat is None
     assert screwdriver.picked_up_fastener_name is None
 
     for i in range(100):

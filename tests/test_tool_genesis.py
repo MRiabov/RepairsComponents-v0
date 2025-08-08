@@ -345,6 +345,11 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
         ),
         atol=0.05,
     ).all()
+    assert torch.isclose(
+        screwdriver.picked_up_fastener_quat,
+        tool_cube.get_quat(),
+        atol=0.01,
+    ).all()
 
     # detach tool from arm
     detach_tool_from_arm(

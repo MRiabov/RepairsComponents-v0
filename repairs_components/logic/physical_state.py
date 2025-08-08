@@ -429,24 +429,29 @@ class PhysicalState(TensorClass):
             self.connect_fastener_to_one_body(fastener_id, initial_body_b)
         return self  # maybe that would fix view issues.
 
-    #TODO deprecate and set to functions
-    def connect_fastener_to_one_body(self, fastener_id: int, body_name: str):
+    # TODO deprecate and set to functions
+    def connect_fastener_to_one_body(
+        self, fastener_id: int, body_name: str, env_idx: torch.Tensor
+    ):
         """Connect a fastener to a body. Used during screw-in and initial construction."""
         # FIXME: but where to get/store fastener ids I'll need to think.
-        assert (self.fasteners_attached_to_body[fastener_id] == -1).any(), (
+        assert (self.fasteners_attached_to_body[env_idx, fastener_id] == -1).any(), (
             "Fastener is already connected to two bodies."
         )
-        free_slot = (
-            self.fasteners_attached_to_body[fastener_id][0] == -1
-        ).int()  # 0 or 1 # bad syntax, but incidentally it works.
+        # Choose slot 0 if it is free, otherwise use slot 1
+        slot0_free = self.fasteners_attached_to_body[env_idx, fastener_id, 0] == -1
+        # Ensure we have a Python bool even if this is a 0-dim tensor
+        if isinstance(slot0_free, torch.Tensor):
+            slot0_free = bool(slot0_free.item())
+        free_slot = 0 if slot0_free else 1
 
-        self.fasteners_attached_to_body[fastener_id][free_slot] = self.body_indices[
-            body_name
-        ]
+        self.fasteners_attached_to_body[env_idx, fastener_id, free_slot] = (
+            self.body_indices[body_name]
+        )
 
         return self
 
-    #TODO deprecate and set to functions
+    # TODO deprecate and set to functions
     def disconnect(self, fastener_id: int, disconnected_body: str):
         body_id = self.body_indices[disconnected_body]
 
@@ -863,25 +868,23 @@ def register_bodies_batch(
 
     # Validate inputs
     assert positions.shape == (B, num_bodies, 3), (
-        f"Expected positions shape [{B}, {num_bodies}, 3], got {positions.shape}"
+        f"Expected positions shape [B, num_bodies, 3] [{B}, {num_bodies}, 3], got {positions.shape}"
     )
     assert rotations.shape == (B, num_bodies, 4), (
-        f"Expected rotations shape [{B}, {num_bodies}, 4], got {rotations.shape}"
+        f"Expected rotations shape [B, num_bodies, 4] [{B}, {num_bodies}, 4], got {rotations.shape}"
     )
 
     # Handle fixed parameter - can be [B, num_bodies] or [num_bodies]
-    if isinstance(fixed, torch.Tensor):
-        if fixed.shape == (num_bodies,):
-            # Broadcast to [B, num_bodies]
-            fixed = fixed.unsqueeze(0).expand(B, num_bodies)
-        elif fixed.shape == (B, num_bodies):
-            pass  # Already correct shape
-        else:
-            raise ValueError(
-                f"Expected fixed shape [{num_bodies}] or [{B}, {num_bodies}], got {fixed.shape}"
-            )
+    assert isinstance(fixed, torch.Tensor), "`fixed` must be a torch.Tensor"
+    if fixed.shape == (num_bodies,):
+        # Broadcast to [B, num_bodies]
+        fixed = fixed.unsqueeze(0).expand(B, num_bodies)
+    elif fixed.shape == (B, num_bodies):
+        pass  # Already correct shape
     else:
-        raise ValueError("fixed must be a torch.Tensor")
+        raise ValueError(
+            f"Expected `fixed` shape [num_bodies] [{num_bodies}] or [B, num_bodies] [{B}, {num_bodies}], got {fixed.shape}"
+        )
 
     # Move to device
     positions = positions.to(device)
@@ -1029,7 +1032,8 @@ def update_bodies_batch(
     names: list[str],
     positions: torch.Tensor,  # [B, num_update, 3]
     rotations: torch.Tensor,  # [B, num_update, 4]
-    connector_position_relative_to_center: torch.Tensor | None = None,  # [num_update, 3] with NaNs for non-connectors
+    connector_position_relative_to_center: torch.Tensor
+    | None = None,  # [num_update, 3] with NaNs for non-connectors
     max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64]),
     min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0]),
 ) -> "PhysicalState":
@@ -1062,7 +1066,9 @@ def update_bodies_batch(
     assert len(names) == num_update, (
         f"Got {len(names)} names but positions/rotations have {num_update} bodies"
     )
-    assert len(set(names)) == len(names), "Duplicate names in update list are not allowed"
+    assert len(set(names)) == len(names), (
+        "Duplicate names in update list are not allowed"
+    )
     for name in names:
         assert name in physical_states.body_indices, (
             f"Body {name} not registered. Registered: {list(physical_states.body_indices.keys())}"
@@ -1081,7 +1087,11 @@ def update_bodies_batch(
     sanitize_quaternion(rotations)
 
     # Map names -> body indices
-    idxs = torch.tensor([physical_states.body_indices[n] for n in names], dtype=torch.long, device=device)
+    idxs = torch.tensor(
+        [physical_states.body_indices[n] for n in names],
+        dtype=torch.long,
+        device=device,
+    )
 
     # Update positions/quaternions where not fixed
     not_fixed = ~physical_states.fixed[:, idxs]  # [B, num_update]
@@ -1095,17 +1105,21 @@ def update_bodies_batch(
     physical_states.quat[:, idxs, :] = upd_quat
 
     # Handle connectors: recompute positions for connectors among the updated names
-    connector_indices_local = [i for i, n in enumerate(names) if n.endswith("@connector")]
+    connector_indices_local = [
+        i for i, n in enumerate(names) if n.endswith("@connector")
+    ]
     if connector_indices_local:
-        assert (
-            connector_position_relative_to_center is not None
-        ), "Updated connectors must provide connector_position_relative_to_center"
+        assert connector_position_relative_to_center is not None, (
+            "Updated connectors must provide connector_position_relative_to_center"
+        )
         assert connector_position_relative_to_center.shape == (num_update, 3), (
             f"Expected connector_position_relative_to_center shape [{num_update}, 3], got {connector_position_relative_to_center.shape}"
         )
 
         connector_names = [names[i] for i in connector_indices_local]
-        connector_rel = connector_position_relative_to_center[connector_indices_local].to(device)
+        connector_rel = connector_position_relative_to_center[
+            connector_indices_local
+        ].to(device)
 
         # Validate connector rel positions for the connectors
         for i, cname in enumerate(connector_names):
@@ -1119,8 +1133,12 @@ def update_bodies_batch(
 
         # Use updated state tensors (with fixed masking applied) to recompute connector positions
         body_idxs_for_connectors = idxs[connector_indices_local]
-        conn_positions = physical_states.position[:, body_idxs_for_connectors, :]  # [B, Nc, 3]
-        conn_rotations = physical_states.quat[:, body_idxs_for_connectors, :]      # [B, Nc, 4]
+        conn_positions = physical_states.position[
+            :, body_idxs_for_connectors, :
+        ]  # [B, Nc, 3]
+        conn_rotations = physical_states.quat[
+            :, body_idxs_for_connectors, :
+        ]  # [B, Nc, 4]
 
         male_pos_new, female_pos_new = update_connector_def_pos_batch(
             conn_positions, conn_rotations, connector_rel, connector_names
@@ -1128,8 +1146,12 @@ def update_bodies_batch(
 
         # Write back into preallocated connector position tensors using stored indices
         # Note: connector_indices_from_name is stored per-batch element
-        male_indices_local = [i for i, n in enumerate(connector_names) if n.endswith("_male@connector")]
-        female_indices_local = [i for i, n in enumerate(connector_names) if n.endswith("_female@connector")]
+        male_indices_local = [
+            i for i, n in enumerate(connector_names) if n.endswith("_male@connector")
+        ]
+        female_indices_local = [
+            i for i, n in enumerate(connector_names) if n.endswith("_female@connector")
+        ]
 
         # Update male connector positions
         if male_indices_local:
@@ -1138,18 +1160,26 @@ def update_bodies_batch(
                 name_to_idx = physical_states[b].connector_indices_from_name
                 for j, local_i in enumerate(male_indices_local):
                     cname = connector_names[local_i]
-                    assert cname in name_to_idx, f"Connector {cname} not found in state mapping"
+                    assert cname in name_to_idx, (
+                        f"Connector {cname} not found in state mapping"
+                    )
                     dst_idx = name_to_idx[cname]
-                    physical_states.male_connector_positions[b, dst_idx, :] = male_pos_new[b, j, :]
+                    physical_states.male_connector_positions[b, dst_idx, :] = (
+                        male_pos_new[b, j, :]
+                    )
         # Update female connector positions
         if female_indices_local:
             for b in range(B):
                 name_to_idx = physical_states[b].connector_indices_from_name
                 for j, local_i in enumerate(female_indices_local):
                     cname = connector_names[local_i]
-                    assert cname in name_to_idx, f"Connector {cname} not found in state mapping"
+                    assert cname in name_to_idx, (
+                        f"Connector {cname} not found in state mapping"
+                    )
                     dst_idx = name_to_idx[cname]
-                    physical_states.female_connector_positions[b, dst_idx, :] = female_pos_new[b, j, :]
+                    physical_states.female_connector_positions[b, dst_idx, :] = (
+                        female_pos_new[b, j, :]
+                    )
 
     return physical_states
 
@@ -1211,18 +1241,22 @@ def register_fasteners_batch(
         physical_states.fasteners_length[:, i] = torch.tensor(
             length / 1000.0, dtype=torch.float32, device=device
         )
-    
+
     # Runtime guardrails to catch unit mistakes (e.g., mm accidentally stored as meters)
-    assert (physical_states.fasteners_diam > 0).all(), "Fastener diameters must be positive (meters)."
+    assert (physical_states.fasteners_diam > 0).all(), (
+        "Fastener diameters must be positive (meters)."
+    )
     # Typical fastener diameters are < 0.05 m (50 mm); use 0.1 m as a generous upper bound
-    assert (
-        physical_states.fasteners_diam.max() < 0.1
-    ), "Fastener diameters look too large; expected meters. Did you forget mm->m conversion?"
-    assert (physical_states.fasteners_length > 0).all(), "Fastener lengths must be positive (meters)."
+    assert physical_states.fasteners_diam.max() < 0.1, (
+        "Fastener diameters look too large; expected meters. Did you forget mm->m conversion?"
+    )
+    assert (physical_states.fasteners_length > 0).all(), (
+        "Fastener lengths must be positive (meters)."
+    )
     # Typical fastener lengths are < 0.25 m (250 mm); use 0.5 m as a generous upper bound
-    assert (
-        physical_states.fasteners_length.max() < 0.5
-    ), "Fastener lengths look too large; expected meters. Did you forget mm->m conversion?"
+    assert physical_states.fasteners_length.max() < 0.5, (
+        "Fastener lengths look too large; expected meters. Did you forget mm->m conversion?"
+    )
 
     assert physical_states.part_hole_batch is not None, (
         "Part hole batch must be set before registering fasteners."
@@ -1255,10 +1289,14 @@ def register_fasteners_batch(
         [fastener_init_hole_a, fastener_init_hole_b], dim=-1
     )
     empty = physical_states.fasteners_attached_to_hole == -1
-    physical_states.fasteners_attached_to_body = physical_states.part_hole_batch[
-        0, physical_states.fasteners_attached_to_hole
-    ]
-    physical_states.fasteners_attached_to_body[empty] = -1
+    physical_states.fasteners_attached_to_body = torch.full_like(
+        physical_states.fasteners_attached_to_hole, -1
+    )
+    physical_states.fasteners_attached_to_body[~empty] = (
+        physical_states.part_hole_batch[
+            0, physical_states.fasteners_attached_to_hole[~empty]
+        ]
+    )
 
     # Update fastener counts for connected bodies
     # Count how many fasteners are attached to each body for each batch
