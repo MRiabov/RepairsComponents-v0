@@ -12,7 +12,7 @@ from repairs_components.processing.translation import translate_genesis_to_pytho
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.geometry.connectors.models.europlug import Europlug
-from global_test_config import init_gs
+from tests.global_test_config import init_gs
 
 
 @pytest.fixture

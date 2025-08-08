@@ -99,7 +99,7 @@ def save_concurrent_scene_metadata(
         # note: graphs paths can now be recovered by get_graph_save_paths.
         "mesh_file_names": mesh_file_name_mapping,
         "electronics_indices": data.current_state.electronics_state[0].indices,
-        "mechanical_indices": data.current_state.physical_state[0].body_indices,
+        "mechanical_indices": data.current_state.physical_state.body_indices,
         "count_generated_envs": data.batch_dim,
         "env_setup_name": scene_setups[scene_id].__class__.__name__,
     }

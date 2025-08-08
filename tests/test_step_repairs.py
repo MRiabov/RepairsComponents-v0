@@ -3,7 +3,11 @@ import torch
 from repairs_components.geometry.fasteners import Fastener
 from repairs_components.processing.translation import update_hole_locs
 from repairs_components.training_utils.sim_state_global import RepairsSimState
-from repairs_components.logic.physical_state import PhysicalState
+from repairs_components.logic.physical_state import (
+    PhysicalState,
+    register_bodies_batch,
+    register_fasteners_batch,
+)
 from repairs_components.logic.electronics.electronics_state import ElectronicsState
 
 import repairs_sim_step as step_mod
@@ -21,7 +25,7 @@ from repairs_components.logic.tools.gripper import Gripper
 from genesis.engine.entities import RigidEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 import numpy as np
-from global_test_config import init_gs
+from tests.global_test_config import init_gs
 
 
 @pytest.fixture
@@ -167,27 +171,37 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
     hole_positions, hole_quats, hole_indices_batch = holes_for_two_parts
 
     fastener_data = Fastener(initial_hole_id_a=None)
+    standard_fastener_name = fastener_data.name
     # populate current sim state
     repairs_sim_state = RepairsSimState(1)
-    physical_state = repairs_sim_state.physical_state[0]
+    physical_state = repairs_sim_state.physical_state
 
     part_with_holes_1_pos = entities["part_with_holes_1@solid"].get_pos(0).squeeze(0)
     part_with_holes_2_pos = entities["part_with_holes_2@solid"].get_pos(0).squeeze(0)
 
     physical_state.register_fastener(fastener_data)
-    physical_state.register_body(
-        "part_with_holes_1@solid",
-        position=part_with_holes_1_pos,
-        rotation=entities["part_with_holes_1@solid"].get_quat(0).squeeze(0),
-        rot_as_quat=True,
-        _expect_unnormalized_coordinates=False,
+
+    register_fasteners_batch(
+        physical_state,
+        entities["0@fastener"].get_pos(0),
+        entities["0@fastener"].get_quat(0),
+        torch.tensor([-1]),
+        torch.tensor([-1]),
+        fastener_compound_names=standard_fastener_name,
     )
-    physical_state.register_body(
-        "part_with_holes_2@solid",
-        position=part_with_holes_2_pos,
-        rotation=entities["part_with_holes_2@solid"].get_quat(0).squeeze(0),
-        rot_as_quat=True,
-        _expect_unnormalized_coordinates=False,
+
+    physical_state = register_bodies_batch(
+        physical_state,
+        names=["part_with_holes_1@solid", "part_with_holes_2@solid"],
+        positions=torch.stack([part_with_holes_1_pos, part_with_holes_2_pos], dim=0),
+        rotations=torch.stack(
+            [
+                entities["part_with_holes_1@solid"].get_quat(0).squeeze(0),
+                entities["part_with_holes_2@solid"].get_quat(0).squeeze(0),
+            ],
+            dim=0,
+        ),
+        fixed=torch.tensor([False, False]),
     )
     # expected shape
     physical_state.hole_positions = hole_positions
@@ -196,7 +210,7 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
 
     # populate desired state
     desired_sim_state = RepairsSimState(1)
-    desired_physical_state = desired_sim_state.physical_state[0]
+    desired_physical_state = desired_sim_state.physical_state
     desired_part_with_holes_1_pos = part_with_holes_1_pos + torch.tensor(
         [0.0, 0.0, 0.5]
     )  # elevate 0.5m higher
@@ -234,12 +248,12 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
         fresh_scene_with_fastener_screwdriver_and_two_parts
     )
     fastener_entity = gs_entities["0@fastener"]
-    physical_state = repairs_sim_state.physical_state[0]
+    physical_state = repairs_sim_state.physical_state
     graph_device = physical_state.fasteners_attached_to_body.device
 
     screwdriver = Screwdriver(
         picked_up_fastener_name="0@fastener",
-        picked_up_fastener_tip_position=physical_state.hole_positions[0],
+        picked_up_fastener_tip_position=physical_state.hole_positions[0, 0],
     )  # mark as moved to closest hole.
     repairs_sim_state.tool_state[0].current_tool = screwdriver
     connected_part_id = physical_state.body_indices["part_with_holes_1@solid"]
@@ -258,10 +272,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     ).all(), "Fastener is expected to be marked as attached to a part"
     assert (
         fastener_entity.get_pos(0)
-        == repairs_sim_state.physical_state[0].hole_positions[0]
+        == repairs_sim_state.physical_state.hole_positions[0, 0]
     ).all(), "Fastener is expected to move to hole position"
     assert (
-        fastener_entity.get_quat(0) == repairs_sim_state.physical_state[0].hole_quats[0]
+        fastener_entity.get_quat(0) == repairs_sim_state.physical_state.hole_quats[0, 0]
     ).all(), "Fastener is expected to move to hole quat"
     # now, unscrew it. To make sim cheaper, simply assert that it runs.
     assert screwdriver.has_picked_up_fastener, (
@@ -292,10 +306,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
         fresh_scene_with_fastener_screwdriver_and_two_parts
     )
     fastener_entity = gs_entities["0@fastener"]
-    physical_state = repairs_sim_state.physical_state[0]
+    physical_state = repairs_sim_state.physical_state
     graph_device = physical_state.fasteners_attached_to_body.device
     screwdriver = Screwdriver(
-        picked_up_fastener_tip_position=physical_state.hole_positions[0],
+        picked_up_fastener_tip_position=physical_state.hole_positions[0, 0],
         picked_up_fastener_name="0@fastener",
     )
     repairs_sim_state.tool_state[0].current_tool = screwdriver
@@ -312,10 +326,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
         physical_state.fasteners_attached_to_body
         == torch.tensor([[connected_part_1_id, -1]], device=graph_device)
     ).all(), "Fastener is expected to be marked as attached to a part"
-    assert (fastener_entity.get_pos(0) == physical_state.hole_positions[0]).all(), (
+    assert (fastener_entity.get_pos(0) == physical_state.hole_positions[0, 0]).all(), (
         "Fastener is expected to move to hole position"
     )
-    assert (fastener_entity.get_quat(0) == physical_state.hole_quats[0]).all(), (
+    assert (fastener_entity.get_quat(0) == physical_state.hole_quats[0, 0]).all(), (
         "Fastener is expected to move to hole quat"
     )
     assert (
@@ -324,7 +338,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     ), "Fastener is not expected to be released after screwing in"
 
     # mark as moved to closest marked hole on second part
-    hole_pos_part_2 = physical_state.hole_positions[2]
+    hole_pos_part_2 = physical_state.hole_positions[0, 2]
     screwdriver.picked_up_fastener_tip_position = hole_pos_part_2
     actions = torch.zeros((1, 10))
     actions[:, 8] = 0.99  # screw in to attach second part
@@ -332,7 +346,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
         scene, gs_entities, repairs_sim_state, actions
     )
     assert (
-        repairs_sim_state.physical_state[0].fasteners_attached_to_body
+        repairs_sim_state.physical_state.fasteners_attached_to_body
         == torch.tensor(
             [[connected_part_1_id, connected_part_2_id]], device=graph_device
         )
@@ -351,7 +365,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
         scene, gs_entities, repairs_sim_state, actions
     )
     assert (
-        repairs_sim_state.physical_state[0].fasteners_attached_to_body
+        repairs_sim_state.physical_state.fasteners_attached_to_body
         == torch.tensor([[-1, -1]], device=graph_device)
     ).all(), "Fastener is expected to be marked as detached from both parts"
     # TODO: when genesis implements constraints checks, assert that fastener is not attached to a part
@@ -370,11 +384,11 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
         fresh_scene_with_fastener_screwdriver_and_two_parts
     )
     fastener_entity = gs_entities["0@fastener"]
-    physical_state = repairs_sim_state.physical_state[0]
+    physical_state = repairs_sim_state.physical_state
     graph_device = physical_state.fasteners_attached_to_body.device
     repairs_sim_state.tool_state[0].current_tool = Screwdriver(
         picked_up_fastener_name="0@fastener",
-        picked_up_fastener_tip_position=physical_state.hole_positions[0],
+        picked_up_fastener_tip_position=physical_state.hole_positions[0, 0],
     )
 
     connected_part_1_id = physical_state.body_indices["part_with_holes_1@solid"]
@@ -386,14 +400,14 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
         scene, gs_entities, repairs_sim_state, actions
     )
     assert (
-        repairs_sim_state.physical_state[0].fasteners_attached_to_body
+        repairs_sim_state.physical_state.fasteners_attached_to_body
         == torch.tensor([[connected_part_1_id, -1]], device=graph_device)
     ).all(), "Fastener is expected to be marked as attached to first part"
 
     # Now try to attach to second part with a large angle difference (90 degrees rotation)
 
     # Create a quaternion with 90-degree rotation around Z-axis from the original
-    original_quat = physical_state.hole_quats[2]
+    original_quat = physical_state.hole_quats[0, 2]
     # Create 90-degree rotation around Z-axis
     large_angle_rotation = euler_deg_to_quat_wxyz(torch.tensor([0, 0, 90]))
     # Convert to [w,x,y,z] format
@@ -414,7 +428,7 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
     repairs_sim_state.tool_state[
         0
     ].current_tool.picked_up_fastener_tip_position = physical_state.hole_positions[
-        2
+        0, 2
     ]  # move it to closest marked hole on second part
     repairs_sim_state.tool_state[
         0
@@ -433,7 +447,7 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
 
     # Assert that the fastener attachment state did not change (still only attached to first part)
     assert torch.equal(
-        repairs_sim_state.physical_state[0].fasteners_attached_to_body,
+        repairs_sim_state.physical_state.fasteners_attached_to_body,
         fasteners_attached_before,
     ), "Fastener attachment should not change when angle is too large"
 
@@ -590,9 +604,7 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
     fastener_entity.set_quat(fastener_initial_quat.unsqueeze(0))
 
     # Update fastener position in sim state
-    repairs_sim_state.physical_state[0].fasteners_pos = torch.tensor(
-        [[0.2, 0.0, 0.02]]
-    )
+    repairs_sim_state.physical_state.fasteners_pos[0] = torch.tensor([[0.2, 0.0, 0.02]])
 
     # Test 1: Pick up fastener (action[7] = 1.0 for pick up)
     actions = torch.zeros((1, 10))
@@ -687,12 +699,12 @@ def test_all_bodies_moved_to_desired_pos_results_in_success(
     untranslated_hole_positions, untranslated_hole_quats, hole_indices_batch = (
         holes_for_two_parts
     )
-    for body_name, body_idx in desired_sim_state.physical_state[0].body_indices.items():
+    for body_name, body_idx in desired_sim_state.physical_state.body_indices.items():
         gs_entities[body_name].set_pos(
-            desired_sim_state.physical_state[0].position[body_idx].unsqueeze(0)
+            desired_sim_state.physical_state.position[0, body_idx].unsqueeze(0)
         )
         gs_entities[body_name].set_quat(
-            desired_sim_state.physical_state[0].quat[body_idx].unsqueeze(0)
+            desired_sim_state.physical_state.quat[0, body_idx].unsqueeze(0)
         )
 
     success, total_diff_left, _, _ = step_repairs(

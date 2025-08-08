@@ -103,7 +103,7 @@ class RewardHistory:
                 if reward_type == RewardType.FASTENER_INSERTION:
                     fastener_id, body_id = self.reward_check_data[current_timestep]
                     if scene_data.current_state.physical_state[
-                        env_id
+                        env_id  # FIXME: check_if_fastener_inserted does not exist/is broken.
                     ].check_if_fastener_inserted(body_id, fastener_id):
                         reward_tensor[env_id] += RewardType.FASTENER_INSERTION.value[1]
 
@@ -113,12 +113,10 @@ class RewardHistory:
                         ].append((body_id, fastener_id))
                 if reward_type == RewardType.PART_PLACEMENT:
                     part_id = self.reward_check_data[current_timestep]
-                    if scene_data.current_state.physical_state[
-                        env_id
-                    ].check_if_part_placed(
+                    if scene_data.current_state.physical_state.check_if_part_in_desired_pos(
                         part_id,
-                        scene_data.current_state.physical_state[env_id],
-                        scene_data.desired_state.physical_state[env_id],
+                        scene_data.current_state.physical_state,
+                        scene_data.desired_state.physical_state,
                     ):
                         reward_tensor[env_id] += RewardType.PART_PLACEMENT.value[1]
 

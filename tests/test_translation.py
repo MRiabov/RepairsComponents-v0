@@ -18,7 +18,7 @@ from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.gym_env import RepairsEnv
 import pytest
 from pathlib import Path
-from global_test_config import init_gs
+from tests.global_test_config import init_gs
 
 
 @pytest.fixture

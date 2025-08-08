@@ -14,7 +14,7 @@ from repairs_components.geometry.fasteners import (
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import attach_tool_to_arm, detach_tool_from_arm
 from repairs_components.processing.geom_utils import get_connector_pos
-from global_test_config import init_gs
+from tests.global_test_config import init_gs
 
 
 @pytest.fixture(scope="module")

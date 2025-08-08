@@ -290,9 +290,9 @@ def initialize_and_build_scene(
     tooling_stand_aabb = _tooling_stand.get_AABB()
     tooling_stand_size = tooling_stand_aabb[:, 1] - tooling_stand_aabb[:, 0]
 
-    print(
-        f"Debug: screwdriver size: {screwdriver_size}, pos: {screwdriver.get_pos()}, tooling_stand size: {tooling_stand_size}, pos: {_tooling_stand.get_pos()}"
-    )
+    # print(
+    #     f"Debug: screwdriver size: {screwdriver_size}, pos: {screwdriver.get_pos()}, tooling_stand size: {tooling_stand_size}, pos: {_tooling_stand.get_pos()}"
+    # )
 
     # ===== Control Parameters =====
     # Set PD control gains (tuned for Franka Emika Panda)
@@ -387,24 +387,13 @@ def move_entities_to_pos(
     """Move parts to their necessary positions. Can be used both in reset and init."""
     if env_idx is None:
         env_idx = torch.arange(len(starting_sim_state.physical_state))
-    # batch collect all positions (mm to meters) across environments
-    all_positions = (
-        torch.stack(
-            [
-                torch.tensor(s.position, device=env_idx.device)
-                for s in starting_sim_state.physical_state
-            ],
-            dim=0,
-        )
-        / 1000
-    )
-
     # set positions for each entity in batch
-    for gs_entity_name, entity_idx in starting_sim_state.physical_state[
-        env_idx[0]
-    ].body_indices.items():
+    for (
+        gs_entity_name,
+        entity_idx,
+    ) in starting_sim_state.physical_state.body_indices.items():
         entity = gs_entities[gs_entity_name]
-        entity_pos = all_positions[env_idx, entity_idx]
+        entity_pos = starting_sim_state.physical_state.position[env_idx, entity_idx]
         # No need to move because already centered
         entity.set_pos(entity_pos, envs_idx=env_idx)
 

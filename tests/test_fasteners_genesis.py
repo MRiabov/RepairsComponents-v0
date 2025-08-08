@@ -17,7 +17,7 @@ from repairs_components.geometry.fasteners import (
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from tests.test_tool_genesis import move_franka_to_pos
 from genesis.engine.entities import RigidEntity
-from global_test_config import init_gs
+from tests.global_test_config import init_gs
 
 
 @pytest.fixture(scope="module")

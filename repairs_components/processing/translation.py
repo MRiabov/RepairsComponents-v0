@@ -54,22 +54,22 @@ def translate_state_to_genesis_scene(
         k: v for k, v in mesh_file_names.items() if not k.endswith("@fastener")
     }
     assert (
-        len(val_mesh_file_names) == len(sim_state.physical_state[0].body_indices)
-    ), f"""Number of meshes ({len(val_mesh_file_names)}) does not match number of bodies ({len(sim_state.physical_state[0].body_indices)}).
+        len(val_mesh_file_names) == len(sim_state.physical_state.body_indices)
+    ), f"""Number of meshes ({len(val_mesh_file_names)}) does not match number of bodies ({len(sim_state.physical_state.body_indices)}).
     Mesh names: {val_mesh_file_names.keys()}
-    Body names: {sim_state.physical_state[0].body_indices.keys()}
+    Body names: {sim_state.physical_state.body_indices.keys()}
     Original (unfiltered) mesh names: {mesh_file_names.keys()}"""
     assert set(val_mesh_file_names.keys()) == set(
-        sim_state.physical_state[0].body_indices.keys()
+        sim_state.physical_state.body_indices.keys()
     ), f"""Mesh names do not match body indices.
     Mesh names: {val_mesh_file_names.keys()}
-    Body names: {sim_state.physical_state[0].body_indices.keys()}
+    Body names: {sim_state.physical_state.body_indices.keys()}
     Original (unfiltered) mesh names: {mesh_file_names.keys()}"""
 
     gs_entities: dict[str, RigidEntity] = {}
 
-    physical_state = sim_state.physical_state[0]
-    electronics_state = sim_state.physical_state[0]
+    physical_state = sim_state.physical_state
+    electronics_state = sim_state.electronics_state[0]
 
     # translate each child into genesis entities
     for body_name, body_idx in physical_state.body_indices.items():
@@ -211,13 +211,8 @@ def translate_genesis_to_python(  # translate to sim state, really.
             fastener_pos = torch.tensor(entity.get_pos(env_idx), device=device)
             fastener_quat = torch.tensor(entity.get_quat(env_idx), device=device)
             fastener_id = int(full_name.split("@")[0])  # fastener name is "1@fastener"
-            for env_id in range(n_envs):
-                sim_state.physical_state[env_id].fasteners_pos[fastener_id] = (
-                    fastener_pos[env_id]
-                )
-                sim_state.physical_state[env_id].fasteners_quat[fastener_id] = (
-                    fastener_quat[env_id]
-                )
+            sim_state.physical_state.fasteners_pos[:, fastener_id] = fastener_pos
+            sim_state.physical_state.fasteners_quat[:, fastener_id] = fastener_quat
 
     # handle picked up fastener (tip)
     # fastener_tip_pos
