@@ -147,8 +147,9 @@ class TestRegisterFastenersBatch:
         )
         
         # Verify fastener parameters are set correctly
-        expected_diam_0, expected_length_0 = 3.0, 10.0
-        expected_diam_1, expected_length_1 = 4.0, 12.0
+        # get_fastener_singleton_name uses millimeters; PhysicalState stores values in meters
+        expected_diam_0, expected_length_0 = 3.0 / 1000.0, 10.0 / 1000.0
+        expected_diam_1, expected_length_1 = 4.0 / 1000.0, 12.0 / 1000.0
         
         assert torch.allclose(result_state.fasteners_diam[0, 0], torch.tensor(expected_diam_0))
         assert torch.allclose(result_state.fasteners_length[0, 0], torch.tensor(expected_length_0))

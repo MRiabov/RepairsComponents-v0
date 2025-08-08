@@ -173,7 +173,8 @@ def test_translate_compound_to_sim_state(test_env_geom):
     assert phys_state.hole_positions.allclose(expected_hole_pos_single.unsqueeze(0))
     assert phys_state.part_hole_batch == torch.tensor([[holed_body_idx]])
     assert torch.allclose(
-        phys_state.fasteners_diam, torch.tensor([5.0 / 1000])  # default Fastener diameter
+        phys_state.fasteners_diam,
+        torch.tensor([5.0 / 1000]),  # default Fastener diameter
     )
 
 
@@ -244,8 +245,6 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
         phys_state.fasteners_diam,
         torch.tensor([5.0 / 1000]).expand(batch_dim, -1),  # default diameter
     )
-
-
 
 
 def test_get_starting_part_holes_origin_and_shift():

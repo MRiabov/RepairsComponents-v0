@@ -120,7 +120,7 @@ def translate_state_to_genesis_scene(
         fastener_h = sim_state.physical_state.fasteners_length[0, fastener_id]
 
         fastener_name = get_fastener_singleton_name(
-            float(fastener_d), float(fastener_h)
+            float(fastener_d * 1000), float(fastener_h * 1000)
         )
         fastener_path = mesh_file_names[fastener_name]
 

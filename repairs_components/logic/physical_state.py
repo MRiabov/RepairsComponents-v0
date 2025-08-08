@@ -95,11 +95,11 @@ class PhysicalState(TensorClass):
     fasteners_diam: torch.Tensor = field(
         default_factory=lambda: torch.empty((0,), dtype=torch.float32)
     )
-    """Fastener diameters [num_fasteners]"""
+    """Fastener diameters in meters [num_fasteners]"""
     fasteners_length: torch.Tensor = field(
         default_factory=lambda: torch.empty((0,), dtype=torch.float32)
     )
-    """Fastener lengths [num_fasteners]"""
+    """Fastener lengths in meters [num_fasteners]"""
     # TODO encode mass, and possibly velocity.
     # note: fasteners_inserted_into_holes is not meant to be exported. for internal ref in screw in logic only.
 
@@ -1075,6 +1075,18 @@ def register_fasteners_batch(
         physical_states.fasteners_length[:, i] = torch.tensor(
             length / 1000.0, dtype=torch.float32, device=device
         )
+    
+    # Runtime guardrails to catch unit mistakes (e.g., mm accidentally stored as meters)
+    assert (physical_states.fasteners_diam > 0).all(), "Fastener diameters must be positive (meters)."
+    # Typical fastener diameters are < 0.05 m (50 mm); use 0.1 m as a generous upper bound
+    assert (
+        physical_states.fasteners_diam.max() < 0.1
+    ), "Fastener diameters look too large; expected meters. Did you forget mm->m conversion?"
+    assert (physical_states.fasteners_length > 0).all(), "Fastener lengths must be positive (meters)."
+    # Typical fastener lengths are < 0.25 m (250 mm); use 0.5 m as a generous upper bound
+    assert (
+        physical_states.fasteners_length.max() < 0.5
+    ), "Fastener lengths look too large; expected meters. Did you forget mm->m conversion?"
 
     assert physical_states.part_hole_batch is not None, (
         "Part hole batch must be set before registering fasteners."
