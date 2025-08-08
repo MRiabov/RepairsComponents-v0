@@ -32,6 +32,7 @@ from repairs_components.logic.physical_state import (
     register_bodies_batch,
     register_fasteners_batch,
     compound_pos_to_sim_pos,
+    update_bodies_batch,
 )
 from repairs_components.geometry.b123d_utils import fastener_hole_info_from_joint_name
 
@@ -46,7 +47,7 @@ def translate_state_to_genesis_scene(
     "Translate the first state to genesis scene (unbatched - this is only to populate scene.)"
     "Essentially, populate the scene with meshes."
     # assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
-    assert len(sim_state.physical_state[0].body_indices) > 0, (
+    assert len(sim_state.physical_state.body_indices) > 0, (
         "Translated assembly is empty."
     )
     assert len(mesh_file_names) > 0, "No meshes provided."
@@ -173,36 +174,56 @@ def translate_genesis_to_python(  # translate to sim state, really.
         for ts in sim_state.tool_state
     ), "picked_up_fastener_name must end with @fastener"
 
-    # loop entities and dispatch by suffix
+    # loop entities, gather body transforms for batched update; update fasteners directly
+    body_names: list[str] = []
+    physical_device = sim_state.physical_state.device
+    # Preallocate using existing PhysicalState shapes to avoid stacking
+    positions = torch.zeros_like(sim_state.physical_state.position)  # [B, N, 3]
+    rotations = torch.zeros_like(sim_state.physical_state.quat)  # [B, N, 4]
+    connector_rel = torch.full(
+        (positions.shape[1], 3),
+        float("nan"),
+        dtype=positions.dtype,
+        device=physical_device,
+    )  # [N, 3]
+    fill_idx = 0
+
     for full_name, entity in gs_entities.items():
         part_name, part_type = full_name.split("@")
         if part_type in ("solid", "fixed_solid", "connector"):
-            # TODO: I haven't explicitly handled fixed solids, but it may be unnecessary(?)
-            # hole_pos = get_fastener_hole_positions(entity, device=device)
-            # fastener_hole_positions[full_name] = hole_pos
-            pos_all = entity.get_pos(env_idx)  # fixme: 0,0,0 on pos?
-            quat_all = entity.get_quat(env_idx)
-            for env_id in range(n_envs):
-                relative_connector_pos = None
-                if part_type == "connector":
-                    male = part_name.endswith(
-                        "_male"
-                    )  # dev note: _male, not male. is passes for female otherwise.
-                    connector = Connector.from_name(part_name)
-                    if male:
-                        relative_connector_pos = (
-                            connector.connector_pos_relative_to_center_male
-                        )
-                    else:
-                        relative_connector_pos = (
-                            connector.connector_pos_relative_to_center_female
-                        )
-                    relative_connector_pos = (
-                        torch.tensor(relative_connector_pos, device=device) / 1000
+            # Collect batched positions/rotations across environments
+            pos_all = torch.as_tensor(
+                entity.get_pos(env_idx), device=physical_device, dtype=positions.dtype
+            )  # [B,3]
+            quat_all = torch.as_tensor(
+                entity.get_quat(env_idx), device=physical_device, dtype=rotations.dtype
+            )  # [B,4]
+
+            # Fill into preallocated tensors
+            body_names.append(full_name)
+            positions[:, fill_idx, :] = pos_all
+            rotations[:, fill_idx, :] = quat_all
+
+            # Connector relative position or NaNs for non-connectors
+            if part_type == "connector":
+                male = part_name.endswith(
+                    "_male"
+                )  # dev note: "_male", not "male". is passes for female otherwise.
+                connector = Connector.from_name(part_name)
+                if male:
+                    rel = torch.as_tensor(
+                        connector.connector_pos_relative_to_center_male / 1000,
+                        dtype=positions.dtype,
+                        device=physical_device,
                     )
-                sim_state.physical_state[env_id].update_body(
-                    full_name, pos_all[env_id], quat_all[env_id], relative_connector_pos
-                )
+                else:
+                    rel = torch.as_tensor(
+                        connector.connector_pos_relative_to_center_female / 1000,
+                        dtype=positions.dtype,
+                        device=physical_device,
+                    )
+                connector_rel[fill_idx] = rel
+            fill_idx += 1
 
         elif part_type == "control":
             continue  # skip.
@@ -213,6 +234,18 @@ def translate_genesis_to_python(  # translate to sim state, really.
             fastener_id = int(full_name.split("@")[0])  # fastener name is "1@fastener"
             sim_state.physical_state.fasteners_pos[:, fastener_id] = fastener_pos
             sim_state.physical_state.fasteners_quat[:, fastener_id] = fastener_quat
+
+    # Perform a single batched update for all bodies
+    if body_names:
+        assert fill_idx == positions.shape[1], (
+            "Number of filled bodies does not match allocated space"
+        )
+        positions = positions[:, :fill_idx]
+        rotations = rotations[:, :fill_idx]
+        connector_rel = connector_rel[:fill_idx]
+        sim_state.physical_state = update_bodies_batch(
+            sim_state.physical_state, body_names, positions, rotations, connector_rel
+        )
 
     # handle picked up fastener (tip)
     # fastener_tip_pos
