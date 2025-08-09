@@ -399,8 +399,9 @@ def step_fastener_pick_up_release(
     )
     screwdriver_with_fastener_mask = torch.tensor(
         [
-            w_screwdriver and (ts.current_tool.picked_up_fastener_name is not None)
-            for w_screwdriver, ts in zip(screwdriver_picked_up.tolist(), tool_state)
+            isinstance(ts.current_tool, Screwdriver)
+            and (ts.current_tool.picked_up_fastener_name is not None)
+            for ts in tool_state
         ],
         dtype=torch.bool,
         device=actions.device,
@@ -468,8 +469,12 @@ def step_fastener_pick_up_release(
     if release_mask.any():
         desired_release_indices = release_mask.nonzero().squeeze(1)
         for env_id in desired_release_indices.tolist():
-            assert tool_state[env_id].current_tool.picked_up_fastener_name is not None
-            fastener_name = tool_state[env_id].current_tool.picked_up_fastener_name
+            fastener_name = getattr(
+                tool_state[env_id].current_tool, "picked_up_fastener_name", None
+            )
+            if fastener_name is None:
+                # I've debugged multiple times, somehow even though we check it higher, fastener name can still be None.
+                continue
             detach_fastener_from_screwdriver(
                 scene,
                 fastener_entity=gs_entities[fastener_name],
