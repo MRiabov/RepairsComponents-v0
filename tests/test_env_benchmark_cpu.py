@@ -215,6 +215,7 @@ def test_env_benchmark_cpu():
     # Expect at least 500 FPS total on CPU
     assert fps >= 500.0, f"Expected >= 500 FPS on CPU, got {fps:.1f}"
 
-#NOTE: my code runs at 27.54 FPS on 64 envs (0.42 FPS per env)
+
+# NOTE: my code runs at 27.54 FPS on 64 envs (0.42 FPS per env)
 if __name__ == "__main__":
     test_env_benchmark_cpu()

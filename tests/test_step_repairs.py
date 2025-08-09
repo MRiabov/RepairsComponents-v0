@@ -428,7 +428,8 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
 
 
 def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_angle(
-    fresh_scene_with_fastener_screwdriver_and_two_parts, untranslated_holes_for_two_parts
+    fresh_scene_with_fastener_screwdriver_and_two_parts,
+    untranslated_holes_for_two_parts,
 ):
     """When one part is already connected, and the angle is too large, it should not screw in."""
     from repairs_components.processing.geom_utils import (

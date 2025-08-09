@@ -212,7 +212,7 @@ def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
         # For TensorClass, update the specific batch indices
         old_state.fluid_state[old_id] = new_state.fluid_state[new_id]
         old_state.tool_state[old_id] = new_state.tool_state[new_id]
-    #batch update
+    # batch update
     old_state.physical_state[old_idx] = new_state.physical_state
 
     return old_state

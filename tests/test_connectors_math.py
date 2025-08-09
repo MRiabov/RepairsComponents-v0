@@ -24,14 +24,18 @@ def test_single_invalid_connection():
 
 
 def test_multiple_connections():
-    male = torch.tensor([
-        [0.0, 0.0, 0.0],  # m_idx=0
-        [5.0, 0.0, 0.0],  # m_idx=1
-    ])
-    female = torch.tensor([
-        [0.5, 0.0, 0.0],   # f_idx=0, close to m_idx=0
-        [10.0, 0.0, 0.0],  # f_idx=1, too far from both
-    ])
+    male = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],  # m_idx=0
+            [5.0, 0.0, 0.0],  # m_idx=1
+        ]
+    )
+    female = torch.tensor(
+        [
+            [0.5, 0.0, 0.0],  # f_idx=0, close to m_idx=0
+            [10.0, 0.0, 0.0],  # f_idx=1, too far from both
+        ]
+    )
     result = check_connections(male, female, connection_threshold=2.0)
     expected = torch.tensor([[0, 0]])  # only m_idx=0 connects to f_idx=0
     assert torch.equal(result, expected)
@@ -39,14 +43,18 @@ def test_multiple_connections():
 
 def test_batch_connections():
     # Test multiple male and female connectors
-    male = torch.tensor([
-        [0.0, 0.0, 0.0],   # m_idx=0
-        [10.0, 0.0, 0.0],  # m_idx=1
-    ])
-    female = torch.tensor([
-        [1.0, 0.0, 0.0],   # f_idx=0, close to m_idx=0
-        [50.0, 0.0, 0.0],  # f_idx=1, too far from both
-    ])
+    male = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],  # m_idx=0
+            [10.0, 0.0, 0.0],  # m_idx=1
+        ]
+    )
+    female = torch.tensor(
+        [
+            [1.0, 0.0, 0.0],  # f_idx=0, close to m_idx=0
+            [50.0, 0.0, 0.0],  # f_idx=1, too far from both
+        ]
+    )
     result = check_connections(male, female, connection_threshold=2.0)
     expected = torch.tensor([[0, 0]])  # only m_idx=0 connects to f_idx=0
     assert torch.equal(result, expected)
@@ -78,14 +86,18 @@ def test_only_male_or_female():
 
 
 def test_multiple_matches_per_batch():
-    male = torch.tensor([
-        [0.0, 0.0, 0.0],  # m_idx=0
-        [1.0, 0.0, 0.0],  # m_idx=1
-    ])
-    female = torch.tensor([
-        [0.5, 0.0, 0.0],  # f_idx=0, ~0.5 from both males
-        [2.0, 0.0, 0.0],  # f_idx=1, ~1.0 from m_idx=1
-    ])
+    male = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],  # m_idx=0
+            [1.0, 0.0, 0.0],  # m_idx=1
+        ]
+    )
+    female = torch.tensor(
+        [
+            [0.5, 0.0, 0.0],  # f_idx=0, ~0.5 from both males
+            [2.0, 0.0, 0.0],  # f_idx=1, ~1.0 from m_idx=1
+        ]
+    )
     result = check_connections(male, female, connection_threshold=1.5)
     # Expected connections: (m0,f0), (m1,f0), (m1,f1)
     expected_connections = {(0, 0), (1, 0), (1, 1)}
