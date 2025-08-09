@@ -14,7 +14,7 @@ from repairs_components.geometry.fasteners import (
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import attach_tool_to_arm, detach_tool_from_arm
 from repairs_components.processing.geom_utils import get_connector_pos
-from tests.global_test_config import init_gs
+from tests.global_test_config import init_gs, base_data_dir
 
 
 @pytest.fixture(scope="module")
@@ -30,9 +30,7 @@ def scene_franka_and_two_cubes(init_gs):
         show_viewer=False,
         profiling_options=gs.options.ProfilingOptions(show_FPS=False),
     )
-    plane = scene.add_entity(
-        gs.morphs.Plane(),
-    )
+    plane = scene.add_entity(gs.morphs.Plane())
     # "tool cube" and "fastener cube" as stubs for real geometry. Functionally the same.
     tool_cube: RigidEntity = scene.add_entity(
         gs.morphs.Box(
@@ -146,12 +144,12 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     print("end_effector.get_quat(): ", end_effector.get_quat(0))
 
     # tested func.
-    attach_tool_to_arm(scene, tool_cube, franka, screwdriver, torch.tensor([0]))
+    attach_tool_to_arm(scene, tool_cube, end_effector, screwdriver, torch.tensor([0]))
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
 
     assert torch.isclose(
-        tool_cube.get_pos(),
+        tool_cube.get_pos(0),
         torch.tensor([[0.65, 0.0, 0.5 - screwdriver.tool_grip_position()[2]]]),
         atol=0.05,
     ).all(), (
@@ -198,7 +196,7 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     print("end_effector.get_quat(): ", end_effector.get_quat())
 
     # attach tool to arm
-    attach_tool_to_arm(scene, tool_cube, franka, screwdriver, torch.tensor([0]))
+    attach_tool_to_arm(scene, tool_cube, end_effector, screwdriver, torch.tensor([0]))
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
 
@@ -230,7 +228,7 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
 
     # detach tool from arm
     detach_tool_from_arm(
-        scene, tool_cube, franka, entities, [screwdriver], torch.tensor([0])
+        scene, tool_cube, end_effector, entities, [screwdriver], torch.tensor([0])
     )
     for i in range(100):
         scene.step()
@@ -240,6 +238,9 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     ).all(), f"Expected the tool_cube to fall, got Z pos {tool_cube.get_pos()[2]}"
 
 
+@pytest.mark.xfail(
+    "Assertions are incorrect until get_weld_constraints is available in Genesis API."
+)
 def test_attach_and_detach_tool_to_arm_with_fastener(
     scene_franka_and_two_cubes, fingers_dof
 ):
@@ -266,7 +267,7 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
     print("end_effector.get_quat(): ", end_effector.get_quat())
 
     # attach tool to arm
-    attach_tool_to_arm(scene, tool_cube, franka, screwdriver, torch.tensor([0]))
+    attach_tool_to_arm(scene, tool_cube, end_effector, screwdriver, torch.tensor([0]))
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
 
@@ -353,11 +354,12 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
 
     # detach tool from arm
     detach_tool_from_arm(
-        scene, tool_cube, franka, entities, [screwdriver], torch.tensor([0])
+        scene, tool_cube, end_effector, entities, [screwdriver], torch.tensor([0])
     )
     assert not screwdriver.has_picked_up_fastener
     assert screwdriver.picked_up_fastener_name is None
     assert screwdriver.picked_up_fastener_tip_position is None
+    assert screwdriver.picked_up_fastener_quat is None
 
     for i in range(200):
         scene.step()
