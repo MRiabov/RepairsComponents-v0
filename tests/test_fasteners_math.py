@@ -14,7 +14,7 @@ def test_simple_match_within_distance():
     # for batch of 1, with two holes, both of which in the first part, test that one close hole is selected.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])  # [B,3]
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04], [0.2, 0.0, 0.0]]])  # [B,H,3]
-    part_hole_batch = torch.tensor([0, 0])  # [H]
+    part_hole_batch = torch.tensor([[0, 0]])  # [H]
 
     part_idx, hole_idx = check_fastener_possible_insertion(
         tip_pos,
@@ -33,7 +33,7 @@ def test_no_hole_within_distance():
     # for batch of 1, with two holes, both of which in the first part, test that all are too far.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.1, 0.0, 0.0], [0.2, 0.0, 0.0]]])
-    part_hole_batch = torch.tensor([0, 0])
+    part_hole_batch = torch.tensor([[0, 0]])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
         tip_pos,
@@ -54,7 +54,7 @@ def test_batch():
     part_hole_positions = torch.tensor(
         [[[0.0, 0.0, 0.04], [0.2, 0.0, 0.0]], [[0.2, 0.0, 0.0], [0.1, 0.0, 0.03]]]
     )
-    hole_batch = torch.tensor([0, 1])
+    hole_batch = torch.tensor([[0, 1], [0, 1]])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
         tip_pos,
@@ -73,9 +73,11 @@ def test_orientation_mask_rejects():
     # for batch of 1, with one hole, test that the hole is rejected if it is not within angle threshold.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04]]])
-    part_hole_batch = torch.tensor([0])
+    part_hole_batch = torch.tensor([[0]])
     fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
-    hole_quats = torch.tensor([[[0.0, 1.0, 0.0, 0.0]]])  # 180° around x
+    hole_quats = torch.tensor(
+        [[[0.0, 1.0, 0.0, 0.0]]]
+    )  # 180° around x, in WXYZ convention
 
     part_idx, hole_idx = check_fastener_possible_insertion(
         tip_pos,
@@ -96,7 +98,7 @@ def test_orientation_mask_accepts():
     # for batch of 1, with one hole, test that the hole is accepted if it is within angle threshold.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04]]])
-    part_hole_batch = torch.tensor([0])
+    part_hole_batch = torch.tensor([[0]])
     fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
     hole_quats = torch.tensor([[[0.9848, 0.0, 0.1736, 0.0]]])  # ~10° around y
 
@@ -117,7 +119,7 @@ def test_ignore_part_index_masks():
     # for batch of 1, with two holes, test that the hole in the ignored part is not selected.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04], [0.2, 0.0, 0.0]]])
-    part_hole_batch = torch.tensor([0, 0])
+    part_hole_batch = torch.tensor([[0, 0]])
     ignore_part_idx = torch.tensor([0])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
@@ -137,7 +139,7 @@ def test_ignore_part_index_masks():
 def test_ignore_part_index_does_not_mask():
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04], [0.2, 0.0, 0.0]]])
-    part_hole_batch = torch.tensor([0, 0])
+    part_hole_batch = torch.tensor([[0, 0]])
     ignore_part_idx = torch.tensor([-1])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
@@ -156,7 +158,7 @@ def test_distance_tie_selects_first():
     # for batch of 1, with two holes, test that the first hole is selected if they are at the same distance.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04], [0.0, 0.0, -0.04]]])
-    part_hole_batch = torch.tensor([0, 0])
+    part_hole_batch = torch.tensor([[0, 0]])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
         tip_pos,
@@ -267,10 +269,10 @@ def test_recalculate_fastener_pos_with_offset_to_hole_partial_insertion_returns_
         top_hole_depth,
     )
     # With identity quaternion, get_connector_pos applies no rotation, just addition
-    expected_offset = top_hole_depth[0]  # get_connector_pos no longer negates
+    expected_offset = (fastener_length[0] - top_hole_depth[0])  # remaining length
     assert torch.isclose(
         fastener_pos_blind, hole_pos + torch.tensor([0.0, 0.0, expected_offset])
-    ).all(), "fastener_pos should be hole_pos + top_hole_depth"
+    ).all(), "fastener_pos should be hole_pos + (fastener_length - top_hole_depth)"
     # through hole (should be equal.)
     hole_is_through = torch.tensor([True])
     fastener_pos_through = recalculate_fastener_pos_with_offset_to_hole(
@@ -282,11 +284,11 @@ def test_recalculate_fastener_pos_with_offset_to_hole_partial_insertion_returns_
         top_hole_depth,
     )
     # Through hole with partial insertion should also use get_connector_pos
-    expected_offset = top_hole_depth[0]  # get_connector_pos no longer negates
+    expected_offset = (fastener_length[0] - top_hole_depth[0])
     assert torch.isclose(
         fastener_pos_through,
         hole_pos + torch.tensor([0.0, 0.0, expected_offset]),
-    ).all(), "fastener_pos should be hole_pos + top_hole_depth (same as blind case)"
+    ).all(), "fastener_pos should be hole_pos + (fastener_length - top_hole_depth) (same as blind case)"
 
 
 def test_recalculate_fastener_pos_with_offset_to_hole_with_quaternion():
@@ -343,11 +345,11 @@ def test_recalculate_fastener_pos_with_offset_to_hole_with_quaternion():
         fastener_length,
         top_hole_depth,
     )
-    # Expected: get_connector_pos(hole_pos, hole_quat, [0, 0, top_hole_depth])
-    # get_connector_pos no longer negates input: [0, 0, 7] stays [0, 0, 7]
-    # Then applies 90° Y rotation: [0, 0, 7] -> [7, 0, 0] (Z becomes X)
-    # Then adds to hole_pos: [1, 2, 3] + [7, 0, 0] = [8, 2, 3]
-    expected_partial = torch.tensor([[8.0, 2.0, 3.0]])
+    # Expected: get_connector_pos(hole_pos, hole_quat, [0, 0, fastener_length - top_hole_depth])
+    # [0, 0, 8] stays [0, 0, 8] before rotation
+    # 90° Y rotation: [0, 0, 8] -> [8, 0, 0] (Z becomes X)
+    # Then adds to hole_pos: [1, 2, 3] + [8, 0, 0] = [9, 2, 3]
+    expected_partial = torch.tensor([[9.0, 2.0, 3.0]])
     assert torch.isclose(fastener_pos_partial, expected_partial, atol=1e-3).all(), (
         f"Partial insertion should apply quaternion transformation. Got {fastener_pos_partial}, expected {expected_partial}"
     )
