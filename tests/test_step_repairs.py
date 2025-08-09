@@ -132,41 +132,46 @@ def _built_scene_with_fastener_screwdriver_and_two_parts(init_gs):
 
 
 @pytest.fixture
-def holes_for_two_parts():
+def untranslated_holes_for_two_parts():
     # holes on top of the cubes.
     num_holes_first_part = 2
     num_holes_second_part = 2
-    total_holes = num_holes_first_part + num_holes_second_part
+    total_num_holes = num_holes_first_part + num_holes_second_part
     starting_hole_positions = torch.tensor(
-        [[[0.2, 0.0, 0.06], [0.2, 0.0, 0.0], [0, 0.2, 0.06], [0.2, 0.0, 0.0]]]
-    )  # [B, H, 3]
+        [
+            [0.2, 0.0, 0.06],
+            [0.2, 0.0, 0.0],
+            [0.0, 0.2, 0.06],
+            [0.2, 0.0, 0.0],
+        ]
+    )  # [H, 3]
     starting_hole_quats = torch.tensor(
         [
-            [
-                [1.0, 0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0, 0.0],
-                [1.0, 0.0, 0.0, 0.0],
-            ]
+            [1.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0],
         ]
-    )  # [B, H, 4]
+    )  # [H, 4]
     hole_indices_batch = torch.tensor(
-        [[0] * num_holes_first_part + [1] * num_holes_second_part]
-    )  # [B, H]
+        [0] * num_holes_first_part + [1] * num_holes_second_part
+    )  # [H]
 
     # unsure # setting these uncarefully may break something in tests
     hole_depths = torch.tensor(
-        [[0.04] * num_holes_first_part + [0.04] * num_holes_second_part]
-    )  # [B, H]
+        [0.04] * num_holes_first_part + [0.04] * num_holes_second_part
+    )  # [H]
     hole_is_through = torch.tensor(
-        [[True] * num_holes_first_part + [True] * num_holes_second_part]
-    )  # [B, H]
+        [True] * num_holes_first_part + [True] * num_holes_second_part
+    )  # [H]
     # /unsure
     assert (
-        (1, total_holes)  # add batch dim.
-        == hole_indices_batch.shape
-        == starting_hole_quats.shape[:2]
-        == starting_hole_positions.shape[:2]
+        total_num_holes
+        == hole_indices_batch.shape[0]
+        == starting_hole_quats.shape[0]
+        == starting_hole_positions.shape[0]
+        == hole_depths.shape[0]
+        == hole_is_through.shape[0]
     ), "Test setup failure - hole count mismatch"
     return (
         starting_hole_positions,
@@ -180,14 +185,18 @@ def holes_for_two_parts():
 @pytest.fixture(scope="function")
 def fresh_scene_with_fastener_screwdriver_and_two_parts(
     _built_scene_with_fastener_screwdriver_and_two_parts,
-    holes_for_two_parts,
+    untranslated_holes_for_two_parts,
 ):
     "Reset the scene."
     scene, entities = _built_scene_with_fastener_screwdriver_and_two_parts
     scene.reset()
-    hole_positions, hole_quats, hole_indices_batch, hole_depths, hole_is_through = (
-        holes_for_two_parts
-    )
+    (
+        untranslated_hole_positions,
+        untranslated_hole_quats,
+        hole_indices_batch,
+        hole_depths,
+        hole_is_through,
+    ) = untranslated_holes_for_two_parts
 
     fastener_data = Fastener(initial_hole_id_a=None)
     standard_fastener_name = fastener_data.name
@@ -220,10 +229,14 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
         ),
         fixed=torch.tensor([False, False]),
     )
-    # expected shape
-    physical_state.hole_positions = hole_positions
-    physical_state.hole_quats = hole_quats
-    physical_state.part_hole_batch = hole_indices_batch
+    # compute translated hole positions/quats based on current part poses
+    repairs_sim_state = update_hole_locs(
+        repairs_sim_state,
+        untranslated_hole_positions,
+        untranslated_hole_quats,
+        hole_indices_batch,
+    )
+    physical_state.part_hole_batch = hole_indices_batch.expand(1, -1)
 
     # populate desired state
     desired_sim_state = RepairsSimState(1)
@@ -268,7 +281,7 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
 
 def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     fresh_scene_with_fastener_screwdriver_and_two_parts,
-    holes_for_two_parts,
+    untranslated_holes_for_two_parts,
 ):
     scene, gs_entities, repairs_sim_state, desired_sim_state = (
         fresh_scene_with_fastener_screwdriver_and_two_parts
@@ -279,7 +292,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
         hole_indices_batch,
         hole_depths,
         hole_is_through,
-    ) = holes_for_two_parts
+    ) = untranslated_holes_for_two_parts
     fastener_entity = gs_entities["0@fastener"]
     physical_state = repairs_sim_state.physical_state
     graph_device = physical_state.fasteners_attached_to_body.device
@@ -335,14 +348,18 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
 
 def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     fresh_scene_with_fastener_screwdriver_and_two_parts,
-    holes_for_two_parts,
+    untranslated_holes_for_two_parts,
 ):
     scene, gs_entities, repairs_sim_state, desired_sim_state = (
         fresh_scene_with_fastener_screwdriver_and_two_parts
     )
-    hole_positions, hole_quats, hole_indices_batch, hole_depths, hole_is_through = (
-        holes_for_two_parts
-    )
+    (
+        untranslated_hole_positions,
+        untranslated_hole_quats,
+        hole_indices_batch,
+        hole_depths,
+        hole_is_through,
+    ) = untranslated_holes_for_two_parts
     fastener_entity = gs_entities["0@fastener"]
     physical_state = repairs_sim_state.physical_state
     graph_device = physical_state.fasteners_attached_to_body.device
@@ -411,7 +428,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
 
 
 def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_angle(
-    fresh_scene_with_fastener_screwdriver_and_two_parts, holes_for_two_parts
+    fresh_scene_with_fastener_screwdriver_and_two_parts, untranslated_holes_for_two_parts
 ):
     """When one part is already connected, and the angle is too large, it should not screw in."""
     from repairs_components.processing.geom_utils import (
@@ -419,9 +436,13 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
         euler_deg_to_quat_wxyz,
     )
 
-    hole_positions, hole_quats, hole_indices_batch, hole_depths, hole_is_through = (
-        holes_for_two_parts
-    )
+    (
+        untranslated_hole_positions,
+        untranslated_hole_quats,
+        hole_indices_batch,
+        hole_depths,
+        hole_is_through,
+    ) = untranslated_holes_for_two_parts
 
     scene, gs_entities, repairs_sim_state, desired_sim_state = (
         fresh_scene_with_fastener_screwdriver_and_two_parts
@@ -581,12 +602,10 @@ def test_step_pick_up_release_tool_picks_up_or_releases_tool_when_in_proximity(
     # The screwdriver should now be positioned at the calculated grip position relative to franka hand
     franka_hand = franka_entity.get_link("hand")
     expected_tool_pos = get_connector_pos(
-        franka_hand.get_pos(torch.tensor([0])).squeeze(1),
-        franka_hand.get_quat(torch.tensor([0])).squeeze(1),
-        -Screwdriver()
-        .tool_grip_position()
-        .unsqueeze(0),  # minus because from arm to tool
-    )
+        franka_hand.get_pos(0).squeeze(1),
+        franka_hand.get_quat(0).squeeze(1),
+        Screwdriver().tool_grip_position().unsqueeze(0),
+    )  # tool base should sit below the hand for downward orientation
 
     assert torch.allclose(current_screwdriver_pos, expected_tool_pos, atol=1e-3), (
         "Screwdriver should be positioned at the correct grip position relative to franka hand"
@@ -738,7 +757,7 @@ def test_step_fastener_pick_up_release_does_not_pick_up_fastener_when_in_one_han
 
 def test_all_bodies_moved_to_desired_pos_results_in_success(
     fresh_scene_with_fastener_screwdriver_and_two_parts,
-    holes_for_two_parts,
+    untranslated_holes_for_two_parts,
 ):
     """
     Test that all bodies moved to desired position results in success.
@@ -751,10 +770,10 @@ def test_all_bodies_moved_to_desired_pos_results_in_success(
     (
         untranslated_hole_positions,
         untranslated_hole_quats,
-        hole_indices_batch,
+        part_hole_batch,
         hole_depths,
         hole_is_through,
-    ) = holes_for_two_parts
+    ) = untranslated_holes_for_two_parts
     for body_name, body_idx in desired_sim_state.physical_state.body_indices.items():
         gs_entities[body_name].set_pos(
             desired_sim_state.physical_state.position[0, body_idx].unsqueeze(0)
@@ -773,7 +792,7 @@ def test_all_bodies_moved_to_desired_pos_results_in_success(
         starting_hole_quats=untranslated_hole_quats,
         hole_depth=hole_depths,
         hole_is_through=hole_is_through,
-        part_hole_batch=hole_indices_batch,
+        part_hole_batch=part_hole_batch,
     )
     assert success == True, (
         "All bodies moved to desired position should result in success"

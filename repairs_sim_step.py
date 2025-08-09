@@ -42,7 +42,7 @@ def step_repairs(
     starting_hole_quats: torch.Tensor,  # [H, 4]
     hole_depth: torch.Tensor,  # [H] - updated to be always positive
     hole_is_through: torch.Tensor,  # [H] - boolean mask
-    part_hole_batch: torch.Tensor,  # [H]
+    part_hole_batch: torch.Tensor,  # [H] - int ids of parts hole is from.
     # TODO holes are unupdated here yet.
 ):
     """Step repairs sim.
@@ -188,9 +188,9 @@ def step_screw_in_or_out(
     scene: gs.Scene,
     gs_entities: dict[str, RigidEntity],
     current_sim_state: RepairsSimState,
-    actions: torch.Tensor,
-    hole_depths: torch.Tensor,
-    hole_is_through: torch.Tensor,
+    actions: torch.Tensor,  # [B, 10]
+    hole_depths: torch.Tensor,  # [H]
+    hole_is_through: torch.Tensor,  # [H]
 ):
     "A method to update fastener attachments based on actions and proximity."
     tool_state = current_sim_state.tool_state
@@ -230,7 +230,6 @@ def step_screw_in_or_out(
     # check if the fastener is already in blind hole
     fastener_in_blind_hole_mask = (
         ~hole_is_through[  # expected 1 fastener per env.
-            torch.arange(scene.n_envs),
             physical_state.fasteners_attached_to_hole[
                 torch.arange(scene.n_envs), picked_up_fastener_ids
             ],
@@ -313,17 +312,17 @@ def step_screw_in_or_out(
                 fastener_entity=gs_entities[fastener_name],
                 inserted_into_hole_pos=hole_pos,
                 inserted_into_hole_quat=hole_quat,
-                inserted_to_hole_depth=hole_depths[env_id, hole_id],
-                inserted_into_hole_is_through=hole_is_through[env_id, hole_id],
+                inserted_to_hole_depth=hole_depths[hole_id],
+                inserted_into_hole_is_through=hole_is_through[hole_id],
                 inserted_into_part_entity=gs_entities[part_name],
-                fastener_length=physical_state.fasteners_length[env_id, fastener_id],
-                top_hole_is_through=hole_is_through[env_id, already_inserted_hole_id],
+                fastener_length=physical_state.fasteners_length[fastener_id],
+                top_hole_is_through=hole_is_through[already_inserted_hole_id],
                 envs_idx=torch.tensor([env_id]),
                 already_inserted_into_one_hole=already_inserted_into_a_hole,
                 top_hole_depth=torch.where(
                     already_inserted_into_a_hole,
-                    hole_depths[env_id, already_inserted_hole_id],
-                    torch.zeros_like(hole_depths[env_id, already_inserted_hole_id]),
+                    hole_depths[already_inserted_hole_id],
+                    torch.zeros_like(hole_depths[already_inserted_hole_id]),
                 ),
             )
             # future: assert (prevent) more than two connections.

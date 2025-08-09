@@ -148,12 +148,16 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
 
-    assert torch.isclose(
-        tool_cube.get_pos(0),
-        torch.tensor([[0.65, 0.0, 0.5 - screwdriver.tool_grip_position()[2]]]),
-        atol=0.05,
-    ).all(), (
-        f"Cube pos expected to be [0.65, 0.0, 0.5 - screwdriver.tool_grip_position()[2]], got {tool_cube.get_pos(0)}"
+    expected_tool_pos = get_connector_pos(
+        end_effector.get_pos(0).squeeze(1),
+        end_effector.get_quat(0).squeeze(1),
+        screwdriver.tool_grip_position().unsqueeze(0),
+    )
+    assert torch.isclose(tool_cube.get_pos(0), expected_tool_pos, atol=0.05).all(), (
+        f"Tool pos should align with hand grip offset, got {tool_cube.get_pos(0)} vs {expected_tool_pos}"
+    )
+    assert (tool_cube.get_AABB()[0, 0, 2] < end_effector.get_AABB()[0, 0, 2]).all(), (
+        "expected min of tool AABB to be lower than hand pos"
     )
 
     # move to
@@ -166,12 +170,16 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
         fingers_dof,
     )
 
-    assert torch.isclose(
-        tool_cube.get_pos(),
-        torch.tensor([[0.0, 0.65, 0.5 - screwdriver.tool_grip_position()[2]]]),
-        atol=0.05,
-    ).all(), (
-        f"Cube pos expected to be [0.0, 0.65, 0.5 - screwdriver.tool_grip_position()[2]], got {tool_cube.get_pos()}"
+    expected_tool_pos = get_connector_pos(
+        end_effector.get_pos(0).squeeze(1),
+        end_effector.get_quat(0).squeeze(1),
+        screwdriver.tool_grip_position().unsqueeze(0),
+    )
+    assert torch.isclose(tool_cube.get_pos(), expected_tool_pos, atol=0.05).all(), (
+        f"Tool pos should align with hand grip offset, got {tool_cube.get_pos()} vs {expected_tool_pos}"
+    )
+    assert (tool_cube.get_AABB()[0, 0, 2] < end_effector.get_AABB()[0, 0, 2]).all(), (
+        "expected min of tool AABB to be lower than hand pos"
     )
 
 
@@ -218,12 +226,13 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
         fingers_dof,
     )
 
-    assert torch.isclose(
-        tool_cube.get_pos(0),
-        torch.tensor([[0.0, 0.65, 0.5 - screwdriver.tool_grip_position()[2]]]),
-        atol=0.05,
-    ).all(), (
-        f"Cube pos expected to be [0.0, 0.65, 0.5 - screwdriver.tool_grip_position()[2]], got {tool_cube.get_pos(0)}"
+    expected_tool_pos = get_connector_pos(
+        end_effector.get_pos(0).squeeze(1),
+        end_effector.get_quat(0).squeeze(1),
+        screwdriver.tool_grip_position().unsqueeze(0),
+    )
+    assert torch.isclose(tool_cube.get_pos(0), expected_tool_pos, atol=0.05).all(), (
+        f"Tool pos should align with hand grip offset, got {tool_cube.get_pos(0)} vs {expected_tool_pos}"
     )
 
     # detach tool from arm
@@ -239,7 +248,7 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
 
 
 @pytest.mark.xfail(
-    "Assertions are incorrect until get_weld_constraints is available in Genesis API."
+    reason="Assertions are incorrect until get_weld_constraints is available in Genesis API."
 )
 def test_attach_and_detach_tool_to_arm_with_fastener(
     scene_franka_and_two_cubes, fingers_dof

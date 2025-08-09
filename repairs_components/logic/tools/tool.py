@@ -69,7 +69,7 @@ def attach_tool_to_arm(
         arm_hand_pos.squeeze(1),  # [b,3]
         arm_hand_quat.squeeze(1),  # [b,4]
         tool.tool_grip_position().unsqueeze(0),
-    )  # use +grip so world pos = hand_pos - R*grip (matches expected downward offset)
+    )  # place tool base so that hand aligns with tool grip: pos = hand_pos + R_hand*grip
 
     # FIXME: the tool is not repositioned to the entity, for whichever reason.
 
