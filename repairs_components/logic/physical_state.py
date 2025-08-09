@@ -1290,13 +1290,13 @@ def register_fasteners_batch(
     )
     empty = physical_states.fasteners_attached_to_hole == -1
     physical_states.fasteners_attached_to_body = torch.full_like(
-        physical_states.fasteners_attached_to_hole, -1
+        physical_states.fasteners_attached_to_hole, -1, dtype=torch.int64
     )
     physical_states.fasteners_attached_to_body[~empty] = (
         physical_states.part_hole_batch[
             0, physical_states.fasteners_attached_to_hole[~empty]
         ]
-    )
+    )  # indexing all by 0 is OK because part_hole_batch is equal along the batch.
 
     # Update fastener counts for connected bodies
     # Count how many fasteners are attached to each body for each batch

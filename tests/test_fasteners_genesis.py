@@ -17,10 +17,10 @@ from repairs_components.geometry.fasteners import (
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from tests.test_tool_genesis import move_franka_to_pos
 from genesis.engine.entities import RigidEntity
-from tests.global_test_config import init_gs
+from tests.global_test_config import init_gs, base_data_dir
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def scene_with_fastener_screwdriver_and_two_parts(init_gs):
     from repairs_components.logic.tools.screwdriver import Screwdriver
     from repairs_components.logic.tools.tool import attach_tool_to_arm
@@ -319,6 +319,15 @@ def test_attach_and_detach_fastener_to_part(
 def test_attach_and_detach_fastener_to_two_parts(
     scene_with_fastener_screwdriver_and_two_parts,
 ):
+    """
+    Test:
+    1. get initial positions of all parts,
+    2. attach fastener to part 1, fastener should move, part 1 shouldn't.
+    3. attach fastener to part 2, fastener should move, part 1 should follow, part 2 shouldn't move.
+    4. Set fastener position by an arbitrary offset, both parts should move by that offset too.
+    5. detach fastener from both parts, move fastener pos by an arbitrary offset, parts shouldn't move.
+    """
+    # NOTE: test failure due to not being able to easily check for constraints... and it's unexpected. Anyhow, it's not super-important.
     scene, entities = scene_with_fastener_screwdriver_and_two_parts
     camera = scene.visualizer.cameras[0]
     fastener = entities["0@fastener"]
@@ -346,13 +355,15 @@ def test_attach_and_detach_fastener_to_two_parts(
         envs_idx=torch.tensor([0]),
     )  # fastener moves to hole_pos1...
     assert torch.isclose(fastener.get_pos(0), hole_pos1[0]).all(), (
-        "Fastener should be at hole_pos1"
+        "Fastener should be moved to the part 1 at hole_pos1"
     )
-    pos_diff_part_to_fastener = entities["part_with_holes_1@solid"].get_pos(
+    pos_diff_part_1_to_fastener = entities["part_with_holes_1@solid"].get_pos(
         0
     ) - entities["0@fastener"].get_pos(0)
-    pos_diff_part_to_part_pre_attachment_to_second = hole_pos1[0] - hole_pos2[0]
+    pos_diff_hole_2_to_hole_1_pre_attachment_to_second = hole_pos1[0] - hole_pos2[0]
     part_1_pos_pre_attachment_to_second = entities["part_with_holes_1@solid"].get_pos(0)
+    fastener_pos_pre_attachment_to_second = fastener.get_pos(0)
+    part_2_pos_pre_attachment = entities["part_with_holes_2@solid"].get_pos(0)
 
     # second
     # note: the top hole here is the first hole (as it was the first to be inserted.)
@@ -370,33 +381,59 @@ def test_attach_and_detach_fastener_to_two_parts(
         fastener_length=fastener_length,
         already_inserted_into_one_hole=torch.tensor([True]),
     )  # fastener moves to hole_pos_2 with the first part...
+    # test fastener move after 2nd attachment
     assert torch.isclose(
         fastener.get_pos(0),
         hole_pos2
         + torch.tensor([[0.0, 0.0, fastener_length[0] - through_hole_depth_1[0]]]),
     ).all(), "Fastener should be at hole_pos2"
-    fastener_moved = hole_pos1 - hole_pos2
-    part_pos_after_attachment_to_second = entities["part_with_holes_1@solid"].get_pos()
-    part_moved_xyz = (
-        part_1_pos_pre_attachment_to_second - part_pos_after_attachment_to_second
+    holes_xyz_diff = hole_pos1 - hole_pos2
+    fastener_pos_diff_after_2nd_attach_actual = (
+        fastener.get_pos(0) - fastener_pos_pre_attachment_to_second
     )
-    assert torch.isclose(fastener_moved, part_moved_xyz).all(), (
-        f"Part should've moved equally as much as the fastener has moved. Got diff: {part_moved_xyz}, expected: {fastener_moved}"
+    # test that a fastener has moved by correct distance
+    assert torch.isclose(
+        holes_xyz_diff,
+        fastener_pos_diff_after_2nd_attach_actual,
+    ).all(), (
+        f"Fastener should've moved by difference of the hole positions. Got diff: {fastener_pos_diff_after_2nd_attach_actual}, expected: {holes_xyz_diff}"
     )
-    part_2_pos_pre_move = entities["part_with_holes_2@solid"].get_pos()
+    # test that a part 1 has moved by correct distance
+    part_1_pos_after_attachment_to_second = entities[
+        "part_with_holes_1@solid"
+    ].get_pos()
+    part_1_moved_after_attachment_to_second = (
+        part_1_pos_pre_attachment_to_second - part_1_pos_after_attachment_to_second
+    )
+    assert torch.isclose(
+        holes_xyz_diff,
+        part_1_moved_after_attachment_to_second,
+    ).all(), (
+        f"Part 1 should've moved equally as much as the fastener has moved as it is expected to be attached to the fastener. Got diff: {part_1_moved_after_attachment_to_second}, expected: {holes_xyz_diff}"
+    )
+    # test that a part 2 has not moved
+    part_2_pos_after_attachment = entities["part_with_holes_2@solid"].get_pos()
+    assert torch.isclose(
+        part_2_pos_pre_attachment - part_2_pos_after_attachment,
+        torch.tensor([[0.0, 0.0, 0.0]]),
+    ).all(), "Part 2 should not have moved"
 
-    fastener.set_pos(fastener.get_pos() + torch.tensor([[0.0, 0.0, 0.5]]))
+    # move fastener (and parts should follow)
+    move_fastener_by = torch.tensor([[0.0, 0.0, 0.5]])
+    fastener.set_pos(fastener.get_pos() + move_fastener_by)
 
     # assert that they have moved equally to the fastener.
     part_2_pos_after_move = entities["part_with_holes_2@solid"].get_pos()
-    part_moved_xyz = part_2_pos_pre_move - part_2_pos_after_move
-    assert torch.isclose(fastener_moved, part_moved_xyz).all(), (
-        f"Part should've moved equally as much as the fastener has moved. Got diff: {part_moved_xyz}, expected: {fastener_moved}"
+    part_2_moved_after_move = part_2_pos_after_attachment - part_2_pos_after_move
+    assert torch.isclose(move_fastener_by, part_2_moved_after_move).all(), (
+        f"Part 2 should've moved equally as much as the fastener has moved as it is expected to be attached to the fastener. Got diff: {part_2_moved_after_move}, expected: {move_fastener_by}"
     )
     part_1_pos_after_move = entities["part_with_holes_1@solid"].get_pos()
-    part_moved_xyz = part_1_pos_pre_attachment_to_second - part_1_pos_after_move
-    assert torch.isclose(fastener_moved, part_moved_xyz).all(), (
-        f"Part should've moved equally as much as the fastener has moved. Got diff: {part_moved_xyz}, expected: {fastener_moved}"
+    part_1_moved_after_move = (
+        part_1_pos_after_attachment_to_second - part_1_pos_after_move
+    )
+    assert torch.isclose(move_fastener_by, part_1_moved_after_move).all(), (
+        f"Part 1 should've moved equally as much as the fastener has moved as it is expected to be attached to the fastener. Got diff: {part_1_moved_after_move}, expected: {move_fastener_by}"
     )
 
     # detach fastener from parts
@@ -426,7 +463,7 @@ def test_attach_and_detach_fastener_to_two_parts(
     ).all(), "Parts should not be attached to each other after detaching"
     assert not torch.isclose(
         entities["part_with_holes_1@solid"].get_pos(),
-        entities["0@fastener"].get_pos() + pos_diff_part_to_fastener,
+        entities["0@fastener"].get_pos() + pos_diff_part_1_to_fastener,
     ).all(), (
         "Parts should not be attached to fastener after detaching. Got diff: "
         + str(

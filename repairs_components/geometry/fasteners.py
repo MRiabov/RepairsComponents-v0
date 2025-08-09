@@ -330,10 +330,59 @@ def attach_fastener_to_part(
     fastener_length: torch.Tensor,
     envs_idx: torch.Tensor,
 ):
-    """Note: hole pos is absolute to world frame because it is expected to be recalculated already
-    We also need to adjust for hole depth.
+    """Attach a fastener to a part at a target hole and add a weld constraint.
 
-    Note: all arguments that are passed are passed in filtered. So equal to env_idx.shape[0] in batch shape."""
+    This is invoked from `step_repairs -> step_screw_in_or_out` when the policy decides to
+    screw in. It computes the fastener pose from the target hole world pose and depth, taking
+    into account whether the hole is through/blind and any existing partial insertion into a
+    previously connected ("top") hole in the same environment.
+
+    Behavior:
+    - Position is computed via `recalculate_fastener_pos_with_offset_to_hole(...)`, which:
+      * for a through hole with no prior insertion: aligns the fastener head with the hole top
+      * for a blind hole with no prior insertion: offsets by (fastener_length - hole_depth)
+        along the hole axis
+      * for a second connection when partially inserted into a top hole: offsets by
+        (fastener_length - top_hole_depth)
+    - Orientation is set equal to `inserted_into_hole_quat`.
+    - A rigid weld constraint is added between the fastener base link and the part base link
+      (temporary simplification; will be replaced by a revolute/cylindrical joint later).
+
+    Args:
+        scene (gs.Scene): Genesis scene.
+        fastener_entity (RigidEntity): The fastener to attach.
+        inserted_into_hole_pos (torch.Tensor): World-frame position of the target hole.
+            Shape [B, 3] where B == len(envs_idx). In `step_repairs` this is passed for a
+            single environment (B=1).
+        inserted_into_hole_quat (torch.Tensor): World-frame quaternion [w, x, y, z] of the
+            target hole. Shape [B, 4].
+        inserted_to_hole_depth (torch.Tensor): Target hole depth in meters (> 0). Shape [B].
+        inserted_into_part_entity (RigidEntity): Part owning the target hole.
+        inserted_into_hole_is_through (torch.Tensor): Whether the target hole is through.
+            Shape [B] (bool).
+        top_hole_is_through (torch.Tensor): Whether the already-connected "top" hole is through.
+            Used only for validation. Where `already_inserted_into_one_hole` is True, all entries
+            must be True. Shape [B] (bool).
+        already_inserted_into_one_hole (torch.Tensor): Whether the fastener is already inserted
+            into a (top) hole in the same environment. Shape [B] (bool).
+        top_hole_depth (torch.Tensor): Depth inserted into the top hole in meters (>= 0). If
+            `already_inserted_into_one_hole` is True, must be > 0; otherwise must be 0. Shape [B].
+        fastener_length (torch.Tensor): Total fastener length in meters (> 0). Shape [B].
+        envs_idx (torch.Tensor): Indices of environments to apply the update to. Shape [B].
+
+    Notes:
+        - All tensor arguments must be filtered to the same batch as `envs_idx` (B items).
+        - Units are meters throughout.
+        - Preconditions enforced by assertions:
+            * Where `already_inserted_into_one_hole` is True: `top_hole_is_through` must be True
+              and `top_hole_depth` > 0
+            * Where `already_inserted_into_one_hole` is False: `top_hole_depth` == 0
+            * `inserted_to_hole_depth` > 0 and `fastener_length` > 0
+
+    Returns:
+        None. Side effects: updates the fastener pose and adds a weld constraint to
+        `inserted_into_part_entity` in the specified environments.
+    """
     assert (top_hole_is_through[already_inserted_into_one_hole]).all(), (
         f"Where already inserted, must be inserted into a through hole (can't insert when the top hole is blind).\n"
         f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_is_through: {top_hole_is_through}"
@@ -469,8 +518,9 @@ def recalculate_fastener_pos_with_offset_to_hole(
     of the fastener at the bottom of the hole
     3. Attaching a fastener partially inserted into a through hole, so top_hole_depth
     is not None, so connect the bottom (B) hole to the center of the fastener.
-    - in the third case, depth of insertion into B hole is equal to fastener_length - top_hole_depth
-      - so the formula is simply (hole_pos+top_hole_depth)@quat.
+    - in the third case, the remaining length to be accommodated by the bottom hole is
+      (fastener_length - top_hole_depth). Therefore, offset along the hole axis by
+      (fastener_length - top_hole_depth), i.e. (hole_pos + (fastener_length - top_hole_depth))@quat.
     - in the third case, the hole_pos, hole_quat and hole_depth are params of a bottom hole.
     - in the third case, the fastener inserted into a blind hole can not be connected nowhere else.
     """
@@ -507,11 +557,14 @@ def recalculate_fastener_pos_with_offset_to_hole(
         )
         fastener_pos[blind_hole_no_partial] = transformed_pos
 
-    # Case 3: Partial insertion - offset by top_hole_depth (applies to both through and blind holes)
+    # Case 3: Partial insertion - offset by the remaining length (L - top_hole_depth)
+    # (applies to both through and blind holes for the second connection)
     if has_partial_insertion.any():
         # For partial insertion, offset by the depth the fastener is already inserted
         offset = torch.zeros_like(hole_pos)
-        offset[has_partial_insertion, 2] = top_hole_depth[has_partial_insertion]
+        offset[has_partial_insertion, 2] = (fastener_length - top_hole_depth)[
+            has_partial_insertion
+        ]
 
         # Apply quaternion transformation using get_connector_pos
         transformed_pos = get_connector_pos(
