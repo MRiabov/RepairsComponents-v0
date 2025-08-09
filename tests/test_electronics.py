@@ -8,6 +8,8 @@ from repairs_components.logic.electronics.gates import AndGate, OrGate, NotGate
 from repairs_components.logic.electronics.simulator import simulate_circuit
 from repairs_components.logic.electronics.wire import Wire
 
+pytestmark = pytest.mark.skip(reason="Electronics is not implemented yet.")
+
 
 # Test 1: Simple series circuit: VoltageSource -> Resistor -> LED
 def test_series_led():

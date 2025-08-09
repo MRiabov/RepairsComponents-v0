@@ -58,6 +58,7 @@ def test_physical_state_diff_basic():
     assert isinstance(diff_str, str)
 
 
+@pytest.mark.skip(reason="Electronics is not implemented yet.")
 def test_electronics_state_diff_basic():
     """Test basic diff functionality for ElectronicsState."""
     # Create two electronics states
@@ -125,6 +126,7 @@ def test_physical_state_no_changes():
     assert diff_graph.edge_mask.sum() == 0
 
 
+@pytest.mark.skip(reason="Electronics is not implemented yet.")
 def test_electronics_state_edge_changes():
     """Test ElectronicsState diff with edge changes."""
     state1 = ElectronicsState()

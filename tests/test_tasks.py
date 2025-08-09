@@ -30,7 +30,7 @@ def test_perturb_initial_state(bd_test_compound):
         new_compound = task.perturb_initial_state(bd_test_compound, env_size)
 
         assert (
-            tuple(np.array(new_compound.bounding_box().size)) < np.array(env_size)
+            np.array(tuple(new_compound.bounding_box().size)) < np.array(env_size)
         ).all(), "Parts are not within bounds."
         filtered_intersection_check(new_compound, assertion=True)
 
