@@ -234,7 +234,7 @@ class RepairsEnv(gym.Env):
             # NOTE: scene_id is not the same as env_setup_id!
             scene = gs.Scene(
                 sim_options=gs.options.SimOptions(dt=self.dt, substeps=2),
-                show_viewer=False,
+                show_viewer=io_cfg["show_viewer"],
                 vis_options=gs.options.VisOptions(
                     env_separate_rigid=True,
                     shadow=True,

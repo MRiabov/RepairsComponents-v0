@@ -90,6 +90,7 @@ def io_cfg(data_dir, env_setups_two_connectors):
         },
         "force_recreate_data": True,  # true for testing.
         "env_setup_ids": list(range(len(env_setups_two_connectors))),
+        "show_viewer": False,
     }
     return io_cfg
 
