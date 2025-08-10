@@ -14,16 +14,16 @@ from repairs_components.logic.electronics.component import ElectricalComponentsE
 class TestElectronicsDiff:
     def make_two_states_same_components(self):
         names = ["batt", "res"]
-        ctype = torch.tensor([int(ECE.VOLTAGE_SOURCE), int(ECE.RESISTOR)], dtype=torch.long)
-        vmax_A = torch.tensor([9.0, 0.0], dtype=torch.float32)
-        vmax_B = torch.tensor([9.0, 0.0], dtype=torch.float32)
-        imax = torch.tensor([1.0, 0.1], dtype=torch.float32)
-        tpc = torch.tensor([2, 2], dtype=torch.long)
+        component_type = torch.tensor([int(ECE.VOLTAGE_SOURCE), int(ECE.RESISTOR)], dtype=torch.long)
+        voltage_max_A = torch.tensor([9.0, 0.0], dtype=torch.float32)
+        voltage_max_B = torch.tensor([9.0, 0.0], dtype=torch.float32)
+        current_max = torch.tensor([1.0, 0.1], dtype=torch.float32)
+        terminals_per_component_batch = torch.tensor([2, 2], dtype=torch.long)
 
         A = ElectronicsState()
         B = ElectronicsState()
-        A = register_components_batch(A, names, ctype, vmax_A, imax, tpc)
-        B = register_components_batch(B, names, ctype.clone(), vmax_B, imax.clone(), tpc.clone())
+        A = register_components_batch(A, names, component_type, voltage_max_A, current_max, terminals_per_component_batch)
+        B = register_components_batch(B, names, component_type.clone(), voltage_max_B, current_max.clone(), terminals_per_component_batch.clone())
         return A, B
 
     def test_diff_edges_added(self):
@@ -66,16 +66,16 @@ class TestElectronicsDiff:
     def test_diff_nodes_changed(self):
         # Change a scalar node feature (max_voltage) on one component
         names = ["batt", "res"]
-        ctype = torch.tensor([int(ECE.VOLTAGE_SOURCE), int(ECE.RESISTOR)], dtype=torch.long)
-        vmax_A = torch.tensor([9.0, 0.0], dtype=torch.float32)
-        vmax_B = torch.tensor([12.0, 0.0], dtype=torch.float32)  # changed batt voltage
-        imax = torch.tensor([1.0, 0.1], dtype=torch.float32)
-        tpc = torch.tensor([2, 2], dtype=torch.long)
+        component_type = torch.tensor([int(ECE.VOLTAGE_SOURCE), int(ECE.RESISTOR)], dtype=torch.long)
+        voltage_max_A = torch.tensor([9.0, 0.0], dtype=torch.float32)
+        voltage_max_B = torch.tensor([12.0, 0.0], dtype=torch.float32)  # changed batt voltage
+        current_max = torch.tensor([1.0, 0.1], dtype=torch.float32)
+        terminals_per_component_batch = torch.tensor([2, 2], dtype=torch.long)
 
         A = ElectronicsState()
         B = ElectronicsState()
-        A = register_components_batch(A, names, ctype, vmax_A, imax, tpc)
-        B = register_components_batch(B, names, ctype.clone(), vmax_B, imax.clone(), tpc.clone())
+        A = register_components_batch(A, names, component_type, voltage_max_A, current_max, terminals_per_component_batch)
+        B = register_components_batch(B, names, component_type.clone(), voltage_max_B, current_max.clone(), terminals_per_component_batch.clone())
 
         diff_graph, n = A.diff(B)
         assert isinstance(n, int)
