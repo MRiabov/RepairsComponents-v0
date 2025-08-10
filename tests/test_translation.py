@@ -259,20 +259,20 @@ def test_two_connectors_match_after_step(assembly_task_geoms_two_connectors, dat
         current_state,
         picked_up_tip_positions,
         fastener_hole_positions,
-        male_connector_positions,
-        female_connector_positions,
+        male_terminal_positions,
+        female_terminal_positions,
     ) = translate_genesis_to_python(scene, gs_entities, desired_state)
     assert torch.isclose(
-        male_connector_positions[male_name],
+        male_terminal_positions[male_name],
         gs_entities[male_name].get_links_pos(link_idx),
     ).all()
     assert torch.isclose(
-        female_connector_positions[female_name],
+        female_terminal_positions[female_name],
         gs_entities[female_name].get_links_pos(link_idx),
     ).all()
     assert torch.isclose(
-        male_connector_positions[male_name],
-        female_connector_positions[female_name],
+        male_terminal_positions[male_name],
+        female_terminal_positions[female_name],
     ).all()  # they should be coincident
 
     def test_graph_features_unchanged(current_state, desired_state):

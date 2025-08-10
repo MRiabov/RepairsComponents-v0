@@ -33,13 +33,13 @@ class RoundConnector(Connector):
 
             chamfer(male.faces().sort_by(Axis.X)[:2].edges(), 0.5)
 
-        with BuildPart() as connector_def:
-            connector_center_pos = pin.center(CenterOf.BOUNDING_BOX)
-            connector_center_pos = connector_center_pos - Vector(1, 0, 0)
-            with Locations(connector_center_pos):
-                Sphere(self._connector_def_size)
+        with BuildPart() as terminal_def:
+            terminal_center_pos = pin.center(CenterOf.BOUNDING_BOX)
+            terminal_center_pos = terminal_center_pos - Vector(1, 0, 0)
+            with Locations(terminal_center_pos):
+                Sphere(self._terminal_def_size)
 
-        comp = Compound(children=[male.part, connector_def.part])
+        comp = Compound(children=[male.part, terminal_def.part])
         return self.color_and_label(comp, male=True).moved(Location(moved_to))
 
     def bd_geometry_female(self, moved_to: VectorLike) -> Part | Compound:
@@ -63,26 +63,26 @@ class RoundConnector(Connector):
                 )
             chamfer(female.faces().sort_by(Axis.X)[:3].edges(), 0.5)
 
-        with BuildPart() as connector_def:
-            connector_center_pos = (
+        with BuildPart() as terminal_def:
+            terminal_center_pos = (
                 female.faces()
                 .sort_by(Axis.X)
                 .first.offset(-(pin_len / 2 + 0.5))
                 .center(CenterOf.BOUNDING_BOX)
             )
-            connector_center_pos = connector_center_pos
-            with Locations(connector_center_pos):
-                Sphere(self._connector_def_size)
+            terminal_center_pos = terminal_center_pos
+            with Locations(terminal_center_pos):
+                Sphere(self._terminal_def_size)
 
-        comp = Compound(children=[female.part, connector_def.part])
+        comp = Compound(children=[female.part, terminal_def.part])
         return self.color_and_label(comp, male=False).moved(Location(moved_to))
 
     @property
-    def connector_pos_relative_to_center_male(self) -> np.ndarray:
+    def terminal_pos_relative_to_center_male(self) -> np.ndarray:
         return np.array([-22.625, 0, 0])
 
     @property
-    def connector_pos_relative_to_center_female(self) -> np.ndarray:
+    def terminal_pos_relative_to_center_female(self) -> np.ndarray:
         return np.array([-4, 0, 0])
 
     @property

@@ -78,7 +78,7 @@ class EnvSetup(ABC):
                 "button",
                 "led",
                 "switch",
-                "connector_def",
+                "terminal_def",
             )
             assert part_type in supported_types, (
                 f"Part type must be one of {supported_types}. Currently have: {part_type}."

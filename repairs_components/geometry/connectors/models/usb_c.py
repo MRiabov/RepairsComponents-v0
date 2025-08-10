@@ -34,16 +34,16 @@ class USB_C(Connector):
 
             connector = extrude(opening_sketch.sketch.rotate(Axis.X, -90), shell_len)
 
-        with BuildPart() as connector_def:
+        with BuildPart() as terminal_def:
             # x -= 0.5  # can't make opening because equality.
-            connector_center_pos = connector.center(CenterOf.BOUNDING_BOX)
-            connector_center_pos = connector_center_pos - Vector(
+            terminal_center_pos = connector.center(CenterOf.BOUNDING_BOX)
+            terminal_center_pos = terminal_center_pos - Vector(
                 0.5, 0, 0
             )  # move a little closer
-            with Locations(connector_center_pos):
-                Sphere(self._connector_def_size)
+            with Locations(terminal_center_pos):
+                Sphere(self._terminal_def_size)
 
-        connector = Compound(children=[usb_c.part, connector_def.part])
+        connector = Compound(children=[usb_c.part, terminal_def.part])
         self.color_and_label(connector, male=True)
         return connector.moved(Location(moved_to))
 
@@ -84,24 +84,24 @@ class USB_C(Connector):
             ):
                 Box(tongue_offset_from_edge, tongue_w, tongue_h, mode=Mode.SUBTRACT)
 
-        with BuildPart() as connector_def:
-            connector_center_pos = connector.center(CenterOf.BOUNDING_BOX)
-            connector_center_pos = connector_center_pos + Vector(
+        with BuildPart() as terminal_def:
+            terminal_center_pos = connector.center(CenterOf.BOUNDING_BOX)
+            terminal_center_pos = terminal_center_pos + Vector(
                 0.0, 0, 0
             )  # move a little farther
-            with Locations(connector_center_pos):
-                Sphere(self._connector_def_size)
+            with Locations(terminal_center_pos):
+                Sphere(self._terminal_def_size)
 
-        connector = Compound(children=[usb_c.part, connector_def.part])
+        connector = Compound(children=[usb_c.part, terminal_def.part])
         self.color_and_label(connector, male=False)
         return connector.moved(Location(moved_to))
 
     @property
-    def connector_pos_relative_to_center_male(self) -> np.ndarray:
+    def terminal_pos_relative_to_center_male(self) -> np.ndarray:
         return np.array([-8.755, 0, 0])
 
     @property
-    def connector_pos_relative_to_center_female(self) -> np.ndarray:
+    def terminal_pos_relative_to_center_female(self) -> np.ndarray:
         return np.array([-2.2, 0, 0])
 
     @property

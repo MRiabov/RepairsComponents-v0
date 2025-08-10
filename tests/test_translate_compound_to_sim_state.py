@@ -51,7 +51,7 @@ class TestEnv(EnvSetup):
         fixed_solid.label = "test_fixed_solid@fixed_solid"
         solid_with_hole.label = "test_solid_with_hole@solid"
 
-        europlug_male, connector_def, europlug_female, _ = Europlug(0).bd_geometry(
+        europlug_male, terminal_def, europlug_female, _ = Europlug(0).bd_geometry(
             (60, 70, 30)
         )
         europlug_male = europlug_male.move(Pos(60, 70, 30))

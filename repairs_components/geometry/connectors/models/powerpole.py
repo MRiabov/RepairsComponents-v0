@@ -42,14 +42,14 @@ class Powerpole(Connector):
             with Locations((0, 0, body_z / 4 - 0.5)):
                 Box(2, body_y - 1, body_z / 2, mode=Mode.SUBTRACT)
 
-        with BuildPart() as connector_center:
+        with BuildPart() as terminal_def:
             # x -= 0.5  # can't make opening because equality.
             with Locations((-body_x / 4 - (0.5), 0, 0)):
                 Sphere(
-                    self._connector_def_size
+                    self._terminal_def_size
                 )  # just get the center of this sphere later.
 
-        powerpole_comp = Compound(children=[powerpole.part, connector_center.part])
+        powerpole_comp = Compound(children=[powerpole.part, terminal_def.part])
         self.color_and_label(powerpole_comp, male=True)
         return powerpole_comp.moved(Location(moved_to))
 
@@ -62,12 +62,12 @@ class Powerpole(Connector):
         return male
 
     @property
-    def connector_pos_relative_to_center_male(self) -> np.ndarray:
+    def terminal_pos_relative_to_center_male(self) -> np.ndarray:
         return np.array([-24.6 / 4 - 0.5, 0.0, 0.0], dtype=np.float32)
 
     @property
-    def connector_pos_relative_to_center_female(self) -> np.ndarray:
-        return self.connector_pos_relative_to_center_male
+    def terminal_pos_relative_to_center_female(self) -> np.ndarray:
+        return self.terminal_pos_relative_to_center_male
 
     def connected_at_angle(self) -> tuple[float, float, float]:
         return (0, 0, 180)

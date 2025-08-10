@@ -31,9 +31,9 @@ import trimesh
 class Connector(ElectricalComponent):
     in_sim_id: int
     "The connector id in the simulation."
-    # NOTE: this should correspond to the physical sim state connector_pos male/female tensors. It currently does not. (P2)
+    # NOTE: this should correspond to the physical sim state terminal_pos male/female tensors. It currently does not. (P2)
 
-    _connector_def_size: float = 0.3  # vis only
+    _terminal_def_size: float = 0.3  # vis only
 
     def __init__(self, in_sim_id: int):
         super().__init__(self.get_name(in_sim_id, None))
@@ -64,14 +64,14 @@ class Connector(ElectricalComponent):
 
     @property
     @abstractmethod
-    def connector_pos_relative_to_center_male(self) -> np.ndarray:
-        """Get the position of the connector def relative to the center of the component."""
+    def terminal_pos_relative_to_center_male(self) -> np.ndarray:
+        """Get the position of the terminal def relative to the center of the component."""
         raise NotImplementedError
 
     @property
     @abstractmethod
-    def connector_pos_relative_to_center_female(self) -> np.ndarray:
-        """Get the position of the connector def relative to the center of the component."""
+    def terminal_pos_relative_to_center_female(self) -> np.ndarray:
+        """Get the position of the terminal def relative to the center of the component."""
         raise NotImplementedError
 
     @property
@@ -86,15 +86,15 @@ class Connector(ElectricalComponent):
         self,
         base_dir: Path,
         male: bool,
-        connector_position: np.ndarray | None = None,
+        terminal_position: np.ndarray | None = None,
         density: float = 1000,
     ):
         """This defines a generic mjcf for a connector with a connector position."""
-        if connector_position is None:
-            connector_position = (
-                self.connector_pos_relative_to_center_male
+        if terminal_position is None:
+            terminal_position = (
+                self.terminal_pos_relative_to_center_male
                 if male
-                else self.connector_pos_relative_to_center_female
+                else self.terminal_pos_relative_to_center_female
             )
         print(
             "warning: exporting electronics as mjcf is deprecated; replace with native genesis controls."
@@ -121,7 +121,7 @@ class Connector(ElectricalComponent):
             <body name="{name}">
                 <geom name="{name}_geom" type="mesh" mesh="{name}" density="{mesh_mass}"/>
                 
-                <body name="connector_point" pos="{connector_position[0]} {connector_position[1]} {connector_position[2]}">
+                <body name="connector_point" pos="{terminal_position[0]} {terminal_position[1]} {terminal_position[2]}">
                     <!-- No inertial, geom, or visual tags = fixed frame -->
                 </body>
             </body>
@@ -155,17 +155,17 @@ class Connector(ElectricalComponent):
         # get the aabb of a CHILD sphere. also discard that sphere from the geometry.
 
         # get the aabb of a child sphere.
-        male_connector_collision_detection_position = geom_male.children[-1].center(
+        male_terminal_collision_detection_position = geom_male.children[-1].center(
             CenterOf.BOUNDING_BOX
         )
-        female_connector_collision_detection_position = geom_female.children[-1].center(
+        female_terminal_collision_detection_position = geom_female.children[-1].center(
             CenterOf.BOUNDING_BOX
         )
 
         if connected:
             # TODO: move geom_male into the position where connector positions would be equal,
             # with connected_at_angle difference between them.
-            # Step 1: Rotate around female_connector_collision_detection_position
+            # Step 1: Rotate around female_terminal_collision_detection_position
             # get the index of the non-zero element -
             # rotate.
             geom_male = Rotation(self.connected_at_angle) * geom_male
@@ -177,23 +177,23 @@ class Connector(ElectricalComponent):
                 label=geom_male.label,
             )
 
-            male_connector_collision_detection_position = geom_male.children[-1].center(
+            male_terminal_collision_detection_position = geom_male.children[-1].center(
                 CenterOf.BOUNDING_BOX
             )
 
             # Step 2: Translate to match female connector position
             pos_diff = (
-                female_connector_collision_detection_position
-                - male_connector_collision_detection_position
+                female_terminal_collision_detection_position
+                - male_terminal_collision_detection_position
             )
 
             geom_male = geom_male.moved(Location(pos_diff))
 
         return (
             geom_male,
-            male_connector_collision_detection_position,
+            male_terminal_collision_detection_position,
             geom_female,
-            female_connector_collision_detection_position if not connected else None,
+            female_terminal_collision_detection_position if not connected else None,
         )
 
     @abstractmethod
@@ -207,7 +207,7 @@ class Connector(ElectricalComponent):
         pass
 
     def color_and_label(self, geom: Compound, male: bool):
-        # note: removing connector_def.
+        # note: removing terminal_def.
         assert len(geom.children) == 2, "Expected a two children for the geometry."
         assert geom.children[1].volume < geom.children[0].volume, (
             "Expected the connector to be smaller than the geometry."
@@ -221,12 +221,12 @@ class Connector(ElectricalComponent):
         base_name = self.get_name(self.in_sim_id, male)
         # to indicate typing to the model
         geom.children[0].label = base_name + "@connector"
-        geom.children[1].label = base_name + "@connector_def"
+        geom.children[1].label = base_name + "@terminal_def"
         geom.label = base_name + "_compound"
 
-        # util to print connector collision position
+        # util to print terminal collision position
         print(
-            f"{base_name}_connector_collision_detection_position",
+            f"{base_name}_terminal_collision_detection_position",
             geom.children[1].center(CenterOf.BOUNDING_BOX),
         )
 
@@ -287,8 +287,8 @@ class Connector(ElectricalComponent):
 
 
 def check_connections(
-    male_connector_positions: torch.Tensor,
-    female_connector_positions: torch.Tensor,
+    male_terminal_positions: torch.Tensor,
+    female_terminal_positions: torch.Tensor,
     connection_threshold: float = 2.5,
 ) -> torch.Tensor:
     """
@@ -299,10 +299,10 @@ def check_connections(
 
     Parameters
     ----------
-    male_connector_positions : torch.Tensor
-        Tensor of shape [M, 3] containing male connector positions.
-    female_connector_positions : torch.Tensor
-        Tensor of shape [F, 3] containing female connector positions.
+    male_terminal_positions : torch.Tensor
+        Tensor of shape [M, 3] containing male terminal positions.
+    female_terminal_positions : torch.Tensor
+        Tensor of shape [F, 3] containing female terminal positions.
     connection_threshold : float, default=2.5
         Max distance allowed for a valid connection.
 
@@ -312,27 +312,26 @@ def check_connections(
         Tensor of shape [N, 2] where N is the number of valid connections.
         Each row contains [male_idx, female_idx] for a valid connection.
     """
-    if male_connector_positions.numel() == 0 or female_connector_positions.numel() == 0:
+    if male_terminal_positions.numel() == 0 or female_terminal_positions.numel() == 0:
         return torch.empty(
-            (0, 2), dtype=torch.long, device=male_connector_positions.device
+            (0, 2), dtype=torch.long, device=male_terminal_positions.device
         )
 
     assert (
-        male_connector_positions.ndim == 2 and male_connector_positions.shape[1] == 3
+        male_terminal_positions.ndim == 2 and male_terminal_positions.shape[1] == 3
     ), (
-        f"Expected male_connector_positions to be [M, 3], got {male_connector_positions.shape}"
+        f"Expected male_terminal_positions to be [M, 3], got {male_terminal_positions.shape}"
     )
     assert (
-        female_connector_positions.ndim == 2
-        and female_connector_positions.shape[1] == 3
+        female_terminal_positions.ndim == 2 and female_terminal_positions.shape[1] == 3
     ), (
-        f"Expected female_connector_positions to be [F, 3], got {female_connector_positions.shape}"
+        f"Expected female_terminal_positions to be [F, 3], got {female_terminal_positions.shape}"
     )
 
     # Compute pairwise distances [M, F]
     D = torch.cdist(
-        male_connector_positions.unsqueeze(0),
-        female_connector_positions.unsqueeze(0),
+        male_terminal_positions.unsqueeze(0),
+        female_terminal_positions.unsqueeze(0),
         p=2,
     ).squeeze(0)
 

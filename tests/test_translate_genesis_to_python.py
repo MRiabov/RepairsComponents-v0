@@ -122,16 +122,16 @@ def scene_with_entities(init_gs):
         dim=1,
     )
     fixed = torch.zeros((1, len(names)), dtype=torch.bool, device=device)
-    connector_position_relative_to_center = torch.cat(
+    terminal_position_relative_to_center = torch.cat(
         [
             torch.full((2, 3), float("nan"), device=device, dtype=dtype),
             torch.tensor(
-                europlug.connector_pos_relative_to_center_male / 1000,
+                europlug.terminal_pos_relative_to_center_male / 1000,
                 device=device,
                 dtype=dtype,
             ).unsqueeze(0),
             torch.tensor(
-                europlug.connector_pos_relative_to_center_female / 1000,
+                europlug.terminal_pos_relative_to_center_female / 1000,
                 device=device,
                 dtype=dtype,
             ).unsqueeze(0),
@@ -145,7 +145,7 @@ def scene_with_entities(init_gs):
         positions=positions,
         rotations=rotations,
         fixed=fixed,
-        connector_position_relative_to_center=connector_position_relative_to_center,
+        terminal_position_relative_to_center=terminal_position_relative_to_center,
     )
     # Register fasteners in batch (replace deprecated single registration)
     # Prepare a minimal placeholder part_hole_batch to satisfy fastener registration
@@ -287,41 +287,41 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     female_name = "europlug_0_female@connector"
     europlug = Connector.from_name(male_name)
     m_connector_pos_untranslated = torch.from_numpy(
-        europlug.connector_pos_relative_to_center_male / 1000
+        europlug.terminal_pos_relative_to_center_male / 1000
     ).to(gs_device)
     f_connector_pos_untranslated = torch.from_numpy(
-        europlug.connector_pos_relative_to_center_female / 1000
+        europlug.terminal_pos_relative_to_center_female / 1000
     ).to(gs_device)
 
-    # connector_def pos should be at their positions too.
+    # terminal_def pos should be at their positions too.
     # Get male connector index and position from tensor-based structure
-    male_connector_idx = sim_state.physical_state[0].connector_indices_from_name[
+    male_connector_idx = sim_state.physical_state[0].terminal_indices_from_name[
         male_name
     ]
-    connector_def_actual_m = sim_state.physical_state.male_connector_positions[
+    terminal_def_actual_m = sim_state.physical_state.male_terminal_positions[
         0, male_connector_idx
     ].to(gs_device)
-    connector_def_expected_m = get_connector_pos(
+    terminal_def_expected_m = get_connector_pos(
         entities[male_name].get_pos(0),
         entities[male_name].get_quat(0),
         m_connector_pos_untranslated.unsqueeze(0),
     ).squeeze(0)
-    assert torch.allclose(connector_def_actual_m, connector_def_expected_m)
+    assert torch.allclose(terminal_def_actual_m, terminal_def_expected_m)
 
-    # connector_def pos should be at their positions too.
+    # terminal_def pos should be at their positions too.
     # Get female connector index and position from tensor-based structure
-    female_connector_idx = sim_state.physical_state[0].connector_indices_from_name[
+    female_connector_idx = sim_state.physical_state[0].terminal_indices_from_name[
         female_name
     ]
-    connector_def_actual_f = sim_state.physical_state.female_connector_positions[
+    terminal_def_actual_f = sim_state.physical_state.female_terminal_positions[
         0, female_connector_idx
     ].to(gs_device)
-    connector_def_expected_f = get_connector_pos(
+    terminal_def_expected_f = get_connector_pos(
         entities[female_name].get_pos(0),
         entities[female_name].get_quat(0),
         f_connector_pos_untranslated.unsqueeze(0),
     ).squeeze(0)
-    assert torch.allclose(connector_def_actual_f, connector_def_expected_f)
+    assert torch.allclose(terminal_def_actual_f, terminal_def_expected_f)
 
     # holes should be updated relative to bodies:
     holes_actual = sim_state.physical_state.hole_positions

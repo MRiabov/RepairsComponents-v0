@@ -2,7 +2,7 @@
 
 1. Translation of electronics and fasteners is not implemented. (DONE)
   - Persistence of mjcf singletons is not implemented on electronics; not modular on fasteners too. (DONE)
-2. Electronics collision has distance checks implemented (untested), but it does not have actual "connect" logic implemented. `check_connections` outputs (presumably) correct labels of connectors (connector_defs?), but then we need to `connect` the items manually (DONE, untested.)
+2. Electronics collision has distance checks implemented (untested), but it does not have actual "connect" logic implemented. `check_connections` outputs (presumably) correct labels of connectors (terminal_defs?), but then we need to `connect` the items manually (DONE, untested.)
 3. Collision detection of electronics during simulation is untested. does it work? (WIP)
 4. Collision detection of fasteners during simulation is untested. does it work? 
 5. Diff code may be unupdated. (DONE, untested.)  
@@ -12,8 +12,8 @@
 8. Buttons, LEDs, and switches are not implemented.
 9. Fasteners may not constrain two parts properly. (untested)
 10. (related) fastener insertion hint (next task)
-11. Europlug connector_pos_relative_to_center_male and female are not implemented. (DONE, tested.)
-12. connector_pos_relative_to_center_male and female are not used properly. Links are most likely gotten by the center of the part (although I think I fixed it?). Possibly, may not work at all (DONE, untested).
+11. Europlug terminal_pos_relative_to_center_male and female are not implemented. (DONE, tested.)
+12. terminal_pos_relative_to_center_male and female are not used properly. Links are most likely gotten by the center of the part (although I think I fixed it?). Possibly, may not work at all (DONE, untested).
 13. ~~Fasteners and electronics rely on MJCF and MJCF does not support links and glb mesh imports. WON'T DO: better to use MJCF and just export to obj. And calculate fixed frames manually.~~
 - MJCF caused unexpected problems/bugs. It isn't necessary either. Deprecate mjcf and use meshes instead. (DONE)
 ~~14. Simulating my small objects on meter scale is not stable (as indicated by Genesis). Need to change settings of Genesis to milimeter including exports.~~ (Reverted)

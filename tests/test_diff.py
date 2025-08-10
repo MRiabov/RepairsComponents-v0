@@ -197,7 +197,9 @@ def test_physical_state_diff_fastener_attr_flags():
 
     # State B fastener: changed d, L, position and quaternion (10 deg around Z)
     theta = torch.deg2rad(torch.tensor(10.0))
-    qz = torch.tensor([[[(torch.cos(theta / 2)).item(), 0.0, 0.0, (torch.sin(theta / 2)).item()]]])
+    qz = torch.tensor(
+        [[[(torch.cos(theta / 2)).item(), 0.0, 0.0, (torch.sin(theta / 2)).item()]]]
+    )
     B_batched = register_fasteners_batch(
         B_batched,
         fastener_pos=torch.tensor([[[0.01, 0.00, 0.00]]], dtype=torch.float32),
@@ -221,7 +223,9 @@ def test_physical_state_diff_fastener_attr_flags():
 
     # Detailed aligned deltas should be present for changed edge
     assert diff_graph.fastener_pos_diff.shape == (1, 3)
-    assert torch.allclose(diff_graph.fastener_pos_diff[0], torch.tensor([0.01, 0.0, 0.0]))
+    assert torch.allclose(
+        diff_graph.fastener_pos_diff[0], torch.tensor([0.01, 0.0, 0.0])
+    )
     assert diff_graph.fastener_quat_delta.shape == (1, 4)
     assert torch.linalg.norm(diff_graph.fastener_quat_delta[0]) > 0
 
@@ -327,7 +331,9 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
     A_batched = register_fasteners_batch(
         A_batched,
         fastener_pos=torch.zeros(Bsz, 1, 3),
-        fastener_quat=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]], dtype=torch.float32).expand(Bsz, -1, -1).contiguous(),
+        fastener_quat=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]], dtype=torch.float32)
+        .expand(Bsz, -1, -1)
+        .contiguous(),
         fastener_init_hole_a=fa,
         fastener_init_hole_b=fb,
         fastener_compound_names=[get_fastener_singleton_name(3.0, 10.0)],
@@ -335,11 +341,16 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
 
     # State B fastener: changed d, L, position and quaternion (10 deg around Z), replicated across batch
     theta = torch.deg2rad(torch.tensor(10.0))
-    qz_single = torch.tensor([[(torch.cos(theta / 2)).item(), 0.0, 0.0, (torch.sin(theta / 2)).item()]], dtype=torch.float32)
+    qz_single = torch.tensor(
+        [[(torch.cos(theta / 2)).item(), 0.0, 0.0, (torch.sin(theta / 2)).item()]],
+        dtype=torch.float32,
+    )
     qz = qz_single.unsqueeze(0).expand(Bsz, -1, -1).contiguous()  # [B,1,4]
     B_batched = register_fasteners_batch(
         B_batched,
-        fastener_pos=torch.tensor([[[0.01, 0.00, 0.00]]], dtype=torch.float32).expand(Bsz, -1, -1).contiguous(),
+        fastener_pos=torch.tensor([[[0.01, 0.00, 0.00]]], dtype=torch.float32)
+        .expand(Bsz, -1, -1)
+        .contiguous(),
         fastener_quat=qz,
         fastener_init_hole_a=fa.clone(),
         fastener_init_hole_b=fb.clone(),
@@ -358,7 +369,9 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
 
     # Detailed aligned deltas should be present for changed edge
     assert diff_graph.fastener_pos_diff.shape == (1, 3)
-    assert torch.allclose(diff_graph.fastener_pos_diff[0], torch.tensor([0.01, 0.0, 0.0]))
+    assert torch.allclose(
+        diff_graph.fastener_pos_diff[0], torch.tensor([0.01, 0.0, 0.0])
+    )
     assert diff_graph.fastener_quat_delta.shape == (1, 4)
     assert torch.linalg.norm(diff_graph.fastener_quat_delta[0]) > 0
 

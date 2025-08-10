@@ -180,7 +180,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
     # Preallocate using existing PhysicalState shapes to avoid stacking
     positions = torch.zeros_like(sim_state.physical_state.position)  # [B, N, 3]
     rotations = torch.zeros_like(sim_state.physical_state.quat)  # [B, N, 4]
-    connector_rel = torch.full(
+    terminal_rel = torch.full(
         (positions.shape[1], 3),
         float("nan"),
         dtype=positions.dtype,
@@ -204,7 +204,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
             positions[:, fill_idx, :] = pos_all
             rotations[:, fill_idx, :] = quat_all
 
-            # Connector relative position or NaNs for non-connectors
+            # Terminal relative position or NaNs for non-connectors
             if part_type == "connector":
                 male = part_name.endswith(
                     "_male"
@@ -212,17 +212,17 @@ def translate_genesis_to_python(  # translate to sim state, really.
                 connector = Connector.from_name(part_name)
                 if male:
                     rel = torch.as_tensor(
-                        connector.connector_pos_relative_to_center_male / 1000,
+                        connector.terminal_pos_relative_to_center_male / 1000,
                         dtype=positions.dtype,
                         device=physical_device,
                     )
                 else:
                     rel = torch.as_tensor(
-                        connector.connector_pos_relative_to_center_female / 1000,
+                        connector.terminal_pos_relative_to_center_female / 1000,
                         dtype=positions.dtype,
                         device=physical_device,
                     )
-                connector_rel[fill_idx] = rel
+                terminal_rel[fill_idx] = rel
             fill_idx += 1
 
         elif part_type == "control":
@@ -242,9 +242,9 @@ def translate_genesis_to_python(  # translate to sim state, really.
         )
         positions = positions[:, :fill_idx]
         rotations = rotations[:, :fill_idx]
-        connector_rel = connector_rel[:fill_idx]
+        terminal_rel = terminal_rel[:fill_idx]
         sim_state.physical_state = update_bodies_batch(
-            sim_state.physical_state, body_names, positions, rotations, connector_rel
+            sim_state.physical_state, body_names, positions, rotations, terminal_rel
         )
 
     # handle picked up fastener (tip)
@@ -387,8 +387,8 @@ def translate_compound_to_sim_state(
                 raise NotImplementedError("Liquid is not handled yet.")
             elif part_type == "button":
                 raise NotImplementedError("Buttons are not handled yet.")
-            elif part_type == "connector_def":
-                continue  # connector def is already registered in connectors.
+            elif part_type == "terminal_def":
+                continue  # terminal def is already registered in connectors.
             elif part_type == "fastener":
                 continue  # would be handled in the next loop.
             else:
@@ -406,16 +406,16 @@ def translate_compound_to_sim_state(
 
     for i, name in enumerate(all_body_names):
         if name.endswith("@connector"):
-            # get the connector def position
+            # get the terminal def position
             connector = Connector.from_name(name)
             if name.endswith("_male@connector"):
                 connector_positions_relative[i] = torch.tensor(
-                    connector.connector_pos_relative_to_center_male / 1000,
+                    connector.terminal_pos_relative_to_center_male / 1000,
                     dtype=torch.float32,
                 )
             elif name.endswith("_female@connector"):
                 connector_positions_relative[i] = torch.tensor(
-                    connector.connector_pos_relative_to_center_female / 1000,
+                    connector.terminal_pos_relative_to_center_female / 1000,
                     dtype=torch.float32,
                 )
 
@@ -522,7 +522,7 @@ def translate_compound_to_sim_state(
         fastener_names,
     )
 
-    # NOTE: connectors and connector_defs other solid bodies are not encoded in electronics, only functional components and their connections are encoded.
+    # NOTE: connectors and terminal_defs other solid bodies are not encoded in electronics, only functional components and their connections are encoded.
     # so check_connections will remain, however it will simply be an intermediate before the actual export graph.
     # alternatively (!) connectors can be encoded as edges in the non-export graph,
     # however, during export they will be removed and component nodes will be connected
@@ -531,15 +531,15 @@ def translate_compound_to_sim_state(
     # # Check for connections using tensor-based connector positions
     # unnecessary yet because connectors are not encoded in electronics state.
     # if (
-    #     len(sim_state.physical_state[0].male_connector_positions) > 0
-    #     and len(sim_state.physical_state[0].female_connector_positions) > 0
+    #     len(sim_state.physical_state[0].male_terminal_positions) > 0
+    #     and len(sim_state.physical_state[0].female_terminal_positions) > 0
     # ):
     #     for env_idx in range(n_envs):
     #         ps = sim_state.physical_state[env_idx]
 
     #         # Get tensor-based connector positions for this environment
-    #         male_positions = ps.male_connector_positions
-    #         female_positions = ps.female_connector_positions
+    #         male_positions = ps.male_terminal_positions
+    #         female_positions = ps.female_terminal_positions
 
     #         if male_positions.numel() > 0 and female_positions.numel() > 0:
     #             # Find connections using the updated check_connections function
@@ -553,8 +553,8 @@ def translate_compound_to_sim_state(
     #             # Add new connections using body indices to get connector names
     #             for male_idx, female_idx in connection_indices.tolist():
     #                 # Get connector names from indices
-    #                 male_body_idx = ps.male_connector_batch[male_idx].item()
-    #                 female_body_idx = ps.female_connector_batch[female_idx].item()
+    #                 male_body_idx = ps.male_terminal_batch[male_idx].item()
+    #                 female_body_idx = ps.female_terminal_batch[female_idx].item()
 
     #                 # Convert body indices back to connector names
     #                 male_name = ps.inverse_body_indices[male_body_idx]
@@ -565,7 +565,7 @@ def translate_compound_to_sim_state(
     #       sim_state.physical_state[env_idx] = ps
 
     # TODO I'll do this later.
-    # possibly (reasonably) we can encode XYZ and quat of connector def positions into electronics state features.
+    # possibly (reasonably) we can encode XYZ and quat of terminal def positions into electronics state features.
     # however this won't mean they will be returned in export_graph.
 
     # assert out # absolute because it's normalized and equal to both sides.

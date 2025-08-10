@@ -15,7 +15,7 @@ from torch_scatter import scatter_min
 # Define part type to color mapping (for priority extraction)
 PART_TYPE_COLORS = {
     "part_to_replace": [1, 0.5, 0, 0.8],  # orange
-    "connector_def": [1, 1, 0, 0.8],  # yellow
+    "terminal_def": [1, 1, 0, 0.8],  # yellow
     "connector": [0.9, 0.9, 0, 0.8],  # yellow, but a little greyer.
     "LED": [0, 1, 0, 0.8],  # green
     "switch": [1, 0.25, 0.25, 0.8],
@@ -31,7 +31,7 @@ PART_TYPE_COLORS = {
 # Map part types to integer labels
 PART_TYPE_LABEL = {
     "part_to_replace": 1,  # this is the part that will be replaced in "ReplaceTask".
-    "connector_def": 2,
+    "terminal_def": 2,
     "connector": 3,
     "LED": 4,
     "fastener": 5,

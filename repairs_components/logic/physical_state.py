@@ -126,24 +126,24 @@ class PhysicalState(TensorClass):
     """Hole quats per part, batched with hole_indices_batch."""
 
     # Connector attributes (tensor-based batching)
-    connector_indices_from_name: dict[str, int] = field(default_factory=dict)
+    terminal_indices_from_name: dict[str, int] = field(default_factory=dict)
     """Connector indices per connector name."""
-    male_connector_batch: torch.Tensor = field(
+    male_terminal_batch: torch.Tensor = field(
         default_factory=lambda: torch.empty((0,), dtype=torch.long)
     )
     """Male connector indices per part in the batch."""
-    female_connector_batch: torch.Tensor = field(
+    female_terminal_batch: torch.Tensor = field(
         default_factory=lambda: torch.empty((0,), dtype=torch.long)
     )
     """Female connector indices per part in the batch."""
-    male_connector_positions: torch.Tensor = field(
+    male_terminal_positions: torch.Tensor = field(
         default_factory=lambda: torch.empty((0, 3), dtype=torch.float32)
     )
-    """Male connector positions per part, batched with male_connector_batch."""
-    female_connector_positions: torch.Tensor = field(
+    """Male connector positions per part, batched with male_terminal_batch."""
+    female_terminal_positions: torch.Tensor = field(
         default_factory=lambda: torch.empty((0, 3), dtype=torch.float32)
     )
-    """Female connector positions per part, batched with female_connector_batch."""
+    """Female connector positions per part, batched with female_terminal_batch."""
 
     permanently_constrained_parts: list[list[str]] = field(default_factory=list)
     """List of lists of permanently constrained parts (linked_groups from EnvSetup)"""
@@ -234,7 +234,7 @@ class PhysicalState(TensorClass):
         fixed: bool = False,
         rot_as_quat: bool = False,  # mostly for convenience in testing
         _expect_unnormalized_coordinates: bool = True,  # mostly for tests...
-        connector_position_relative_to_center: torch.Tensor | None = None,
+        terminal_position_relative_to_center: torch.Tensor | None = None,
         max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64]),
         min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0]),
     ):
@@ -295,11 +295,11 @@ class PhysicalState(TensorClass):
 
         # handle male and female connector positions.
         if name.endswith("@connector"):
-            assert connector_position_relative_to_center is not None, (
+            assert terminal_position_relative_to_center is not None, (
                 f"Connector {name} must have a connector position relative to center."
             )
-            self._update_connector_def_pos(
-                name, position_sim, rotation, connector_position_relative_to_center
+            self._update_terminal_def_pos(
+                name, position_sim, rotation, terminal_position_relative_to_center
             )
         return self
 
@@ -309,7 +309,7 @@ class PhysicalState(TensorClass):
         name: str,
         position: tuple,
         rotation: tuple,
-        connector_position_relative_to_center: torch.Tensor | None = None,
+        terminal_position_relative_to_center: torch.Tensor | None = None,
     ):
         "Note: expects normalized coordinates."
         assert name in self.body_indices, (
@@ -339,14 +339,14 @@ class PhysicalState(TensorClass):
         self.quat[idx] = rotation
 
         if name.endswith("@connector"):
-            assert connector_position_relative_to_center is not None, (
+            assert terminal_position_relative_to_center is not None, (
                 f"Connector {name} must have a connector position relative to center."
             )
-            self._update_connector_def_pos(
+            self._update_terminal_def_pos(
                 name,
                 pos_tensor.unsqueeze(0),
                 rotation.unsqueeze(0),
-                connector_position_relative_to_center,
+                terminal_position_relative_to_center,
             )
 
         return self  # maybe that would fix view issues.
@@ -775,30 +775,30 @@ class PhysicalState(TensorClass):
         # ^batch of environments would be cool, but batch of parts would barely ever happen.
         return (changed == part_id).any()
 
-    def _update_connector_def_pos(
+    def _update_terminal_def_pos(
         self,
         name: str,
         position_sim: torch.Tensor,
         rotation: torch.Tensor,
-        connector_position_relative_to_center: torch.Tensor,
+        terminal_position_relative_to_center: torch.Tensor,
     ):
         assert name.endswith(("_male@connector", "_female@connector")), (
             f"Connector {name} must end with _male@connector or _female@connector."
         )
-        assert (connector_position_relative_to_center < 5).all(), (
+        assert (terminal_position_relative_to_center < 5).all(), (
             f"Likely dimension error: it is unlikely that a connector is further than 5m from the center of the "
-            f"part. Failed at {name} with position {connector_position_relative_to_center}"
+            f"part. Failed at {name} with position {terminal_position_relative_to_center}"
         )
         assert position_sim.ndim == 2 and rotation.ndim == 2, (
             f"Position and rotation must be 2D tensors, got {position_sim.shape} and {rotation.shape}"
         )  # 2dim because it's just for convenience.
-        assert connector_position_relative_to_center.ndim == 1, (
-            f"Connector position relative to center must be 1D tensor, got {connector_position_relative_to_center.shape}"
+        assert terminal_position_relative_to_center.ndim == 1, (
+            f"Connector position relative to center must be 1D tensor, got {terminal_position_relative_to_center.shape}"
         )
-        connector_pos = get_connector_pos(
+        terminal_pos = get_connector_pos(
             position_sim,
             rotation,
-            connector_position_relative_to_center.to(self.device).unsqueeze(0),
+            terminal_position_relative_to_center.to(self.device).unsqueeze(0),
         ).squeeze(0)
 
         # For connectors, the body index is the connector itself since connectors are registered as bodies
@@ -811,46 +811,46 @@ class PhysicalState(TensorClass):
 
         if name.endswith("_male@connector"):
             # Check if connector already exists
-            if name in self.connector_indices_from_name:
+            if name in self.terminal_indices_from_name:
                 # Update existing connector
-                connector_idx = self.connector_indices_from_name[name]
-                self.male_connector_positions[connector_idx] = connector_pos
+                terminal_idx = self.terminal_indices_from_name[name]
+                self.male_terminal_positions[terminal_idx] = terminal_pos
             else:
                 # Add new connector
-                connector_idx = len(self.male_connector_positions)
-                self.connector_indices_from_name[name] = connector_idx
-                self.male_connector_batch = torch.cat(
+                terminal_idx = len(self.male_terminal_positions)
+                self.terminal_indices_from_name[name] = terminal_idx
+                self.male_terminal_batch = torch.cat(
                     [
-                        self.male_connector_batch,
+                        self.male_terminal_batch,
                         torch.tensor([body_idx], dtype=torch.long, device=self.device),
                     ]
                 )
-                self.male_connector_positions = torch.cat(
+                self.male_terminal_positions = torch.cat(
                     [
-                        self.male_connector_positions.to(self.device),
-                        connector_pos.unsqueeze(0),
+                        self.male_terminal_positions.to(self.device),
+                        terminal_pos.unsqueeze(0),
                     ]
                 )
         else:
             # Check if connector already exists
-            if name in self.connector_indices_from_name:
+            if name in self.terminal_indices_from_name:
                 # Update existing connector
-                connector_idx = self.connector_indices_from_name[name]
-                self.female_connector_positions[connector_idx] = connector_pos
+                terminal_idx = self.terminal_indices_from_name[name]
+                self.female_terminal_positions[terminal_idx] = terminal_pos
             else:
                 # Add new connector
-                connector_idx = len(self.female_connector_positions)
-                self.connector_indices_from_name[name] = connector_idx
-                self.female_connector_batch = torch.cat(
+                terminal_idx = len(self.female_terminal_positions)
+                self.terminal_indices_from_name[name] = terminal_idx
+                self.female_terminal_batch = torch.cat(
                     [
-                        self.female_connector_batch,
+                        self.female_terminal_batch,
                         torch.tensor([body_idx], dtype=torch.long, device=self.device),
                     ]
                 )
-                self.female_connector_positions = torch.cat(
+                self.female_terminal_positions = torch.cat(
                     [
-                        self.female_connector_positions.to(self.device),
-                        connector_pos.unsqueeze(0),
+                        self.female_terminal_positions.to(self.device),
+                        terminal_pos.unsqueeze(0),
                     ]
                 )
         return self
@@ -1120,7 +1120,7 @@ def register_bodies_batch(
     positions: torch.Tensor,  # [B, num_bodies, 3] positions for bodies across environments
     rotations: torch.Tensor,  # [B, num_bodies, 4] quaternions for bodies across environments
     fixed: torch.Tensor,  # [B, num_bodies]
-    connector_position_relative_to_center: torch.Tensor
+    terminal_position_relative_to_center: torch.Tensor
     | None = None,  # [num_bodies, 3] for connectors, can contain NaN for non-connectors
     max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64]),
     min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0]),
@@ -1133,7 +1133,7 @@ def register_bodies_batch(
         positions: Tensor of positions [B, num_bodies, 3] for bodies across environments
         rotations: Tensor of quaternions [B, num_bodies, 4] for bodies across environments
         fixed: Tensor [B, num_bodies]
-        connector_position_relative_to_center: Relative positions for connectors [num_bodies, 3], NaN for non-connectors
+        terminal_position_relative_to_center: Relative positions for connectors [num_bodies, 3], NaN for non-connectors
         max_bounds: Maximum position bounds
         min_bounds: Minimum position bounds
     """
@@ -1209,7 +1209,7 @@ def register_bodies_batch(
     physical_states.count_fasteners_held = fastener_count
 
     # Handle connectors using the batched connector update function
-    if connector_position_relative_to_center is not None:
+    if terminal_position_relative_to_center is not None:
         # Filter out connector bodies and their data
         connector_indices = [
             i for i, name in enumerate(names) if name.endswith("@connector")
@@ -1223,31 +1223,31 @@ def register_bodies_batch(
             connector_rotations = rotations[
                 :, connector_indices
             ]  # [B, num_connectors, 4]
-            connector_rel_positions = connector_position_relative_to_center[
+            terminal_rel_positions = terminal_position_relative_to_center[
                 connector_indices
             ]  # [num_connectors, 3]
 
             # Validate that connector positions are not NaN
             for i, name in enumerate(connector_names):
-                connector_rel_pos = connector_rel_positions[i]
+                terminal_rel_pos = terminal_rel_positions[i]
                 if name.endswith(("_male@connector", "_female@connector")):
-                    assert not torch.isnan(connector_rel_pos).any(), (
-                        f"Connector {name} must have valid connector_position_relative_to_center, got NaN"
+                    assert not torch.isnan(terminal_rel_pos).any(), (
+                        f"Connector {name} must have valid terminal_position_relative_to_center, got NaN"
                     )
 
             # Use the batched connector update function
-            male_connector_positions, female_connector_positions = (
-                update_connector_def_pos_batch(
+            male_terminal_positions, female_terminal_positions = (
+                update_terminal_def_pos_batch(
                     connector_positions,
                     connector_rotations,
-                    connector_rel_positions,
+                    terminal_rel_positions,
                     connector_names,
                 )
             )
 
             # Set connector positions and indices directly
-            physical_states.male_connector_positions = male_connector_positions
-            physical_states.female_connector_positions = female_connector_positions
+            physical_states.male_terminal_positions = male_terminal_positions
+            physical_states.female_terminal_positions = female_terminal_positions
 
             # Set up connector indices and batches
             male_indices = [
@@ -1274,14 +1274,14 @@ def register_bodies_batch(
                 # Expand to batch dimension if needed
                 if len(male_batch_tensor.shape) == 1:
                     male_batch_tensor = male_batch_tensor.unsqueeze(0).expand(B, -1)
-                physical_states.male_connector_batch = male_batch_tensor
+                physical_states.male_terminal_batch = male_batch_tensor
                 # Update connector indices for all batch elements
                 for batch_idx in range(B):
                     for i, name in enumerate(male_names):
-                        physical_states[batch_idx].connector_indices_from_name[name] = i
+                        physical_states[batch_idx].terminal_indices_from_name[name] = i
             else:
                 # Set empty batched tensor
-                physical_states.male_connector_batch = torch.empty(
+                physical_states.male_terminal_batch = torch.empty(
                     (B, 0), dtype=torch.long, device=device
                 )
 
@@ -1298,14 +1298,14 @@ def register_bodies_batch(
                 # Expand to batch dimension if needed
                 if len(female_batch_tensor.shape) == 1:
                     female_batch_tensor = female_batch_tensor.unsqueeze(0).expand(B, -1)
-                physical_states.female_connector_batch = female_batch_tensor
+                physical_states.female_terminal_batch = female_batch_tensor
                 # Update connector indices for all batch elements
                 for batch_idx in range(B):
                     for i, name in enumerate(female_names):
-                        physical_states[batch_idx].connector_indices_from_name[name] = i
+                        physical_states[batch_idx].terminal_indices_from_name[name] = i
             else:
                 # Set empty batched tensor
-                physical_states.female_connector_batch = torch.empty(
+                physical_states.female_terminal_batch = torch.empty(
                     (B, 0), dtype=torch.long, device=device
                 )
 
@@ -1317,7 +1317,7 @@ def update_bodies_batch(
     names: list[str],
     positions: torch.Tensor,  # [B, num_update, 3]
     rotations: torch.Tensor,  # [B, num_update, 4]
-    connector_position_relative_to_center: torch.Tensor
+    terminal_position_relative_to_center: torch.Tensor
     | None = None,  # [num_update, 3] with NaNs for non-connectors
     max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64]),
     min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0]),
@@ -1333,7 +1333,7 @@ def update_bodies_batch(
         names: List of body names to update.
         positions: [B, num_update, 3]
         rotations: [B, num_update, 4]
-        connector_position_relative_to_center: [num_update, 3] relative positions; NaN for non-connectors.
+        terminal_position_relative_to_center: [num_update, 3] relative positions; NaN for non-connectors.
         max_bounds, min_bounds: Bounds for normalized coordinates.
 
     Returns:
@@ -1394,25 +1394,25 @@ def update_bodies_batch(
         i for i, n in enumerate(names) if n.endswith("@connector")
     ]
     if connector_indices_local:
-        assert connector_position_relative_to_center is not None, (
-            "Updated connectors must provide connector_position_relative_to_center"
+        assert terminal_position_relative_to_center is not None, (
+            "Updated connectors must provide terminal_position_relative_to_center"
         )
-        assert connector_position_relative_to_center.shape == (num_update, 3), (
-            f"Expected connector_position_relative_to_center shape [{num_update}, 3], got {connector_position_relative_to_center.shape}"
+        assert terminal_position_relative_to_center.shape == (num_update, 3), (
+            f"Expected terminal_position_relative_to_center shape [{num_update}, 3], got {terminal_position_relative_to_center.shape}"
         )
 
         connector_names = [names[i] for i in connector_indices_local]
-        connector_rel = connector_position_relative_to_center[
-            connector_indices_local
-        ].to(device)
+        terminal_rel = terminal_position_relative_to_center[connector_indices_local].to(
+            device
+        )
 
         # Validate connector rel positions for the connectors
         for i, cname in enumerate(connector_names):
             if cname.endswith(("_male@connector", "_female@connector")):
-                assert not torch.isnan(connector_rel[i]).any(), (
-                    f"Connector {cname} must have valid connector_position_relative_to_center, got NaN"
+                assert not torch.isnan(terminal_rel[i]).any(), (
+                    f"Connector {cname} must have valid terminal_position_relative_to_center, got NaN"
                 )
-        assert (connector_rel.abs() < 5).all(), (
+        assert (terminal_rel.abs() < 5).all(), (
             "Likely dimension error: it is unlikely that a connector is further than 5m from the center of the part."
         )
 
@@ -1425,12 +1425,12 @@ def update_bodies_batch(
             :, body_idxs_for_connectors, :
         ]  # [B, Nc, 4]
 
-        male_pos_new, female_pos_new = update_connector_def_pos_batch(
-            conn_positions, conn_rotations, connector_rel, connector_names
+        male_pos_new, female_pos_new = update_terminal_def_pos_batch(
+            conn_positions, conn_rotations, terminal_rel, connector_names
         )
 
         # Write back into preallocated connector position tensors using stored indices
-        # Note: connector_indices_from_name is stored per-batch element
+        # Note: terminal_indices_from_name is stored per-batch element
         male_indices_local = [
             i for i, n in enumerate(connector_names) if n.endswith("_male@connector")
         ]
@@ -1442,27 +1442,27 @@ def update_bodies_batch(
         if male_indices_local:
             # male_pos_new corresponds to the male subset order
             for b in range(B):
-                name_to_idx = physical_states[b].connector_indices_from_name
+                name_to_idx = physical_states[b].terminal_indices_from_name
                 for j, local_i in enumerate(male_indices_local):
                     cname = connector_names[local_i]
                     assert cname in name_to_idx, (
                         f"Connector {cname} not found in state mapping"
                     )
                     dst_idx = name_to_idx[cname]
-                    physical_states.male_connector_positions[b, dst_idx, :] = (
+                    physical_states.male_terminal_positions[b, dst_idx, :] = (
                         male_pos_new[b, j, :]
                     )
         # Update female connector positions
         if female_indices_local:
             for b in range(B):
-                name_to_idx = physical_states[b].connector_indices_from_name
+                name_to_idx = physical_states[b].terminal_indices_from_name
                 for j, local_i in enumerate(female_indices_local):
                     cname = connector_names[local_i]
                     assert cname in name_to_idx, (
                         f"Connector {cname} not found in state mapping"
                     )
                     dst_idx = name_to_idx[cname]
-                    physical_states.female_connector_positions[b, dst_idx, :] = (
+                    physical_states.female_terminal_positions[b, dst_idx, :] = (
                         female_pos_new[b, j, :]
                     )
 
@@ -1603,10 +1603,10 @@ def register_fasteners_batch(
     return physical_states
 
 
-def update_connector_def_pos_batch(
+def update_terminal_def_pos_batch(
     positions: torch.Tensor,  # [B, num_connectors, 3] positions for connectors across environments
     rotations: torch.Tensor,  # [B, num_connectors, 4] quaternions for connectors across environments
-    connector_positions_relative_to_center: torch.Tensor,  # [num_connectors, 3] relative positions
+    terminal_positions_relative_to_center: torch.Tensor,  # [num_connectors, 3] relative positions
     names: list[str],  # List of connector names
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Update connector positions in batch for multiple environments.
@@ -1614,13 +1614,13 @@ def update_connector_def_pos_batch(
     Args:
         positions: Tensor of positions [B, num_connectors, 3] for connectors across environments
         rotations: Tensor of quaternions [B, num_connectors, 4] for connectors across environments
-        connector_positions_relative_to_center: Relative positions [num_connectors, 3]
+        terminal_positions_relative_to_center: Relative positions [num_connectors, 3]
         names: List of connector names
 
     Returns:
-        Tuple of (male_connector_positions, female_connector_positions)
-        - male_connector_positions: [B, num_male_connectors, 3]
-        - female_connector_positions: [B, num_female_connectors, 3]
+        Tuple of (male_terminal_positions, female_terminal_positions)
+        - male_terminal_positions: [B, num_male_connectors, 3]
+        - female_terminal_positions: [B, num_female_connectors, 3]
     """
     B, num_connectors, _ = positions.shape
     device = positions.device
@@ -1629,8 +1629,8 @@ def update_connector_def_pos_batch(
     assert rotations.shape == (B, num_connectors, 4), (
         f"Expected rotations shape [{B}, {num_connectors}, 4], got {rotations.shape}"
     )
-    assert connector_positions_relative_to_center.shape == (num_connectors, 3), (
-        f"Expected connector_positions_relative_to_center shape [{num_connectors}, 3], got {connector_positions_relative_to_center.shape}"
+    assert terminal_positions_relative_to_center.shape == (num_connectors, 3), (
+        f"Expected terminal_positions_relative_to_center shape [{num_connectors}, 3], got {terminal_positions_relative_to_center.shape}"
     )
     assert len(names) == num_connectors, (
         f"Expected {num_connectors} names, got {len(names)}"
@@ -1643,31 +1643,31 @@ def update_connector_def_pos_batch(
         )
 
     # Validate relative positions are reasonable
-    assert (connector_positions_relative_to_center.abs() < 5).all(), (
+    assert (terminal_positions_relative_to_center.abs() < 5).all(), (
         "Likely dimension error: it is unlikely that a connector is further than 5m from the center of the part."
     )
 
     # Move to device
-    connector_positions_relative_to_center = connector_positions_relative_to_center.to(
+    terminal_positions_relative_to_center = terminal_positions_relative_to_center.to(
         device
     )
 
-    # Calculate connector positions for all environments and connectors
+    # Calculate terminal positions for all environments and connectors
     # We need to expand relative positions to match batch dimension
-    connector_rel_expanded = connector_positions_relative_to_center.unsqueeze(0).expand(
+    terminal_rel_expanded = terminal_positions_relative_to_center.unsqueeze(0).expand(
         B, -1, -1
     )  # [B, num_connectors, 3]
 
-    # Calculate connector positions using get_connector_pos for each connector
-    all_connector_positions = torch.zeros_like(positions)  # [B, num_connectors, 3]
+    # Calculate terminal positions using get_connector_pos for each connector
+    all_terminal_positions = torch.zeros_like(positions)  # [B, num_connectors, 3]
 
     for i in range(num_connectors):
-        connector_pos = get_connector_pos(
+        terminal_pos = get_connector_pos(
             positions[:, i],  # [B, 3]
             rotations[:, i],  # [B, 4]
-            connector_rel_expanded[:, i],  # [B, 3]
+            terminal_rel_expanded[:, i],  # [B, 3]
         )
-        all_connector_positions[:, i] = connector_pos
+        all_terminal_positions[:, i] = terminal_pos
 
     # Separate male and female connectors
     male_indices = [
@@ -1681,17 +1681,17 @@ def update_connector_def_pos_batch(
     # female_names = [names[i] for i in female_indices]  # Not used in this function
 
     if male_indices:
-        male_connector_positions = all_connector_positions[
+        male_terminal_positions = all_terminal_positions[
             :, male_indices
         ]  # [B, num_male, 3]
     else:
-        male_connector_positions = torch.empty((B, 0, 3), device=device)
+        male_terminal_positions = torch.empty((B, 0, 3), device=device)
 
     if female_indices:
-        female_connector_positions = all_connector_positions[
+        female_terminal_positions = all_terminal_positions[
             :, female_indices
         ]  # [B, num_female, 3]
     else:
-        female_connector_positions = torch.empty((B, 0, 3), device=device)
+        female_terminal_positions = torch.empty((B, 0, 3), device=device)
 
-    return male_connector_positions, female_connector_positions
+    return male_terminal_positions, female_terminal_positions

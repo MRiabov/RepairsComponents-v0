@@ -544,17 +544,15 @@ class TestRegisterBodiesBatch:
         single_state.count_fasteners_held = torch.empty(
             (0,), dtype=torch.int8, device=self.device
         )
-        single_state.male_connector_positions = torch.empty((0, 3), device=self.device)
-        single_state.female_connector_positions = torch.empty(
-            (0, 3), device=self.device
-        )
-        single_state.male_connector_batch = torch.empty(
+        single_state.male_terminal_positions = torch.empty((0, 3), device=self.device)
+        single_state.female_terminal_positions = torch.empty((0, 3), device=self.device)
+        single_state.male_terminal_batch = torch.empty(
             (0,), dtype=torch.long, device=self.device
         )
-        single_state.female_connector_batch = torch.empty(
+        single_state.female_terminal_batch = torch.empty(
             (0,), dtype=torch.long, device=self.device
         )
-        single_state.connector_indices_from_name = {}
+        single_state.terminal_indices_from_name = {}
 
         # Stack to create batched state
         states = [single_state for _ in range(batch_size)]
@@ -649,8 +647,8 @@ class TestRegisterBodiesBatch:
 
         # Verify connector positions were calculated
         # We should have one male and one female connector
-        assert result_state.male_connector_positions.shape == (batch_size, 1, 3)
-        assert result_state.female_connector_positions.shape == (batch_size, 1, 3)
+        assert result_state.male_terminal_positions.shape == (batch_size, 1, 3)
+        assert result_state.female_terminal_positions.shape == (batch_size, 1, 3)
 
     def test_register_bodies_batch_mixed_connectors(self):
         """Test register_bodies_batch with mixed connector and non-connector bodies."""
@@ -690,12 +688,12 @@ class TestRegisterBodiesBatch:
 
         # Verify connector positions were calculated only for connector (index 1)
         # We should have one male connector and no female connectors
-        assert result_state.male_connector_positions.shape == (
+        assert result_state.male_terminal_positions.shape == (
             batch_size,
             1,
             3,
         )  # Only one male connector
-        assert result_state.female_connector_positions.shape == (
+        assert result_state.female_terminal_positions.shape == (
             batch_size,
             0,
             3,
@@ -811,7 +809,7 @@ class TestRegisterBodiesBatch:
 
         with pytest.raises(
             AssertionError,
-            match="must have valid connector_position_relative_to_center",
+            match="must have valid terminal_position_relative_to_center",
         ):
             register_bodies_batch(
                 physical_state,
@@ -913,17 +911,15 @@ class TestUpdateBodiesBatch:
         single_state.count_fasteners_held = torch.empty(
             (0,), dtype=torch.int8, device=self.device
         )
-        single_state.male_connector_positions = torch.empty((0, 3), device=self.device)
-        single_state.female_connector_positions = torch.empty(
-            (0, 3), device=self.device
-        )
-        single_state.male_connector_batch = torch.empty(
+        single_state.male_terminal_positions = torch.empty((0, 3), device=self.device)
+        single_state.female_terminal_positions = torch.empty((0, 3), device=self.device)
+        single_state.male_terminal_batch = torch.empty(
             (0,), dtype=torch.long, device=self.device
         )
-        single_state.female_connector_batch = torch.empty(
+        single_state.female_terminal_batch = torch.empty(
             (0,), dtype=torch.long, device=self.device
         )
-        single_state.connector_indices_from_name = {}
+        single_state.terminal_indices_from_name = {}
 
         states = [single_state for _ in range(batch_size)]
         batched_state: PhysicalState = torch.stack(states)  # type: ignore
@@ -947,7 +943,7 @@ class TestUpdateBodiesBatch:
 
         if include_connectors:
             fixed = torch.tensor([False, False, False])
-            connector_rel = torch.tensor(
+            terminal_rel = torch.tensor(
                 [
                     [float("nan"), float("nan"), float("nan")],
                     [0.10, 0.00, 0.05],
@@ -955,7 +951,7 @@ class TestUpdateBodiesBatch:
                 ]
             )
             register_bodies_batch(
-                batched_state, names, positions, rotations, fixed, connector_rel
+                batched_state, names, positions, rotations, fixed, terminal_rel
             )
         else:
             fixed = torch.tensor([False, True, False])
@@ -1016,7 +1012,7 @@ class TestUpdateBodiesBatch:
         rotations = torch.zeros(batch_size, num_update, 4)
         rotations[..., 0] = 1.0
 
-        connector_rel = torch.tensor(
+        terminal_rel = torch.tensor(
             [
                 [float("nan"), float("nan"), float("nan")],
                 [0.10, 0.00, 0.05],  # male
@@ -1024,15 +1020,15 @@ class TestUpdateBodiesBatch:
             ]
         )
 
-        updated = update_bodies_batch(state, names, positions, rotations, connector_rel)
+        updated = update_bodies_batch(state, names, positions, rotations, terminal_rel)
 
         # Expected connector positions with identity rotations: pos + rel
         # Names order: [body_0, male, female]; male array contains only male connectors in that order
-        expected_male = positions[:, 1:2, :] + connector_rel[1:2, :]
-        expected_female = positions[:, 2:3, :] + connector_rel[2:3, :]
+        expected_male = positions[:, 1:2, :] + terminal_rel[1:2, :]
+        expected_female = positions[:, 2:3, :] + terminal_rel[2:3, :]
 
-        assert torch.allclose(updated.male_connector_positions, expected_male)
-        assert torch.allclose(updated.female_connector_positions, expected_female)
+        assert torch.allclose(updated.male_terminal_positions, expected_male)
+        assert torch.allclose(updated.female_terminal_positions, expected_female)
 
     def test_update_bodies_batch_device_handling(self):
         batch_size = 1

@@ -56,16 +56,16 @@ class USB_A(Connector):
                 with GridLocations(top_hole_y_dist, 0, 2, 1):
                     Box(top_hole_w, top_hole_len, shell_t, mode=Mode.SUBTRACT)
 
-        with BuildPart() as connector_def:
-            connector_center_pos = (
+        with BuildPart() as terminal_def:
+            terminal_center_pos = (
                 tuple(connector.center(CenterOf.BOUNDING_BOX))[0] - 1,
                 0,
                 0,
-            )  # for whichever reason, connector def z is 0.355 and I don't need it. so reset it.
-            with Locations(connector_center_pos):
-                Sphere(self._connector_def_size)
+            )  # for whichever reason, terminal def z is 0.355 and I don't need it. so reset it.
+            with Locations(terminal_center_pos):
+                Sphere(self._terminal_def_size)
 
-        connector = Compound(children=[usb_a.part, connector_def.part])
+        connector = Compound(children=[usb_a.part, terminal_def.part])
         self.color_and_label(connector, male=True)
 
         return connector.moved(Location(moved_to))
@@ -131,22 +131,22 @@ class USB_A(Connector):
             ):
                 Box(tongue_len, tongue_w, tongue_h, mode=Mode.ADD)
 
-        with BuildPart() as connector_def:
-            connector_center_pos = connector.center(CenterOf.BOUNDING_BOX)
-            connector_center_pos = connector_center_pos - Vector(1, 0, 0)
-            with Locations(connector_center_pos):
-                Sphere(self._connector_def_size)
+        with BuildPart() as terminal_def:
+            terminal_center_pos = connector.center(CenterOf.BOUNDING_BOX)
+            terminal_center_pos = terminal_center_pos - Vector(1, 0, 0)
+            with Locations(terminal_center_pos):
+                Sphere(self._terminal_def_size)
 
-        usb_a = Compound(children=[usb_a.part, connector_def.part])
+        usb_a = Compound(children=[usb_a.part, terminal_def.part])
         self.color_and_label(usb_a, male=False)
         return usb_a.moved(Location(moved_to))
 
     @property
-    def connector_pos_relative_to_center_male(self) -> np.ndarray:
+    def terminal_pos_relative_to_center_male(self) -> np.ndarray:
         return np.array([-22.625, 0, 0])
 
     @property
-    def connector_pos_relative_to_center_female(self) -> np.ndarray:
+    def terminal_pos_relative_to_center_female(self) -> np.ndarray:
         return np.array([-4, 0, 0])
 
     @property

@@ -100,7 +100,6 @@ def get_default_configs(debug: bool = True):
         "env_setup_ids": [0],
         "show_fps": True,
         "show_viewer": False,
-
     }
 
     # Command bounds (SAC defaults)

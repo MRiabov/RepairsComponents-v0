@@ -5,7 +5,7 @@ from repairs_components.logic.electronics.motor import Motor
 from repairs_components.logic.electronics.led import LED
 from repairs_components.logic.electronics.button import Button
 from repairs_components.logic.electronics.gates import AndGate, OrGate, NotGate
-from repairs_components.logic.electronics.simulator import simulate_circuit
+from repairs_components.logic.electronics.electronics_simulator import simulate_circuit
 from repairs_components.logic.electronics.wire import Wire
 
 pytestmark = pytest.mark.skip(reason="Electronics is not implemented yet.")

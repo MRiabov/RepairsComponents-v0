@@ -45,7 +45,7 @@ class Europlug(Connector):
         with BuildPart() as connector_center:
             with Locations(pins.center(CenterOf.BOUNDING_BOX)):
                 Sphere(
-                    self._connector_def_size
+                    self._terminal_def_size
                 )  # just get the center of this sphere later.
 
         plug_part = Compound(children=[plug_part.part, connector_center.part])
@@ -78,27 +78,27 @@ class Europlug(Connector):
             )  # native "base" joint, so will hold despite perturbations.
             # connector_center = Locations(holes.center(CenterOf.BOUNDING_BOX))
 
-        with BuildPart() as connector_center:
+        with BuildPart() as terminal_center:
             x, y, z = holes.center(CenterOf.BOUNDING_BOX)
             x += 1.5  # make it easier to plug in.
             with Locations((x, y, z)):
                 Sphere(
-                    self._connector_def_size
+                    self._terminal_def_size
                 )  # just get the center of this sphere later.
 
         socket_part = Compound(
-            children=[socket_part.part, connector_center.part],
+            children=[socket_part.part, terminal_center.part],
             joints={"native": base_joint},
         )
 
         return self.color_and_label(socket_part.moved(Location(moved_to)), male=False)
 
     @property
-    def connector_pos_relative_to_center_male(self) -> np.ndarray:
+    def terminal_pos_relative_to_center_male(self) -> np.ndarray:
         return np.array([34.5, 0.0, 0.0], dtype=np.float32)
 
     @property
-    def connector_pos_relative_to_center_female(self) -> np.ndarray:
+    def terminal_pos_relative_to_center_female(self) -> np.ndarray:
         return np.array([16.0, 0.0, 0.0], dtype=np.float32)
 
 
