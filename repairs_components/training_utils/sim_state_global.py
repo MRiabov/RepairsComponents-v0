@@ -1,10 +1,9 @@
-from dataclasses import dataclass, asdict, field
-import json
+from dataclasses import dataclass, field
 from pathlib import Path
-import uuid
-import numpy as np
 import torch
-from repairs_components.logic.electronics.electronics_state import ElectronicsState
+from repairs_components.logic.electronics.electronics_state import (
+    ElectronicsState,
+)
 from repairs_components.logic.physical_state import PhysicalState
 from repairs_components.logic.fluid_state import FluidState
 from repairs_components.logic.tools.tools_state import ToolState
@@ -21,7 +20,7 @@ class RepairsSimState(SimState):
     Primarily it for sanity checks."""
 
     # the main states.
-    electronics_state: list[ElectronicsState] = field(default_factory=list)
+    electronics_state: ElectronicsState = field(default_factory=ElectronicsState)
     physical_state: PhysicalState = field(
         default_factory=PhysicalState
     )  # Single TensorClass instance
@@ -38,7 +37,9 @@ class RepairsSimState(SimState):
     def __init__(self, batch_dim: int):
         super().__init__()
         self.scene_batch_dim = batch_dim
-        self.electronics_state = [ElectronicsState() for _ in range(batch_dim)]
+        self.electronics_state = torch.stack(
+            [ElectronicsState(device=self.device) for _ in range(batch_dim)]
+        )
         # Use the simpler approach: create list and stack
         self.physical_state = torch.stack(
             [PhysicalState(device=self.device) for _ in range(batch_dim)]
@@ -242,10 +243,11 @@ def reconstruct_sim_state(
 
     batch_dim = len(electronics_graphs)
     repairs_sim_state = RepairsSimState(batch_dim)
-    repairs_sim_state.electronics_state = [
-        ElectronicsState.rebuild_from_graph(graph, electronics_indices)
-        for graph in electronics_graphs
-    ]
+    # repairs_sim_state.electronics_state = [
+    #     ElectronicsStateTC.rebuild_from_graph(graph, electronics_indices)
+    #     for graph in electronics_graphs
+    # ]
+    # FIXME:  electronics state needs to be persisted and loaded.
     # Use the PhysicalState object directly - it should already be a single TensorClass instance
     repairs_sim_state.physical_state = mechanical_state
 

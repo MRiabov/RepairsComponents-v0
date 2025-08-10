@@ -4,13 +4,10 @@ from repairs_components.geometry.fasteners import Fastener
 from repairs_components.processing.translation import update_hole_locs
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.physical_state import (
-    PhysicalState,
     register_bodies_batch,
     register_fasteners_batch,
 )
-from repairs_components.logic.electronics.electronics_state import ElectronicsState
 
-import repairs_sim_step as step_mod
 from repairs_sim_step import (
     step_repairs,
     step_screw_in_or_out,
@@ -19,13 +16,11 @@ from repairs_sim_step import (
 )
 import genesis as gs
 from repairs_components.logic.tools.screwdriver import Screwdriver
-from repairs_components.logic.tools.tool import attach_tool_to_arm
-from repairs_components.logic.tools.tool import ToolsEnum, detach_tool_from_arm
 from repairs_components.logic.tools.gripper import Gripper
 from genesis.engine.entities import RigidEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 import numpy as np
-from tests.global_test_config import init_gs
+from tests.global_test_config import init_gs  # noqa: F401
 
 
 @pytest.fixture

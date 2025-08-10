@@ -9,7 +9,6 @@ from repairs_components.geometry.connectors.models.europlug import Europlug
 from repairs_components.processing.scene_creation_funnel import move_entities_to_pos
 from repairs_components.processing.tasks import AssembleTask
 from repairs_components.processing.translation import (
-    get_connector_pos,
     translate_compound_to_sim_state,
     translate_genesis_to_python,
     translate_state_to_genesis_scene,
@@ -297,16 +296,6 @@ def test_two_connectors_match_after_step(assembly_task_geoms_two_connectors, dat
     ).all()
     test_graph_features_unchanged(current_state, desired_state)
 
-
-# geom utils (until moved)
-def test_get_connector_pos():
-    parent_pos = torch.tensor([0.5, 0.5, 0.5])
-    parent_quat = torch.tensor([1.0, 0.0, 0.0, 0.0])
-    rel_connector_pos = torch.tensor([0.0, 0.0, 0.3])
-    assert torch.isclose(
-        get_connector_pos(parent_pos, parent_quat, rel_connector_pos),
-        torch.tensor([0.5, 0.5, 0.2]),
-    ).all()
 
 
 # TODO split this test in 3 test modules: test_translation_genesis_to_python, test_translation_compound_to_sim_state, test_translation_sim_state_to_genesis

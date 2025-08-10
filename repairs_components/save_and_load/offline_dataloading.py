@@ -230,7 +230,7 @@ class OfflineDataloader:
 
     def _load_sim_states(
         self, scene_id: int, env_idx: torch.Tensor | None = None
-    ) -> tuple[PhysicalState, list[ElectronicsState]]:
+    ) -> tuple[PhysicalState, ElectronicsState]:
         # ^ Returns: (mech_init_states, elec_init_graphs, mech_des_states, elec_des_graphs)
         """Load the physical states and electronics graphs for a scene."""
         if (

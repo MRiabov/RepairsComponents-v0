@@ -8,11 +8,6 @@ from repairs_components.logic.physical_state import (
     register_fasteners_batch,
 )
 from repairs_components.geometry.fasteners import get_fastener_singleton_name
-from repairs_components.logic.electronics.electronics_state import ElectronicsState
-from repairs_components.logic.electronics.resistor import Resistor
-from repairs_components.logic.electronics.wire import Wire
-from repairs_components.logic.electronics.voltage_source import VoltageSource as Battery
-
 # Tests updated to use batched PhysicalState API and WXYZ quaternion convention.
 
 
@@ -51,51 +46,6 @@ def test_physical_state_diff_basic():
     assert isinstance(total_diff, int)
 
 
-@pytest.mark.skip(reason="Electronics is not implemented yet.")
-def test_electronics_state_diff_basic():
-    """Test basic diff functionality for ElectronicsState."""
-    # Create two electronics states
-    state1 = ElectronicsState()
-    state2 = ElectronicsState()
-
-    # Create some components
-    batt1 = Battery(9.0, "batt1")  # type: ignore
-    res1 = Resistor(100.0, "res1")  # type: ignore
-    wire1 = Wire("wire1")  # type: ignore
-
-    # Register components in both states
-    state1.register(batt1)
-    state1.register(res1)
-    state1.connect("batt1", "res1")
-
-    state2.register(batt1)
-    state2.register(res1)
-    state2.register(wire1)  # New component
-    state2.connect("batt1", "res1")
-    state2.connect("res1", "wire1")  # New connection
-
-    # Get the diff
-    diff_graph = state1.diff(state2)
-
-    # Verify node differences
-    assert diff_graph.x.size(0) == 3  # 3 nodes total
-    assert diff_graph.node_mask.sum() == 1  # 1 new node
-
-    # Verify edge differences
-    assert diff_graph.edge_index.size(1) == 2  # 1 existing + 1 new edge
-    assert diff_graph.edge_mask.sum() == 1  # 1 new edge
-
-    # Test conversion to dict
-    diff_dict = state1.diff_to_dict(diff_graph)
-    assert isinstance(diff_dict, dict)
-    assert "nodes" in diff_dict
-    assert "edges" in diff_dict
-
-    # Test string representation
-    diff_str = state1.diff_to_str(diff_graph)
-    assert isinstance(diff_str, str)
-
-
 def test_physical_state_no_changes():
     """Diff should report zero changes for identical batched states."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -118,40 +68,6 @@ def test_physical_state_no_changes():
 
     assert isinstance(total_diff, int)
     assert total_diff == 0
-
-
-@pytest.mark.skip(reason="Electronics is not implemented yet.")
-def test_electronics_state_edge_changes():
-    """Test ElectronicsState diff with edge changes."""
-    state1 = ElectronicsState()
-    batt1 = Battery(9.0, "batt1")  # type: ignore
-    res1 = Resistor(100.0, "res1")  # type: ignore
-    res2 = Resistor(200.0, "res2")  # type: ignore
-
-    # Initial state: batt1 -- res1 -- res2
-    state1.register(batt1)
-    state1.register(res1)
-    state1.register(res2)
-    state1.connect("batt1", "res1")
-    state1.connect("res1", "res2")
-
-    # Modified state: batt1 -- res2 -- res1 (connection changed)
-    state2 = ElectronicsState()
-    state2.register(batt1)
-    state2.register(res1)
-    state2.register(res2)
-    state2.connect("batt1", "res2")  # Changed connection
-    state2.connect("res2", "res1")  # Changed connection
-
-    diff_graph = state1.diff(state2)
-
-    # Should have 2 edge changes (one removed, one added in each direction)
-    assert diff_graph.edge_mask.sum() == 2
-
-    # Verify the diff dict shows the changes
-    diff_dict = state1.diff_to_dict(diff_graph)
-    assert len(diff_dict["edges"]["added"]) == 2  # Two new connections
-    assert len(diff_dict["edges"]["removed"]) == 2  # Two old connections removed
 
 
 def test_physical_state_diff_fastener_attr_flags():
