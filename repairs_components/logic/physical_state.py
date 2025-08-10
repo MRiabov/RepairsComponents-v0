@@ -55,23 +55,23 @@ class PhysicalState(TensorClass):
     )
     """Count of fasteners held by each body (not fasteners)"""
 
-    # Edge attributes (previously in graph)
-    edge_index: torch.Tensor = field(
-        default_factory=lambda: torch.empty((2, 0), dtype=torch.long)
-    )
-    """Edge connections (fastener connections) [2, num_edges]"""
-    edge_attr: torch.Tensor = field(
-        default_factory=lambda: torch.empty((0, 12), dtype=torch.float32)
-    )
-    """Edge attributes (fastener connections) [num_edges, edge_feature_dim]
-    Includes:
-    - fastener diameter (1)
-    - fastener length (1)
-    - fastener position (3)
-    - fastener quaternion (4)
-    - is_connected_a/b (2)
+    # # Edge attributes (previously in graph)
+    # edge_index: torch.Tensor = field(
+    #     default_factory=lambda: torch.empty((2, 0), dtype=torch.long)
+    # )
+    # """Edge connections (fastener connections) [2, num_edges]"""
+    # edge_attr: torch.Tensor = field(
+    #     default_factory=lambda: torch.empty((0, 12), dtype=torch.float32)
+    # ) # 10.8 just commented out - they are obsolete, use fasteners_attached_to_body instead.
+    # """Edge attributes (fastener connections) [num_edges, edge_feature_dim]
+    # Includes:
+    # - fastener diameter (1)
+    # - fastener length (1)
+    # - fastener position (3)
+    # - fastener quaternion (4)
+    # - is_connected_a/b (2)
 
-    """
+    # """
     # FIXME: where does 12 come from? Probably valid, because I copied it from previous init, but I don't remember now.
     # possibly: xyz(3)+quat(4)+connected_to_1(1)+connected_to_2(1)... what else?
     # note: edge_attr is not used for learning. Use export_graph() instead.
@@ -491,73 +491,134 @@ class PhysicalState(TensorClass):
         assert set(self.body_indices.keys()) == set(other.body_indices.keys()), (
             "Compared physical states must have equal bodies in them."
         )
-        # Get node differences
+        # Get node and edge differences
         body_diff, body_diff_count = _diff_body_features(self, other)
-
-        # Get edge differences
         fastener_diff, fastener_diff_count = _diff_fastener_features(self, other)
-
-        # Calculate total differences
         total_diff_count = body_diff_count + fastener_diff_count
 
-        # Create diff graph with same nodes as original
+        # Helper to normalize edge containers to [2, K] long tensors on device
+        def to_edge_tensor(edges) -> torch.Tensor:
+            if isinstance(edges, torch.Tensor):
+                if edges.numel() == 0:
+                    return torch.empty((2, 0), dtype=torch.long, device=self.device)
+                return edges.to(self.device)
+            if not edges:  # empty list
+                return torch.empty((2, 0), dtype=torch.long, device=self.device)
+            return torch.tensor(edges, dtype=torch.long, device=self.device).t()
+
+        # Prepare diff graph
         diff_graph = Data()
-        num_nodes = len(self.body_indices.keys())
+        num_nodes = len(self.body_indices)
 
-        # Node features
-        diff_graph.position = torch.zeros((num_nodes, 3), device=self.device)
-        diff_graph.quat = torch.zeros((num_nodes, 4), device=self.device)
-        diff_graph.node_mask = torch.zeros(
-            num_nodes, dtype=torch.bool, device=self.device
-        )
-
-        changed_indices = body_diff["changed_indices"].to(self.device)
-        # Store full per-node diff tensors (zeros for unchanged nodes)
+        # Per-node diffs
         diff_graph.position = body_diff["pos_diff"].to(self.device)
         diff_graph.quat = body_diff["quat_diff"].to(self.device)
-        diff_graph.node_mask[changed_indices] = True
 
-        # Edge features and mask
-        edge_index = torch.empty((2, 0), dtype=torch.long, device=self.device)
-        edge_attr = torch.empty(
-            (0, 3), device=self.device
-        )  # [is_added, is_removed, is_changed]
-        edge_mask = torch.empty((0,), dtype=torch.bool, device=self.device)
+        # count_fasteners_held diffs (supports batched [B, N])
+        count_a = self.count_fasteners_held
+        count_b = other.count_fasteners_held
+        if count_a.ndim == 2:
+            count_a = count_a[0]
+        if count_b.ndim == 2:
+            count_b = count_b[0]
+        count_diff = (count_b.to(torch.int32) - count_a.to(torch.int32)).to(torch.int32)
+        diff_graph.count_fasteners_held_diff = count_diff.to(self.device)
 
-        if fastener_diff["added"] or fastener_diff["removed"]:
-            added_edges = (
-                torch.tensor(fastener_diff["added"], device=self.device).t()
-                if fastener_diff["added"]
-                else torch.empty((2, 0), device=self.device, dtype=torch.long)
+        # Node mask from changed indices + count diffs
+        node_mask = torch.zeros((num_nodes,), dtype=torch.bool, device=self.device)
+        changed_indices = body_diff["changed_indices"].to(self.device)
+        if (
+            changed_indices.ndim == 2 and changed_indices.size(1) == 2
+        ):  # [K, 2] from nonzero
+            changed_indices = changed_indices[:, 1]
+        node_mask[changed_indices] = True
+        node_mask |= count_diff != 0
+        diff_graph.node_mask = node_mask
+
+        # Edge tensors in order: added, removed, changed
+        added_edges = to_edge_tensor(fastener_diff.get("added", []))
+        removed_edges = to_edge_tensor(fastener_diff.get("removed", []))
+        changed_edges = to_edge_tensor(
+            fastener_diff.get("changed_edges", torch.empty((2, 0), dtype=torch.long))
+        )
+        edge_index = torch.cat([added_edges, removed_edges, changed_edges], dim=1)
+
+        # Edge attributes: [is_added, is_removed, diam_changed, length_changed, pos_changed, quat_changed]
+        n_added, n_removed, n_changed = (
+            added_edges.size(1),
+            removed_edges.size(1),
+            changed_edges.size(1),
+        )
+        added_attrs = torch.zeros((n_added, 6), device=self.device)
+        removed_attrs = torch.zeros((n_removed, 6), device=self.device)
+        changed_attrs = torch.zeros((n_changed, 6), device=self.device)
+        if n_added:
+            added_attrs[:, 0] = 1
+        if n_removed:
+            removed_attrs[:, 1] = 1
+        if n_changed:
+            diam_changed = fastener_diff["diam_changed"].to(self.device)
+            length_changed = fastener_diff["length_changed"].to(self.device)
+            pos_diff = fastener_diff["pos_diff"].to(self.device)
+            quat_delta = fastener_diff["quat_delta"].to(self.device)
+
+            changed_attrs[:, 2] = diam_changed.to(torch.float32)
+            changed_attrs[:, 3] = length_changed.to(torch.float32)
+            changed_attrs[:, 4] = (torch.linalg.norm(pos_diff, dim=1) > 0).to(
+                torch.float32
             )
-            removed_edges = (
-                torch.tensor(fastener_diff["removed"], device=self.device).t()
-                if fastener_diff["removed"]
-                else torch.empty((2, 0), device=self.device, dtype=torch.long)
+            changed_attrs[:, 5] = (torch.linalg.norm(quat_delta, dim=1) > 0).to(
+                torch.float32
             )
 
-            # Combine all edges
-            edge_index = torch.cat([added_edges, removed_edges], dim=1)
-
-            # Create edge features
-            added_attrs = torch.zeros((added_edges.size(1), 3), device=self.device)
-            added_attrs[:, 0] = 1  # is_added
-            added_attrs[:, 2] = 1  # is_changed
-
-            removed_attrs = torch.zeros((removed_edges.size(1), 3), device=self.device)
-            removed_attrs[:, 1] = 1  # is_removed
-            removed_attrs[:, 2] = 1  # is_changed
-
-            edge_attr = torch.cat([added_attrs, removed_attrs], dim=0)
-            edge_mask = torch.ones(
-                edge_index.size(1), dtype=torch.bool, device=self.device
+            # Attach detailed deltas aligned with the combined edge order
+            diff_graph.fastener_pos_diff = (
+                torch.cat(
+                    [
+                        torch.zeros((n_added + n_removed, 3), device=self.device),
+                        pos_diff,
+                    ],
+                    dim=0,
+                )
+                if (n_added + n_removed + n_changed) > 0
+                else torch.empty((0, 3), device=self.device)
             )
+            diff_graph.fastener_quat_delta = (
+                torch.cat(
+                    [
+                        torch.zeros((n_added + n_removed, 4), device=self.device),
+                        quat_delta,
+                    ],
+                    dim=0,
+                )
+                if (n_added + n_removed + n_changed) > 0
+                else torch.empty((0, 4), device=self.device)
+            )
+        else:
+            # Keep alignment even if there are no changed edges
+            if (n_added + n_removed) > 0:
+                diff_graph.fastener_pos_diff = torch.zeros(
+                    (n_added + n_removed, 3), device=self.device
+                )
+                diff_graph.fastener_quat_delta = torch.zeros(
+                    (n_added + n_removed, 4), device=self.device
+                )
+
+        edge_attr = (
+            torch.cat([added_attrs, removed_attrs, changed_attrs], dim=0)
+            if (n_added + n_removed + n_changed) > 0
+            else torch.empty((0, 6), device=self.device)
+        )
+        edge_mask = (
+            edge_attr.any(dim=1)
+            if edge_attr.numel() > 0
+            else torch.empty((0,), dtype=torch.bool, device=self.device)
+        )
 
         diff_graph.edge_index = edge_index
         diff_graph.edge_attr = edge_attr
         diff_graph.edge_mask = edge_mask
-        diff_graph.num_nodes = len(self.body_indices)
-        # ^ could be shape of positions... could be shape too.
+        diff_graph.num_nodes = num_nodes
 
         return diff_graph, int(total_diff_count)
 
@@ -571,19 +632,63 @@ class PhysicalState(TensorClass):
             dict: A dictionary with 'nodes' and 'edges' keys containing
                   human-readable diff information
         """
+        # Defensive extraction of tensors (edge_attr and edge_index may be missing)
+        edge_attr = getattr(diff_graph, "edge_attr", None)
+        edge_index = getattr(diff_graph, "edge_index", None)
+        if edge_attr is None:
+            edge_attr = torch.empty((0, 6), device=self.device)
+        if edge_index is None:
+            edge_index = torch.empty((2, 0), dtype=torch.long, device=self.device)
+
+        # Masks for added/removed/changed
+        is_added = (
+            edge_attr[:, 0].bool()
+            if edge_attr.numel()
+            else torch.zeros((0,), dtype=torch.bool, device=self.device)
+        )
+        is_removed = (
+            edge_attr[:, 1].bool()
+            if edge_attr.numel()
+            else torch.zeros((0,), dtype=torch.bool, device=self.device)
+        )
+        has_attr_change = (
+            edge_attr[:, 2:].any(dim=1)
+            if edge_attr.numel()
+            else torch.zeros((0,), dtype=torch.bool, device=self.device)
+        )
+        changed_mask = (
+            (~is_added) & (~is_removed) & has_attr_change
+            if edge_attr.numel()
+            else torch.zeros((0,), dtype=torch.bool, device=self.device)
+        )
+
         result = {
             "nodes": {
                 "changed_indices": diff_graph.node_mask.nonzero().squeeze(-1).tolist(),
                 "position_diffs": diff_graph.position.tolist(),
                 "quaternion_diffs": diff_graph.quat.tolist(),
+                "count_fasteners_held_diff": diff_graph.count_fasteners_held_diff.tolist()
+                if hasattr(diff_graph, "count_fasteners_held_diff")
+                else [],
             },
             "edges": {
-                "added": diff_graph.edge_index[:, diff_graph.edge_attr[:, 0].bool()]
-                .t()
-                .tolist(),
-                "removed": diff_graph.edge_index[:, diff_graph.edge_attr[:, 1].bool()]
-                .t()
-                .tolist(),
+                "added": edge_index[:, is_added].t().tolist(),
+                "removed": edge_index[:, is_removed].t().tolist(),
+                "changed": edge_index[:, changed_mask].t().tolist(),
+                "fastener_attr_flags": edge_attr.tolist(),
+                "changed_flags": edge_attr[changed_mask].tolist()
+                if edge_attr.numel()
+                else [],
+                "fastener_pos_diff": getattr(
+                    diff_graph, "fastener_pos_diff", torch.empty((0, 3))
+                ).tolist()
+                if hasattr(diff_graph, "fastener_pos_diff")
+                else [],
+                "fastener_quat_delta": getattr(
+                    diff_graph, "fastener_quat_delta", torch.empty((0, 4))
+                ).tolist()
+                if hasattr(diff_graph, "fastener_quat_delta")
+                else [],
             },
         }
         return result
@@ -614,6 +719,7 @@ class PhysicalState(TensorClass):
         # Edge changes
         added_edges = diff_dict["edges"]["added"]
         removed_edges = diff_dict["edges"]["removed"]
+        changed_edges = diff_dict["edges"].get("changed", [])
 
         if added_edges:
             lines.append("\nAdded Edges:")
@@ -624,6 +730,18 @@ class PhysicalState(TensorClass):
             lines.append("\nRemoved Edges:")
             for src, dst in removed_edges:
                 lines.append(f"  {src} -> {dst}")
+
+        if changed_edges:
+            lines.append("\nChanged Edges (fastener attributes):")
+            # Use changed_flags aligned with changed_edges
+            changed_flags = diff_dict["edges"].get("changed_flags", [])
+            for i, (src, dst) in enumerate(changed_edges):
+                flags = (
+                    changed_flags[i] if i < len(changed_flags) else [0, 0, 0, 0, 0, 0]
+                )
+                lines.append(
+                    f"  {src} -> {dst} | diam:{bool(flags[2])} len:{bool(flags[3])} pos:{bool(flags[4])} quat:{bool(flags[5])}"
+                )
 
         if not (changed_nodes or added_edges or removed_edges):
             lines.append("No changes detected.")
@@ -792,24 +910,191 @@ def _diff_body_features(
 def _diff_fastener_features(
     data_a: "PhysicalState", data_b: "PhysicalState"
 ) -> tuple[dict, int]:
-    """Compare fastener features between two PhysicalState instances."""
+    """Compare fastener features between two PhysicalState instances.
 
-    # FIXME: this does not check for (graph) edge feature difference.
-    # Stack edge pairs for easy comparison
-    def to_sorted_tuple_tensor(edge_index):
-        sorted_idx = edge_index.sort(dim=0)[0]
-        return sorted_idx.transpose(-2, -1)
+    Returns a dict with:
+        - added: list[(u, v)] added edges (by body indices, undirected)
+        - removed: list[(u, v)] removed edges (by body indices, undirected)
+        - changed_edges: list[(u, v)] edges present in both where fastener attrs changed
+        - diam_changed: List[bool] same length as changed_edges
+        - length_changed: List[bool] same length as changed_edges
+        - pos_diff: Tensor [K, 3] diffs for changed edges (zeros if not changed)
+        - quat_delta: Tensor [K, 4] quat deltas for changed edges (zeros if not changed)
+    And an integer total count: len(added)+len(removed)+len(changed_edges)
+    """
 
-    edges_a = to_sorted_tuple_tensor(data_a.edge_index)
-    edges_b = to_sorted_tuple_tensor(data_b.edge_index)
+    # Reconstruct edges from fastener attachments.
+    # We consider an edge to exist when a fastener is attached to two bodies (both slots are valid).
+    # Each edge is undirected and represented as a sorted (u, v) tuple of body indices.
 
-    a_set = set(map(tuple, edges_a.tolist()))
-    b_set = set(map(tuple, edges_b.tolist()))
+    # Normalize potentially batched tensors:
+    # - For attachments/poses that can vary per environment, flatten across batch to union info across B
+    # - For scalar fastener params (diam/length) that are equal over batch, validate equality and reduce
+    def _unbatch_fastener_tensors(ps: "PhysicalState"):
+        atb = ps.fasteners_attached_to_body
+        ath = ps.fasteners_attached_to_hole
+        diam = ps.fasteners_diam
+        length = ps.fasteners_length
+        pos = ps.fasteners_pos
+        quat = ps.fasteners_quat
 
-    added = list(b_set - a_set)  # well, this is sloppy, but let it be.
+        if atb.ndim == 3:  # [B, N, 2] -> [B*N, 2]
+            atb = atb.reshape(-1, 2)
+        if ath.ndim == 3:  # [B, N, 2] -> [B*N, 2]
+            ath = ath.reshape(-1, 2)
+        if diam.ndim == 2:  # [B, N] -> [B*N] (validate equality across B)
+            assert torch.allclose(diam, diam[:1].expand_as(diam)), (
+                "fasteners_diam must be equal across batch"
+            )
+            diam = diam.reshape(-1)
+        if length.ndim == 2:  # [B, N] -> [B*N] (validate equality across B)
+            assert torch.allclose(length, length[:1].expand_as(length)), (
+                "fasteners_length must be equal across batch"
+            )
+            length = length.reshape(-1)
+        if pos.ndim == 3:  # [B, N, 3] -> [B*N, 3]
+            pos = pos.reshape(-1, 3)
+        if quat.ndim == 3:  # [B, N, 4] -> [B*N, 4]
+            quat = quat.reshape(-1, 4)
+
+        return atb, ath, diam, length, pos, quat
+
+    a_atb, a_ath, a_diam, a_len, a_pos, a_quat = _unbatch_fastener_tensors(data_a)
+    b_atb, b_ath, b_diam, b_len, b_pos, b_quat = _unbatch_fastener_tensors(data_b)
+
+    def attachments_to_edge_set(attached_to_body: torch.Tensor) -> set[tuple[int, int]]:
+        if attached_to_body.numel() == 0:
+            return set()
+        # attached_to_body: [num_fasteners, 2] with -1 for unattached
+        # Select rows where both bodies are valid
+        valid = (attached_to_body[:, 0] >= 0) & (attached_to_body[:, 1] >= 0)
+        pairs = attached_to_body[valid].to(torch.long)
+        if pairs.numel() == 0:
+            return set()
+        # Sort each pair to make edges undirected-consistent
+        u = torch.minimum(pairs[:, 0], pairs[:, 1])
+        v = torch.maximum(pairs[:, 0], pairs[:, 1])
+        edges = torch.stack([u, v], dim=1)
+        return set(map(tuple, edges.tolist()))
+
+    a_set = attachments_to_edge_set(a_atb)
+    b_set = attachments_to_edge_set(b_atb)
+
+    # Compute differences for connectivity
+    added = list(b_set - a_set)
     removed = list(a_set - b_set)
 
-    return {"added": added, "removed": removed}, len(added) + len(removed)
+    # Attribute diffs: match fasteners by hole pairs (assumes at most one fastener per hole pair)
+    def build_holepair_map(
+        attached_to_hole: torch.Tensor,
+        attached_to_body: torch.Tensor,
+        diam: torch.Tensor,
+        length: torch.Tensor,
+        pos: torch.Tensor,
+        quat: torch.Tensor,
+    ) -> dict[tuple[int, int], dict]:
+        hole_map: dict[tuple[int, int], dict] = {}
+        if attached_to_hole.numel() == 0:
+            return hole_map
+        valid = (attached_to_hole[:, 0] >= 0) & (attached_to_hole[:, 1] >= 0)
+        idxs = torch.nonzero(valid, as_tuple=False).squeeze(1)
+        for i in idxs.tolist():
+            ha, hb = (
+                int(attached_to_hole[i, 0].item()),
+                int(attached_to_hole[i, 1].item()),
+            )
+            key = (ha, hb) if ha <= hb else (hb, ha)
+            # Also record body pair for this fastener
+            ba, bb = (
+                int(attached_to_body[i, 0].item()),
+                int(attached_to_body[i, 1].item()),
+            )
+            bu, bv = (ba, bb) if ba <= bb else (bb, ba)
+            # For batched inputs flattened across B, multiple entries for the same
+            # hole-pair may appear (from different environments). Prefer the first
+            # occurrence to avoid arbitrary overwrites; diam/length are equal across
+            # batch by design.
+            hole_map.setdefault(
+                key,
+                {
+                    "body_pair": (bu, bv),
+                    "diam": float(diam[i].item()),
+                    "length": float(length[i].item()),
+                    "pos": pos[i].detach(),
+                    "quat": quat[i].detach(),
+                },
+            )
+        return hole_map
+
+    a_holes = build_holepair_map(a_ath, a_atb, a_diam, a_len, a_pos, a_quat)
+    b_holes = build_holepair_map(b_ath, b_atb, b_diam, b_len, b_pos, b_quat)
+
+    common_hole_pairs = set(a_holes.keys()) & set(b_holes.keys())
+
+    changed_edges: list[tuple[int, int]] = []
+    diam_changed: list[bool] = []
+    length_changed: list[bool] = []
+    pos_diffs: list[torch.Tensor] = []
+    quat_deltas: list[torch.Tensor] = []
+
+    # thresholds consistent with body diffs
+    pos_threshold = 5.0 / 1000
+    deg_threshold = 5.0
+
+    for k in common_hole_pairs:
+        a_v = a_holes[k]
+        b_v = b_holes[k]
+        # Use body pair from 'b' (should match 'a')
+        changed_edges.append(tuple(b_v["body_pair"]))
+
+        # Diameter/length: scalar compare with small tolerance
+        d_diam = abs(b_v["diam"] - a_v["diam"]) > 1e-6
+        d_len = abs(b_v["length"] - a_v["length"]) > 1e-6
+
+        # Position: vector diff with threshold
+        p_raw = b_v["pos"] - a_v["pos"]
+        p_dist = torch.linalg.norm(p_raw)
+        p_diff = torch.zeros_like(p_raw)
+        if p_dist > pos_threshold:
+            p_diff = p_raw
+
+        # Quaternion: use delta and angular threshold
+        q_delta = quaternion_delta(
+            a_v["quat"].unsqueeze(0), b_v["quat"].unsqueeze(0)
+        ).squeeze(0)
+        q_changed = ~are_quats_within_angle(
+            a_v["quat"].unsqueeze(0),
+            b_v["quat"].unsqueeze(0),
+            torch.tensor(deg_threshold, device=q_delta.device),
+        ).squeeze(0)
+        if q_changed.ndim > 0:
+            q_changed = bool(q_changed.item())
+
+        diam_changed.append(bool(d_diam))
+        length_changed.append(bool(d_len))
+        pos_diffs.append(p_diff)
+        quat_deltas.append(q_delta if q_changed else torch.zeros_like(q_delta))
+
+    if changed_edges:
+        changed_edge_tensor = torch.tensor(changed_edges, dtype=torch.long).t()
+        pos_diff_tensor = torch.stack(pos_diffs, dim=0)
+        quat_delta_tensor = torch.stack(quat_deltas, dim=0)
+    else:
+        changed_edge_tensor = torch.empty((2, 0), dtype=torch.long)
+        pos_diff_tensor = torch.empty((0, 3))
+        quat_delta_tensor = torch.empty((0, 4))
+
+    changed = {
+        "changed_edges": changed_edge_tensor,
+        "diam_changed": torch.tensor(diam_changed, dtype=torch.bool),
+        "length_changed": torch.tensor(length_changed, dtype=torch.bool),
+        "pos_diff": pos_diff_tensor,
+        "quat_delta": quat_delta_tensor,
+    }
+
+    total_count = len(added) + len(removed) + changed_edge_tensor.size(1)
+    out = {"added": added, "removed": removed, **changed}
+    return out, total_count
 
 
 def compound_pos_to_sim_pos(
