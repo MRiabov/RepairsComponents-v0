@@ -55,7 +55,7 @@ class ElectronicsState(TensorClass):
     )
 
     # Optional Python-side name-index mappings (like PhysicalState)
-    # Can be a single dict for single env, or a list[dict] for batched envs
+    # Can be a single dict for single env, or a list[dict] for batched envs #FIXME: should always be dict as changed by __post_init__
     component_indices_from_name: dict | list[dict] = field(default_factory=dict)
     inverse_component_indices: dict | list[dict] = field(default_factory=dict)
 
@@ -297,6 +297,10 @@ def register_components_batch(
 ) -> "ElectronicsState":
     state = electronics_states
     device = state.device
+    assert len(names) > 0, "At least one component must be registered."
+    B = state.batch_size[0]
+    assert B is not None and len(state.batch_size) >= 1
+
     N = len(names)
     assert component_types.shape[-1] == N
     assert max_voltages.shape[-1] == N
@@ -306,10 +310,24 @@ def register_components_batch(
     def to_dev(x: torch.Tensor) -> torch.Tensor:
         return x.to(device)
 
-    state.component_type = to_dev(component_types)
-    state.max_voltage = to_dev(max_voltages)
-    state.max_current = to_dev(max_currents)
-    state.terminals_per_component = to_dev(terminals_per_component)
+    # Normalize inputs to batched shape if state is batched
+    def _expand_to_batch(x: torch.Tensor) -> torch.Tensor:
+        if state.batch_size and state.batch_size[0] >= 1:
+            B_ = state.batch_size[0]
+            if x.ndim == 1:
+                return x.to(device).unsqueeze(0).expand(B_, -1)
+            elif x.ndim == 2:
+                # if provided as [B,N], ensure identical across batch
+                assert x.shape[0] == B_
+                if not torch.allclose(x, x[:1].expand_as(x)):
+                    raise AssertionError("Inputs must be identical across batch")
+                return x.to(device)
+        return x.to(device)
+
+    state.component_type = _expand_to_batch(component_types)
+    state.max_voltage = _expand_to_batch(max_voltages)
+    state.max_current = _expand_to_batch(max_currents)
+    state.terminals_per_component = _expand_to_batch(terminals_per_component)
 
     if component_ids is None:
         state.component_id = torch.arange(N, dtype=torch.long, device=device)
@@ -321,11 +339,19 @@ def register_components_batch(
     tpc = state.terminals_per_component
     if tpc.ndim == 2:
         assert torch.allclose(tpc, tpc[:1].expand_as(tpc))
-        tpc = tpc[0]
+        tpc_1d = tpc[0]
+    else:
+        tpc_1d = tpc
 
     comp_idx = torch.arange(N, device=device)
-    state.terminal_to_component = torch.repeat_interleave(comp_idx, tpc)
-    T = int(state.terminal_to_component.numel())
+    base_ttc = torch.repeat_interleave(comp_idx, tpc_1d)
+    if state.batch_size and state.batch_size[0] >= 1:
+        B_ = state.batch_size[0]
+        state.terminal_to_component = base_ttc.unsqueeze(0).expand(B_, -1)
+        T = int(base_ttc.numel())
+    else:
+        state.terminal_to_component = base_ttc
+        T = int(base_ttc.numel())
 
     # Set name-index maps once (kept identical across batch)
     state.component_indices_from_name = {name: i for i, name in enumerate(names)}
@@ -342,47 +368,238 @@ def register_components_batch(
     return state
 
 
+def register_connectors_batch(
+    electronics_states: "ElectronicsState",
+    connector_names: list[str],
+    component_ids: torch.Tensor | None = None,
+) -> "ElectronicsState":
+    """Register electrical connectors as components with two terminals each.
+
+    - Requires a batched ElectronicsState (B >= 1).
+    - Appends connectors to existing components, expanding all tensors accordingly.
+    - Per-connector max_voltage/max_current are initialized to 0.0.
+    - terminals_per_component for connectors is fixed to 2.
+    """
+    es = electronics_states
+    assert len(es.batch_size) > 0 and es.batch_size[0] >= 1, (
+        "Expected electronics state to be batched."
+    )
+    assert len(connector_names) > 0, "At least one connector must be registered."
+
+    device = es.device
+    B = es.batch_size[0]
+    C = len(connector_names)
+
+    # Existing component count and terminals
+    old_N = int(es.component_id.shape[-1]) if es.component_id.numel() > 0 else 0
+    old_tpc = es.terminals_per_component
+    if old_tpc.numel() > 0 and old_tpc.ndim == 2:
+        assert torch.allclose(old_tpc, old_tpc[:1].expand_as(old_tpc))
+        old_tpc_batched = old_tpc
+        old_tpc_1d = old_tpc[0]
+    else:
+        old_tpc_batched = (
+            old_tpc.unsqueeze(0).expand(B, -1) if old_tpc.numel() > 0 else old_tpc
+        )
+        old_tpc_1d = old_tpc
+    # Number of existing terminals (not used directly, kept for clarity)
+    # old_T = int(es.terminal_to_component.shape[-1]) if es.terminal_to_component.ndim == 2 else int(es.terminal_to_component.numel())
+
+    # Append component_type, component_id, max_voltage, max_current, terminals_per_component
+    from .component import ElectricalComponentsEnum as ECE  # local import to avoid cycles
+
+    new_types = torch.full((C,), int(ECE.CONNECTOR), dtype=torch.long, device=device)
+    new_mv = torch.zeros((C,), dtype=torch.float32, device=device)
+    new_mc = torch.zeros((C,), dtype=torch.float32, device=device)
+    new_tpc = torch.full((C,), 2, dtype=torch.long, device=device)
+
+    if es.component_type.numel() == 0:
+        # Initialize respecting batch shape
+        if len(es.batch_size) > 0 and es.batch_size[0] >= 1:
+            B_ = es.batch_size[0]
+            es.component_type = new_types.unsqueeze(0).expand(B_, -1)
+            es.max_voltage = new_mv.unsqueeze(0).expand(B_, -1)
+            es.max_current = new_mc.unsqueeze(0).expand(B_, -1)
+            es.terminals_per_component = new_tpc.unsqueeze(0).expand(B_, -1)
+        else:
+            es.component_type = new_types
+            es.max_voltage = new_mv
+            es.max_current = new_mc
+            es.terminals_per_component = new_tpc
+    else:
+        if es.component_type.ndim == 2:
+            B_ = es.batch_size[0]
+            es.component_type = torch.cat(
+                [es.component_type.to(device), new_types.unsqueeze(0).expand(B_, -1)], dim=-1
+            )
+            es.max_voltage = torch.cat(
+                [es.max_voltage.to(device), new_mv.unsqueeze(0).expand(B_, -1)], dim=-1
+            )
+            es.max_current = torch.cat(
+                [es.max_current.to(device), new_mc.unsqueeze(0).expand(B_, -1)], dim=-1
+            )
+            es.terminals_per_component = torch.cat(
+                [old_tpc_batched.to(device), new_tpc.unsqueeze(0).expand(B_, -1)], dim=-1
+            )
+        else:
+            es.component_type = torch.cat([es.component_type.to(device), new_types], dim=-1)
+            es.max_voltage = torch.cat([es.max_voltage.to(device), new_mv], dim=-1)
+            es.max_current = torch.cat([es.max_current.to(device), new_mc], dim=-1)
+            es.terminals_per_component = torch.cat([old_tpc_1d.to(device), new_tpc], dim=-1)
+
+    # Component IDs
+    if component_ids is None:
+        new_ids = torch.arange(old_N, old_N + C, dtype=torch.long, device=device)
+    else:
+        assert component_ids.shape[-1] == C
+        new_ids = component_ids.to(device)
+    es.component_id = (
+        new_ids
+        if es.component_id.numel() == 0
+        else torch.cat([es.component_id.to(device), new_ids], dim=-1)
+    )
+
+    # Update terminal_to_component by appending mapping for connectors
+    conn_comp_idx = torch.arange(old_N, old_N + C, device=device)
+    conn_ttc = torch.repeat_interleave(conn_comp_idx, new_tpc)
+    if es.terminal_to_component.numel() == 0:
+        # Respect batch: initialize as [B, add_T] if batched
+        if len(es.batch_size) > 0 and es.batch_size[0] >= 1:
+            es.terminal_to_component = conn_ttc.unsqueeze(0).expand(B, -1)
+        else:
+            es.terminal_to_component = conn_ttc
+    else:
+        if es.terminal_to_component.ndim == 2:
+            es.terminal_to_component = torch.cat(
+                [es.terminal_to_component.to(device), conn_ttc.unsqueeze(0).expand(B, -1)], dim=-1
+            )
+        else:
+            es.terminal_to_component = torch.cat(
+                [es.terminal_to_component.to(device), conn_ttc], dim=-1
+            )
+
+    # Expand net_id with -1 for new terminals
+    add_T = int(conn_ttc.numel())
+    if es.net_id.ndim == 2:
+        pad = torch.full((B, add_T), -1, dtype=torch.long, device=device)
+        es.net_id = torch.cat([es.net_id.to(device), pad], dim=1)
+    elif es.net_id.ndim == 1:
+        pad = torch.full((add_T,), -1, dtype=torch.long, device=device)
+        # If single-env net, expand to batched to be consistent
+        es.net_id = torch.cat([es.net_id.to(device), pad], dim=0)
+
+    # Update name maps (coerce to dict if needed)
+    if isinstance(es.component_indices_from_name, list):
+        assert len(es.component_indices_from_name) == B
+        base = es.component_indices_from_name[0]
+        assert isinstance(base, dict)
+        es.component_indices_from_name = dict(base)
+    for i, nm in enumerate(connector_names):
+        es.component_indices_from_name[nm] = old_N + i
+    es.inverse_component_indices = {
+        v: k for k, v in es.component_indices_from_name.items()
+    }
+
+    return es
+
+
+def connect_connector_to_one_terminal(
+    electronics_states: "ElectronicsState",
+    terminal_pair: torch.Tensor,  # [K, 3] -> (batch_idx, connector_terminal, target_terminal)
+) -> "ElectronicsState":
+    """Connect connector terminals to target terminals using explicit batch indices.
+
+    Input format:
+      - [K, 3]: (b, connector_terminal, target_terminal), 0 <= b < B.
+
+    Notes:
+      - Terminals are global terminal indices in the flattened terminal space [0, T).
+      - electronics_states must be batched (B >= 1), and terminal_to_component must be identical across batch.
+    """
+    es = electronics_states
+    assert es.terminal_to_component.numel() > 0
+    assert len(es.batch_size) > 0 and es.batch_size[0] >= 1, (
+        "Expected electronics state to be batched."
+    )
+
+    device = es.device
+    pair = terminal_pair.to(device)
+
+    # Normalize terminal count T
+    if es.terminal_to_component.ndim == 2:
+        ttc = es.terminal_to_component
+        assert torch.allclose(ttc, ttc[:1].expand_as(ttc)), (
+            "terminal_to_component must be identical across batch"
+        )
+        T = int(ttc.shape[1])
+    else:
+        T = int(es.terminal_to_component.numel())
+
+    net = es.net_id
+    assert net.ndim == 2 and net.shape[0] == es.batch_size[0]
+    B = net.shape[0]
+
+    # Expect [K,3] input: (b, connector_terminal, target_terminal)
+    assert pair.ndim == 2 and pair.shape[1] == 3, "terminal_pair must be [K,3]"
+    b_all = pair[:, 0]
+    t1_all = pair[:, 1]
+    t2_all = pair[:, 2]
+
+    # Validate indices
+    assert torch.all((b_all >= 0) & (b_all < B)), "batch indices out of range"
+    assert torch.all((t1_all >= 0) & (t1_all < T) & (t2_all >= 0) & (t2_all < T)), (
+        "terminal indices out of range"
+    )
+
+    # Process per batch to allow multiple pairs per batch
+    unique_b = torch.unique(b_all)
+    for b in unique_b.tolist():
+        mask = (b_all == b)
+        if not torch.any(mask):
+            continue
+        t1 = t1_all[mask]
+        t2 = t2_all[mask]
+        # Iterate pairs for this batch (safe, typically small K)
+        for i in range(t1.shape[0]):
+            a = int(t1[i].item())
+            c = int(t2[i].item())
+            g1 = int(net[b, a].item())
+            g2 = int(net[b, c].item())
+            big = int(T * 2)
+            cand1 = g1 if g1 >= 0 else big
+            cand2 = g2 if g2 >= 0 else big
+            gid = min(cand1, cand2, a, c)
+            # Merge nets equal to g1 or g2 into gid (ignore negatives)
+            if g1 >= 0:
+                net[b, net[b] == g1] = gid
+            if g2 >= 0 and g2 != g1:
+                net[b, net[b] == g2] = gid
+            # Assign the two terminals to gid
+            net[b, a] = gid
+            net[b, c] = gid
+
+    es.net_id = net.to(device)
+    return es
+
 def connect_terminals_batch(
     electronics_states: "ElectronicsState",
     terminal_pairs: torch.Tensor,
 ) -> "ElectronicsState":
-    state = electronics_states
-    assert state.terminal_to_component.numel() > 0
-    device = state.device
-    T = int(state.terminal_to_component.numel())
+    """Deprecated alias.
 
-    net = state.net_id
-    # Canonicalize shapes: net -> [B, T], terminal_pairs -> [B, K, 2]
-    orig_net_was_1d = net.ndim == 1
-    if orig_net_was_1d:
-        net = net.unsqueeze(0)
-    B = net.shape[0]
-
-    if terminal_pairs.ndim == 2:
-        terminal_pairs = terminal_pairs.unsqueeze(0).expand(B, -1, -1)
-    elif terminal_pairs.ndim != 3:
-        raise AssertionError("terminal_pairs must be [K,2] or [B,K,2]")
-
-    # Process batch uniformly
-    for b in range(B):  # TODO refactor to batch processing.
-        nb = net[b]
-        for p in terminal_pairs[b]:
-            t1, t2 = int(p[0].item()), int(p[1].item())
-            assert 0 <= t1 < T and 0 <= t2 < T
-            g1 = int(nb[t1].item())
-            g2 = int(nb[t2].item())
-            candidates = [c for c in (g1, g2, t1, t2) if c >= 0] or [min(t1, t2)]
-            gid = int(min(candidates))
-            if g1 >= 0:
-                nb[nb == g1] = gid
-            if g2 >= 0 and g2 != g1:
-                nb[nb == g2] = gid
-            nb[t1] = gid
-            nb[t2] = gid
-
-    # Restore original dimensionality for single-env states
-    state.net_id = (net[0] if orig_net_was_1d else net).to(device)
-    return state
+    Accepts historical [B,2] format (one pair per batch). Converts it to [B,3]
+    with explicit batch indices and delegates to connect_connector_to_one_terminal.
+    If [K,3] is provided, it is forwarded directly.
+    """
+    es = electronics_states
+    if terminal_pairs.ndim == 2 and terminal_pairs.shape[1] == 2:
+        B = es.batch_size[0]
+        assert terminal_pairs.shape[0] == B, "terminal_pairs must be [B,2] for this path"
+        b_idx = torch.arange(B, dtype=terminal_pairs.dtype, device=terminal_pairs.device).view(B, 1)
+        pairs_k3 = torch.cat([b_idx, terminal_pairs], dim=1)
+        return connect_connector_to_one_terminal(es, pairs_k3)
+    # Otherwise assume already [K,3]
+    return connect_connector_to_one_terminal(es, terminal_pairs)
 
 
 # Normalize shapes of node features to [N, F]

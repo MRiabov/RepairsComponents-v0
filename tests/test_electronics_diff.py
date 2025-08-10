@@ -95,3 +95,17 @@ class TestElectronicsDiff:
         s = A.diff_to_str(diff_graph)
         assert isinstance(s, str)
         assert "Edges changed:" in s
+
+    def test_diff_with_batched_states_via_slice(self):
+        # Ensure we can stack states (B>1) and still diff by slicing a single env
+        A, B = self.make_two_states_same_components()
+        B = connect_terminals_batch(B, torch.tensor([[0, 2]], dtype=torch.long))
+
+        Ab: ElectronicsState = torch.stack([A, A])  # type: ignore
+        Bb: ElectronicsState = torch.stack([B, B])  # type: ignore
+
+        # Slice to single env and compute diff as usual
+        diff_graph, n = Ab[0].diff(Bb[0])  # type: ignore[index]
+        assert isinstance(n, int)
+        assert diff_graph.edge_index.shape[1] == 1
+        assert int(diff_graph.edge_mask.sum().item()) == 1
