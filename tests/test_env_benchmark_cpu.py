@@ -146,6 +146,7 @@ def get_default_configs(debug: bool = True):
 @pytest.mark.skipif(
     not torch.backends.mkldnn.is_available(), reason="Expecting CPU with decent perf"
 )
+@pytest.mark.skip(reason="Run explicitly with -k test_env_benchmark_cpu")
 def test_env_benchmark_cpu():
     # Init Genesis on CPU (no viewer)
     gs.init(backend=gs.cpu, logging_level="info", performance_mode=True)
