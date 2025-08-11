@@ -3,6 +3,7 @@ from pathlib import Path
 import torch
 from repairs_components.logic.electronics.electronics_state import (
     ElectronicsState,
+    ElectronicsComponentInfo,
 )
 from repairs_components.logic.physical_state import PhysicalState
 from repairs_components.logic.fluid_state import FluidState
@@ -21,6 +22,9 @@ class RepairsSimState(SimState):
 
     # the main states.
     electronics_state: ElectronicsState = field(default_factory=ElectronicsState)
+    component_info: ElectronicsComponentInfo = field(
+        default_factory=ElectronicsComponentInfo
+    )
     physical_state: PhysicalState = field(
         default_factory=PhysicalState
     )  # Single TensorClass instance
@@ -53,6 +57,22 @@ class RepairsSimState(SimState):
         assert len(self.electronics_state) == len(other.electronics_state), (
             "Batch dim mismatch in sim state diff!"
         )
+        assert self.has_electronics == other.has_electronics, (
+            "Electronics present/absent mismatch in sim state diff!"
+        )
+        assert self.scene_batch_dim == other.scene_batch_dim, (
+            "Batch dim mismatch in sim state diff!"
+        )
+        assert self.component_info == other.component_info, (
+            "Electronics component info mismatch in sim state diff."
+        )
+        assert self.component_info is not None, (
+            "Electronics component info is not set on RepairsSimState."
+        )
+        assert (
+            self.electronics_state.net_ids.shape
+            == other.electronics_state.net_ids.shape
+        ), "Electronics net ids shape mismatch in sim state diff."
         electronics_diffs = []
         electronics_diff_counts = []
         physical_diffs = []
@@ -61,9 +81,22 @@ class RepairsSimState(SimState):
         fluid_diff_counts = []
         total_diff_counts = []
         for i in range(self.scene_batch_dim):
-            electronics_diff, electronics_diff_count = self.electronics_state[i].diff(
-                other.electronics_state[i]
-            )
+            # Electronics diff: only compute if both states have electronics registered
+            if self.has_electronics:
+                # Pass single component_info; comparability is validated inside diff
+                electronics_diff, electronics_diff_count = self.electronics_state[
+                    i
+                ].diff(other.electronics_state[i], self.component_info)
+            else:
+                # valid case when electronics is really not registered in either
+                electronics_diff = Data(
+                    x=torch.empty((0, 4), dtype=torch.bfloat16),
+                    edge_index=torch.empty((2, 0), dtype=torch.long),
+                    node_mask=torch.empty((0,), dtype=torch.bool),
+                    edge_mask=torch.empty((0,), dtype=torch.bool),
+                    num_nodes=0,
+                )
+                electronics_diff_count = 0
             electronics_diffs.append(electronics_diff)
             electronics_diff_counts.append(electronics_diff_count)
             # For TensorClass, we need to slice to get individual batch elements
