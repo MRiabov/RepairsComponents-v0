@@ -5,6 +5,11 @@ Genesis supports MJCF (MuJoCo) format for model definition, allowing for easy mi
 from MuJoCo-based simulations.
 """
 
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # circular dep.
+    from repairs_components.logic.tools.tools_state import ToolState
 from pathlib import Path
 
 from ocp_vscode import show
@@ -16,7 +21,7 @@ from genesis.engine.entities import RigidEntity
 import numpy as np
 import torch
 
-from repairs_components.logic.tools.tool import Tool
+
 from repairs_components.processing.geom_utils import get_connector_pos
 
 
@@ -261,7 +266,7 @@ def attach_fastener_to_screwdriver(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
     screwdriver_entity: RigidEntity,
-    tool_state_to_update: Tool,
+    tool_state_to_update: "ToolState",  # full tool state
     fastener_id: int,
     env_id: int,
 ):
@@ -287,11 +292,14 @@ def attach_fastener_to_screwdriver(
     rigid_solver.add_weld_constraint(
         fastener_head_joint, screwdriver_link, env_id
     )  # works is genesis's examples.
-    assert isinstance(tool_state_to_update, Screwdriver), "Tool must be a Screwdriver"
-    tool_state_to_update.picked_up_fastener_tip_position = screwdriver_grip_xyz
-    tool_state_to_update.picked_up_fastener_quat = screwdriver_quat
+    tool_state_to_update.screwdriver_tc.picked_up_fastener_tip_position[env_id] = (
+        screwdriver_grip_xyz
+    )
+    tool_state_to_update.screwdriver_tc.picked_up_fastener_quat[env_id] = (
+        screwdriver_quat
+    )
     # Also store numeric id for batched processing (use float so NaN can represent none)
-    tool_state_to_update.picked_up_fastener_id = torch.tensor(
+    tool_state_to_update.screwdriver_tc.picked_up_fastener_id[env_id] = torch.tensor(
         float(fastener_id), dtype=torch.float32, device=screwdriver_grip_xyz.device
     )
 
@@ -300,11 +308,9 @@ def detach_fastener_from_screwdriver(
     scene: gs.Scene,
     fastener_entity: RigidEntity,
     screwdriver_entity: RigidEntity,
-    tool_state_to_update: Tool,
+    tool_state_to_update: "ToolState",  # full tool state
     env_id: int,
 ):
-    from repairs_components.logic.tools.screwdriver import Screwdriver
-
     rigid_solver = scene.sim.rigid_solver
     hand_link = screwdriver_entity.base_link.idx
     fastener_head_joint = fastener_entity.base_link.idx
@@ -312,10 +318,11 @@ def detach_fastener_from_screwdriver(
         fastener_head_joint, hand_link, [env_id]
     )  # works in genesis's examples. #[env_id] because it wants a collection.
     assert isinstance(tool_state_to_update, Screwdriver), "Tool must be a Screwdriver"
-    tool_state_to_update.picked_up_fastener_name = None
-    tool_state_to_update.picked_up_fastener_tip_position = None
-    tool_state_to_update.picked_up_fastener_quat = None
-    tool_state_to_update.picked_up_fastener_id = None
+    tool_state_to_update.screwdriver_tc.picked_up_fastener_tip_position[env_id, :] = (
+        torch.nan
+    )
+    tool_state_to_update.screwdriver_tc.picked_up_fastener_quat[env_id, :] = torch.nan
+    tool_state_to_update.screwdriver_tc.picked_up_fastener_id[env_id] = torch.nan
 
 
 def attach_fastener_to_part(

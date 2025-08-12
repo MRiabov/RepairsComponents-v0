@@ -166,13 +166,10 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     # sanity-check tool names
     assert all(
-        (
-            not isinstance(ts.current_tool, Screwdriver)
-            or ts.current_tool.picked_up_fastener_name is None
-            or ts.current_tool.picked_up_fastener_name.endswith("@fastener")
-        )
-        for ts in sim_state.tool_state
-    ), "picked_up_fastener_name must end with @fastener"
+        (sim_state.tool_state.screwdriver_tc.picked_up_fastener_id >= 0)[
+            sim_state.tool_state.tool_ids == Screwdriver.id
+        ]  # used to check fastener names, pointless now?
+    ), "picked_up_fastener_id must be non-negative for screwdriver"
 
     # loop entities, gather body transforms for batched update; update fasteners directly
     body_names: list[str] = []
@@ -249,29 +246,28 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     # handle picked up fastener (tip)
     # fastener_tip_pos
-    for env_id in range(n_envs):
-        if (
-            isinstance(sim_state.tool_state[env_id].current_tool, Screwdriver)
-            and sim_state.tool_state[env_id].current_tool.has_picked_up_fastener
-        ):
-            fastener_name = sim_state.tool_state[
-                env_id
-            ].current_tool.picked_up_fastener_name
-            assert fastener_name is not None
-            fastener_pos = gs_entities[fastener_name].get_pos(env_id)
-            fastener_quat = gs_entities[fastener_name].get_quat(env_id)
-            # get tip pos
-            tip_pos = get_connector_pos(
-                fastener_pos,
-                fastener_quat,
-                Fastener.get_tip_pos_relative_to_center().unsqueeze(0),
-            )
-            sim_state.tool_state[
-                env_id
-            ].current_tool.picked_up_fastener_tip_position = tip_pos
-            sim_state.tool_state[
-                env_id
-            ].current_tool.picked_up_fastener_quat = fastener_quat
+    for env_id in torch.nonzero(
+        (sim_state.tool_state.tool_ids == Screwdriver.id)
+        & sim_state.tool_state.screwdriver_tc.has_picked_up_fastener
+    ).squeeze(1):
+        fastener_name = sim_state.tool_state.screwdriver_tc.picked_up_fastener_name(
+            env_id
+        )
+        assert fastener_name is not None
+        fastener_pos = gs_entities[fastener_name].get_pos(env_id)
+        fastener_quat = gs_entities[fastener_name].get_quat(env_id)
+        # get tip pos
+        tip_pos = get_connector_pos(
+            fastener_pos,
+            fastener_quat,
+            Fastener.get_tip_pos_relative_to_center().unsqueeze(0),
+        )
+        sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[env_id] = (
+            tip_pos
+        )
+        sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[env_id] = (
+            fastener_quat
+        )
 
     # update holes
     sim_state = update_hole_locs(

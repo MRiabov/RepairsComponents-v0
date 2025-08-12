@@ -167,7 +167,7 @@ def test_attach_and_detach_fastener_to_screwdriver(
         screwdriver.picked_up_fastener_quat,
         entities["screwdriver@tool"].get_quat(),
     ).all()
-    assert screwdriver.picked_up_fastener_name == "0@fastener"
+    assert screwdriver.picked_up_fastener_id[0] == 0
 
     # detach fastener from screwdriver and assert they fall down.
 
@@ -178,11 +178,11 @@ def test_attach_and_detach_fastener_to_screwdriver(
         screwdriver,
         env_id=0,
     )
-    # assert tool state
-    assert screwdriver.has_picked_up_fastener == False
-    assert screwdriver.picked_up_fastener_tip_position is None
-    assert screwdriver.picked_up_fastener_quat is None
-    assert screwdriver.picked_up_fastener_name is None
+    # assert tool state # note: all should have shape (1,)
+    assert not screwdriver.has_picked_up_fastener
+    assert torch.isnan(screwdriver.picked_up_fastener_tip_position[0])
+    assert torch.isnan(screwdriver.picked_up_fastener_quat[0])
+    assert torch.isnan(screwdriver.picked_up_fastener_id[0])
 
     for i in range(100):
         scene.step()

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 from repairs_components.logic.tools.tool import Tool, ToolsEnum, attachment_link_name
@@ -6,18 +6,20 @@ from pathlib import Path
 from build123d import *  # noqa: F403
 
 
-@dataclass
 class Screwdriver(Tool):
-    id: int = ToolsEnum.SCREWDRIVER.value
+    @property
+    def id(self):
+        return ToolsEnum.SCREWDRIVER.value
+
     picked_up_fastener_tip_position: torch.Tensor = field(
-        default_factory=lambda: torch.full((3,), float("nan"))
+        default_factory=lambda: torch.full((1, 3), float("nan"))
     )
     picked_up_fastener_quat: torch.Tensor = field(
-        default_factory=lambda: torch.full((4,), float("nan"))
+        default_factory=lambda: torch.full((1, 4), float("nan"))
     )
     # New: numeric id for picked-up fastener. Float tensor to allow NaN when absent.
     picked_up_fastener_id: torch.Tensor = field(
-        default_factory=lambda: torch.tensor(float("nan"))  # scalar
+        default_factory=lambda: torch.tensor([float("nan")])  # scalar
     )
 
     @property
@@ -25,13 +27,27 @@ class Screwdriver(Tool):
         # Prefer numeric id if available; fall back to name for backward compatibility.
         return torch.isnan(self.picked_up_fastener_id)
 
-    @property
-    def picked_up_fastener_name(self):
+    # @property # oudated syntax.
+    # def picked_up_fastener_name(self):
+    #     "Just a wrapper to make code more readable."
+    #     from repairs_components.geometry.fasteners import Fastener
+
+    #     return [
+    #         Fastener.fastener_name_in_simulation(fastener_id.item())
+    #         if not torch.isnan(fastener_id)
+    #         else None
+    #         for fastener_id in self.picked_up_fastener_id
+    #     ]
+
+    def picked_up_fastener_name(self, env_ids: torch.Tensor):
+        "Just a wrapper to make code more readable."
         from repairs_components.geometry.fasteners import Fastener
 
         return [
             Fastener.fastener_name_in_simulation(fastener_id.item())
-            for fastener_id in self.picked_up_fastener_id
+            if not torch.isnan(fastener_id)
+            else None
+            for fastener_id in self.picked_up_fastener_id[env_ids]
         ]
 
     @staticmethod

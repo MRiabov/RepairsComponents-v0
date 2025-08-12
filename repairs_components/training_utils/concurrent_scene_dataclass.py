@@ -325,10 +325,10 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         # slice global states
         orig_curr = scene_config.current_state
         curr = RepairsSimState(batch_dim=1)
-        curr.electronics_state = [orig_curr.electronics_state[i]]
+        curr.electronics_state = orig_curr.electronics_state[i : i + 1]
         curr.physical_state = orig_curr.physical_state[i : i + 1]
         curr.fluid_state = [orig_curr.fluid_state[i]]
-        curr.tool_state = [orig_curr.tool_state[i]]
+        curr.tool_state = orig_curr.tool_state[i : i + 1]
         curr.has_electronics = orig_curr.has_electronics
         curr.has_fluid = orig_curr.has_fluid
         # sanity check: ensure single-item state

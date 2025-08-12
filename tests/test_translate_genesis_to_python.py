@@ -84,8 +84,9 @@ def scene_with_entities(init_gs):
 
     # create and populate RepairsSimState
     sim_state = RepairsSimState(1)
-    sim_state.tool_state[0].current_tool = Screwdriver(
-        picked_up_fastener_name="0@fastener",
+    sim_state.tool_state.tool_ids[0] = ToolsEnum.SCREWDRIVER.value
+    sim_state.tool_state.screwdriver_tc = Screwdriver(
+        picked_up_fastener_id=torch.tensor([0]),
         picked_up_fastener_tip_position=torch.tensor([-1.0, -1.0, -1.0]),
         picked_up_fastener_quat=torch.tensor([1.0, 0.0, 0.0, 0.0]),
         # ^ note: the expected is 0,0,0, so this is predictably incorrect.
@@ -355,13 +356,12 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     assert torch.allclose(holes_actual_quats, holes_quats_expected)
 
     # fastener tip should be updated.
-    assert isinstance(sim_state.tool_state[0].current_tool, Screwdriver), (
-        "The tool shouldn't have changed during execution. Got "
-        + str(type(sim_state.tool_state[0].current_tool))
+    assert sim_state.tool_state.tool_ids[0] == ToolsEnum.SCREWDRIVER.value, (
+        f"The tool shouldn't have changed during execution. Got {ToolsEnum(sim_state.tool_state.tool_ids[0]).name}"
     )
-    fastener_tip_actual = sim_state.tool_state[
-        0
-    ].current_tool.picked_up_fastener_tip_position
+    fastener_tip_actual = (
+        sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[0]
+    )
     tip_relative_to_center = Fastener.get_tip_pos_relative_to_center().unsqueeze(0)
     fastener_tip_expected = get_connector_pos(
         entities["0@fastener"].get_pos(0),
@@ -373,7 +373,7 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
         f"Fastener tip position in state {fastener_tip_actual} != expected {fastener_tip_expected}"
     )
     assert torch.allclose(
-        sim_state.tool_state[0].current_tool.picked_up_fastener_quat,
+        sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[0],
         entities["0@fastener"].get_quat(0),
         atol=0.1,
     ), "Fastener tip quaternion in state != expected"

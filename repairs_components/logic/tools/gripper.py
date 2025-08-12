@@ -1,13 +1,11 @@
-from dataclasses import dataclass
 import numpy as np
 from repairs_components.logic.tools.tool import Tool, ToolsEnum
 
 
-@dataclass
-class Gripper(Tool):
-    id: int = ToolsEnum.GRIPPER.value
-    action_shape: int = 2
-    active: bool = True
+class Gripper(Tool):  # tensorclass by inheritance!
+    @property
+    def id(self):
+        return ToolsEnum.GRIPPER.value
 
     def step(self, action: np.ndarray, state: dict):
         """Step the tool with the given action."""

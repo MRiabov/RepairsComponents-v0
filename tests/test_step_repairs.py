@@ -1,6 +1,7 @@
 import pytest
 import torch
 from repairs_components.geometry.fasteners import Fastener
+from repairs_components.logic.tools.tool import ToolsEnum
 from repairs_components.processing.translation import update_hole_locs
 from repairs_components.training_utils.sim_state_global import RepairsSimState
 from repairs_components.logic.physical_state import (
@@ -293,11 +294,12 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     graph_device = physical_state.fasteners_attached_to_body.device
 
     screwdriver = Screwdriver(
-        picked_up_fastener_name="0@fastener",
+        picked_up_fastener_id=torch.tensor([0]),
         picked_up_fastener_tip_position=physical_state.hole_positions[0, 0],
         picked_up_fastener_quat=physical_state.hole_quats[0, 0],
     )  # mark as moved to closest hole.
-    repairs_sim_state.tool_state[0].current_tool = screwdriver
+    repairs_sim_state.tool_state.tool_ids[0] = screwdriver.id
+    repairs_sim_state.tool_state.screwdriver_tc[0] = screwdriver
     connected_part_id = physical_state.body_indices["part_with_holes_1@solid"]
 
     actions = torch.zeros((1, 10))
@@ -361,9 +363,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     screwdriver = Screwdriver(
         picked_up_fastener_tip_position=physical_state.hole_positions[0, 0],
         picked_up_fastener_quat=physical_state.hole_quats[0, 0],
-        picked_up_fastener_name="0@fastener",
+        picked_up_fastener_id=torch.tensor([0]),
     )
-    repairs_sim_state.tool_state[0].current_tool = screwdriver
+    repairs_sim_state.tool_state.tool_ids[0] = screwdriver.id
+    repairs_sim_state.tool_state.screwdriver_tc[0] = screwdriver
     connected_part_1_id = physical_state.body_indices["part_with_holes_1@solid"]
     # Now attach the fastener to the second part as well (screw through both parts)
     connected_part_2_id = physical_state.body_indices["part_with_holes_2@solid"]
@@ -383,10 +386,9 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     assert (fastener_entity.get_quat(0) == physical_state.hole_quats[0, 0]).all(), (
         "Fastener is expected to move to hole quat"
     )
-    assert (
-        repairs_sim_state.tool_state[0].current_tool.picked_up_fastener_name
-        == "0@fastener"
-    ), "Fastener is not expected to be released after screwing in"
+    assert repairs_sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[0] == 0, (
+        "Fastener is not expected to be released after screwing in"
+    )
 
     # mark as moved to closest marked hole on second part
     hole_pos_part_2 = physical_state.hole_positions[0, 2]
@@ -446,11 +448,12 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
     fastener_entity = gs_entities["0@fastener"]
     physical_state = repairs_sim_state.physical_state
     graph_device = physical_state.fasteners_attached_to_body.device
-    repairs_sim_state.tool_state[0].current_tool = Screwdriver(
-        picked_up_fastener_name="0@fastener",
+    repairs_sim_state.tool_state.screwdriver_tc[0] = Screwdriver(
+        picked_up_fastener_id=torch.tensor([0]),
         picked_up_fastener_tip_position=physical_state.hole_positions[0, 0],
         picked_up_fastener_quat=physical_state.hole_quats[0, 0],
     )
+    repairs_sim_state.tool_state.tool_ids[0] = ToolsEnum.SCREWDRIVER.value
 
     connected_part_1_id = physical_state.body_indices["part_with_holes_1@solid"]
 
@@ -488,14 +491,12 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
         original_quat.unsqueeze(0), large_angle_rotation.unsqueeze(0)
     ).squeeze(0)
 
-    repairs_sim_state.tool_state[
-        0
-    ].current_tool.picked_up_fastener_tip_position = physical_state.hole_positions[
-        0, 2
-    ]  # move it to closest marked hole on second part
-    repairs_sim_state.tool_state[
-        0
-    ].current_tool.picked_up_fastener_quat = large_angle_quat
+    repairs_sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position = (
+        physical_state.hole_positions[0, 2]
+    )  # move it to closest marked hole on second part
+    repairs_sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat = (
+        large_angle_quat
+    )
 
     # Store the state before attempting to screw in
     fasteners_attached_before = physical_state.fasteners_attached_to_body.clone()
@@ -548,8 +549,10 @@ def test_step_pick_up_release_tool_picks_up_or_releases_tool_when_in_proximity(
     franka_hand: RigidLink = franka_entity.get_link("hand")
 
     # Initially, tool state should have Gripper (no tool picked up)
-    assert isinstance(repairs_sim_state.tool_state[0].current_tool, Gripper), (
-        f"Initially should have Gripper (no tool), got {repairs_sim_state.tool_state[0].current_tool}"
+    assert isinstance(
+        repairs_sim_state.tool_state.tool_ids[0], ToolsEnum.GRIPPER.value
+    ), (
+        f"Initially should have Gripper (no tool), got {repairs_sim_state.tool_state.tool_ids[0]}"
     )
 
     # Position the franka hand close to the screwdriver grip position
@@ -587,7 +590,7 @@ def test_step_pick_up_release_tool_picks_up_or_releases_tool_when_in_proximity(
     )
 
     # Assert that tool was picked up (should now have Screwdriver)
-    assert isinstance(repairs_sim_state.tool_state[0].current_tool, Screwdriver), (
+    assert repairs_sim_state.tool_state.tool_ids[0] == ToolsEnum.SCREWDRIVER.value, (
         "Tool should be picked up when in proximity and action > 0.75"
     )
 
@@ -616,7 +619,7 @@ def test_step_pick_up_release_tool_picks_up_or_releases_tool_when_in_proximity(
     )
 
     # Assert that tool was released (should now have Gripper again)
-    assert isinstance(repairs_sim_state.tool_state[0].current_tool, Gripper), (
+    assert repairs_sim_state.tool_state.tool_ids[0] == ToolsEnum.GRIPPER.value, (
         "Tool should be released when action < 0.25"
     )
 
@@ -656,7 +659,7 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
     screwdriver_entity = gs_entities["screwdriver@control"]
 
     # Set up screwdriver as current tool
-    repairs_sim_state.tool_state[0].current_tool = Screwdriver()
+    repairs_sim_state.tool_state.tool_ids[0] = ToolsEnum.SCREWDRIVER.value
 
     # Position fastener close to screwdriver (within proximity threshold of 0.75)
     fastener_initial_pos = torch.tensor([0.2, 0.0, 0.02])  # Close to screwdriver
@@ -681,24 +684,26 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
     screwdriver_quat = screwdriver_entity.get_quat(torch.tensor([0]))
 
     # Test 1b: Tool has has_picked_up_fastener set to True
-    assert (
-        updated_sim_state.tool_state[0].current_tool.has_picked_up_fastener == True
-    ), "Tool should have has_picked_up_fastener set to True after picking up"
+    assert updated_sim_state.tool_state.screwdriver_tc.has_picked_up_fastener == True, (
+        "Tool should have has_picked_up_fastener set to True after picking up"
+    )
 
     # Test 1c: Tool has picked_up_fastener_name set to fastener name
     assert (
-        updated_sim_state.tool_state[0].current_tool.picked_up_fastener_name
+        updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_name(0)
         == "0@fastener"
     ), "Tool should have picked_up_fastener_name set to '0@fastener'"
+    assert updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_id == 0, (
+        "Tool should have picked_up_fastener_id set to 0"
+    )
 
     # Test 1d: Tool has picked_up_fastener_tip_position set to fastener tip position
-    assert (
-        updated_sim_state.tool_state[0].current_tool.picked_up_fastener_tip_position
-        is not None
-    ), "Tool should have picked_up_fastener_tip_position set"
-    assert (
-        updated_sim_state.tool_state[0].current_tool.picked_up_fastener_quat is not None
-    ), "Tool should have picked_up_fastener_quat set"
+    assert not torch.isnan(
+        updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[0]
+    ).any(), "Tool should have picked_up_fastener_tip_position set"
+    assert not torch.isnan(
+        updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[0]
+    ).any(), "Tool should have picked_up_fastener_quat set"
 
     # Test 2: Release fastener (action[7] = 0.0 for release)
     actions = torch.zeros((1, 10))
@@ -709,23 +714,31 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
     )
 
     # Test 2a: Tool has has_picked_up_fastener set to False
-    assert (
-        updated_sim_state.tool_state[0].current_tool.has_picked_up_fastener == False
-    ), "Tool should have has_picked_up_fastener set to False after releasing"
+    assert not torch.isnan(
+        updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[0]
+    ).any(), (
+        "Screwdriver should have has_picked_up_fastener set to False after releasing"
+    )
+    assert torch.isnan(
+        updated_sim_state.tool_state.screwdriver_tc.has_picked_up_fastener[0]
+    ).any(), (
+        "Screwdriver should have has_picked_up_fastener set to False after releasing"
+    )
 
     # Test 2b: Tool has picked_up_fastener_name set to None
     assert (
-        updated_sim_state.tool_state[0].current_tool.picked_up_fastener_name is None
+        updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_name(0) is None
     ), "Tool should have picked_up_fastener_name set to None after releasing"
 
     # Test 2c: Tool has picked_up_fastener_tip_position set to None
-    assert (
-        updated_sim_state.tool_state[0].current_tool.picked_up_fastener_tip_position
-        is None
-    ), "Tool should have picked_up_fastener_tip_position set to None after releasing"
-    assert (
-        updated_sim_state.tool_state[0].current_tool.picked_up_fastener_quat is None
-    ), "Tool should have picked_up_fastener_quat set to None after releasing"
+    assert torch.isnan(
+        updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[0]
+    ).all(), (
+        "Tool should have picked_up_fastener_tip_position set to None after releasing"
+    )
+    assert torch.isnan(
+        updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[0]
+    ).all(), "Tool should have picked_up_fastener_quat set to None after releasing"
 
 
 def test_step_fastener_pick_up_release_does_not_pick_up_fastener_when_not_in_proximity():

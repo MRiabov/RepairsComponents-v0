@@ -297,6 +297,5 @@ def test_two_connectors_match_after_step(assembly_task_geoms_two_connectors, dat
     test_graph_features_unchanged(current_state, desired_state)
 
 
-
 # TODO split this test in 3 test modules: test_translation_genesis_to_python, test_translation_compound_to_sim_state, test_translation_sim_state_to_genesis
 # new tests

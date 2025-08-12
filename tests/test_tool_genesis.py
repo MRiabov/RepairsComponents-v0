@@ -12,7 +12,12 @@ from repairs_components.geometry.fasteners import (
     attach_fastener_to_screwdriver,
 )
 from repairs_components.logic.tools.screwdriver import Screwdriver
-from repairs_components.logic.tools.tool import attach_tool_to_arm, detach_tool_from_arm
+from repairs_components.logic.tools.tool import (
+    ToolsEnum,
+    attach_tool_to_arm,
+    detach_tool_from_arm,
+)
+from repairs_components.logic.tools.tools_state import ToolState
 from repairs_components.processing.geom_utils import get_connector_pos
 from tests.global_test_config import init_gs, base_data_dir
 
@@ -129,7 +134,9 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     tool_cube = entities["tool_cube"]
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
-    screwdriver = Screwdriver()
+    tool_state = ToolState(batch_size=1)
+    tool_state.screwdriver_tc = Screwdriver()
+    tool_state.tool_ids = torch.tensor([ToolsEnum.SCREWDRIVER.value])
     # move to pre-grasp pose
     move_franka_to_pos(
         scene,
@@ -144,7 +151,13 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     print("end_effector.get_quat(): ", end_effector.get_quat(0))
 
     # tested func.
-    attach_tool_to_arm(scene, tool_cube, end_effector, screwdriver, torch.tensor([0]))
+    attach_tool_to_arm(
+        scene,
+        tool_cube,
+        end_effector,
+        tool_state,
+        torch.tensor([0]),
+    )
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
 
@@ -189,7 +202,11 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     tool_cube = entities["tool_cube"]
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
-    screwdriver = Screwdriver()
+    tool_state = ToolState(
+        batch_size=1,
+        screwdriver_tc=Screwdriver(batch_size=1),
+        tool_ids=torch.tensor([ToolsEnum.SCREWDRIVER.value]),
+    )
 
     move_franka_to_pos(
         scene,
@@ -204,7 +221,13 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     print("end_effector.get_quat(): ", end_effector.get_quat())
 
     # attach tool to arm
-    attach_tool_to_arm(scene, tool_cube, end_effector, screwdriver, torch.tensor([0]))
+    attach_tool_to_arm(
+        scene,
+        tool_cube,
+        end_effector,
+        tool_state,
+        torch.tensor([0]),
+    )
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
 
@@ -237,7 +260,7 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
 
     # detach tool from arm
     detach_tool_from_arm(
-        scene, tool_cube, end_effector, entities, [screwdriver], torch.tensor([0])
+        scene, tool_cube, end_effector, entities, tool_state, torch.tensor([0])
     )
     for i in range(100):
         scene.step()
@@ -343,9 +366,9 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
         f"Cube pos expected to be {reposition_cube_to_xyz}, got {fastener_cube.get_pos(0)}"
     )
     assert screwdriver.has_picked_up_fastener
-    assert screwdriver.picked_up_fastener_name == Fastener.fastener_name_in_simulation(
+    assert screwdriver.picked_up_fastener_name(
         0
-    )
+    ) == Fastener.fastener_name_in_simulation(0)
     assert torch.isclose(
         screwdriver.picked_up_fastener_tip_position,
         get_connector_pos(
@@ -367,8 +390,8 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
     )
     assert not screwdriver.has_picked_up_fastener
     assert screwdriver.picked_up_fastener_name is None
-    assert screwdriver.picked_up_fastener_tip_position is None
-    assert screwdriver.picked_up_fastener_quat is None
+    assert torch.isnan(screwdriver.picked_up_fastener_tip_position).all()
+    assert torch.isnan(screwdriver.picked_up_fastener_quat).all()
 
     for i in range(200):
         scene.step()
