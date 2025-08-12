@@ -6,7 +6,7 @@ import numpy as np
 
 
 @dataclass
-class SimState(ABC):
+class SimState(ABC):  # TODO migrate to TensorClass
     """Simply a convenience ABC to define the diff method."""
 
     @abstractmethod

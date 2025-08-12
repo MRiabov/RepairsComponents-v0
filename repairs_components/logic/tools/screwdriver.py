@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 from repairs_components.logic.tools.tool import Tool, ToolsEnum, attachment_link_name
@@ -9,14 +9,30 @@ from build123d import *  # noqa: F403
 @dataclass
 class Screwdriver(Tool):
     id: int = ToolsEnum.SCREWDRIVER.value
-    picked_up_fastener_name: str | None = None
-    picked_up_fastener_tip_position: torch.Tensor | None = None
-    picked_up_fastener_quat: torch.Tensor | None = None
+    picked_up_fastener_tip_position: torch.Tensor = field(
+        default_factory=lambda: torch.full((3,), float("nan"))
+    )
+    picked_up_fastener_quat: torch.Tensor = field(
+        default_factory=lambda: torch.full((4,), float("nan"))
+    )
+    # New: numeric id for picked-up fastener. Float tensor to allow NaN when absent.
+    picked_up_fastener_id: torch.Tensor = field(
+        default_factory=lambda: torch.tensor(float("nan"))  # scalar
+    )
 
     @property
     def has_picked_up_fastener(self):
-        # if batch refactor, rename the picked_up_fastener_name to ID and bool check.
-        return self.picked_up_fastener_name is not None
+        # Prefer numeric id if available; fall back to name for backward compatibility.
+        return torch.isnan(self.picked_up_fastener_id)
+
+    @property
+    def picked_up_fastener_name(self):
+        from repairs_components.geometry.fasteners import Fastener
+
+        return [
+            Fastener.fastener_name_in_simulation(fastener_id.item())
+            for fastener_id in self.picked_up_fastener_id
+        ]
 
     @staticmethod
     def tool_grip_position():  # TODO rename to uppercase and make var.
@@ -77,10 +93,10 @@ class Screwdriver(Tool):
     def export_path(self, base_dir: Path, file_extension: str = "glb") -> Path:
         return base_dir / f"shared/tools/screwdriver.{file_extension}"
 
-    def on_tool_release(self):
-        self.picked_up_fastener_name = None
-        self.picked_up_fastener_tip_position = None
-        self.picked_up_fastener_quat = None
+    def on_tool_release(self, env_idx: torch.Tensor):
+        self.picked_up_fastener_tip_position[env_idx] = torch.full((3,), float("nan"))
+        self.picked_up_fastener_quat[env_idx] = torch.full((4,), float("nan"))
+        self.picked_up_fastener_id[env_idx] = torch.tensor(float("nan"))
 
 
 def receive_screw_in_action(

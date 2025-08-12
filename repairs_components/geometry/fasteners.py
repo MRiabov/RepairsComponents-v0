@@ -290,8 +290,9 @@ def attach_fastener_to_screwdriver(
     assert isinstance(tool_state_to_update, Screwdriver), "Tool must be a Screwdriver"
     tool_state_to_update.picked_up_fastener_tip_position = screwdriver_grip_xyz
     tool_state_to_update.picked_up_fastener_quat = screwdriver_quat
-    tool_state_to_update.picked_up_fastener_name = Fastener.fastener_name_in_simulation(
-        fastener_id
+    # Also store numeric id for batched processing (use float so NaN can represent none)
+    tool_state_to_update.picked_up_fastener_id = torch.tensor(
+        float(fastener_id), dtype=torch.float32, device=screwdriver_grip_xyz.device
     )
 
 
@@ -314,6 +315,7 @@ def detach_fastener_from_screwdriver(
     tool_state_to_update.picked_up_fastener_name = None
     tool_state_to_update.picked_up_fastener_tip_position = None
     tool_state_to_update.picked_up_fastener_quat = None
+    tool_state_to_update.picked_up_fastener_id = None
 
 
 def attach_fastener_to_part(

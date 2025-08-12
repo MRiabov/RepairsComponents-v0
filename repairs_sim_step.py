@@ -88,7 +88,7 @@ def step_repairs(
     # create_constraints_based_on_graph(current_sim_state, gs_entities, scene)
 
     print(
-        f"Tools: {[ToolsEnum(ts.current_tool_id).name.lower() for ts in current_sim_state.tool_state]}",
+        f"Tools: {[ToolsEnum(ts.tool_ids).name.lower() for ts in current_sim_state.tool_state]}",
         f"Pick up fastener tip position: {[ts.current_tool.picked_up_fastener_tip_position for ts in current_sim_state.tool_state if isinstance(ts.current_tool, Screwdriver)]}",
     )
 
