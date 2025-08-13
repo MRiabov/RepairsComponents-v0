@@ -73,7 +73,7 @@ def test_physical_state_no_changes():
     assert total_diff == 0
 
 
-@pytest.xfail(reason="wrong test: it's not supposed to diff physical_info.")
+@pytest.mark.xfail(reason="wrong test: it's not supposed to diff physical_info.")
 # NOTE: it is supposed to diff fastener pos/quaternion though! And if the equivalent (by length/diam) fasteners are inserted.
 def test_physical_state_diff_fastener_attr_flags():
     """Verify that fastener attribute flags and aligned deltas are set in the diff."""
@@ -214,7 +214,7 @@ def test_physical_state_diff_fastener_added_removed_and_count_diffs():
     assert diff_graph.node_mask.sum().item() == 2
 
 
-@pytest.xfail(
+@pytest.mark.xfail(
     reason="WRONG TEST: tests for diff in fastener length/diam which is unchanged across batch"
 )
 def test_physical_state_diff_fastener_attr_flags_batch_two():

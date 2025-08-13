@@ -189,7 +189,7 @@ class OfflineDataloader:
             part_hole_batch=part_hole_batch,
         )
 
-        batch_dim = init_sim_state.scene_batch_dim
+        batch_dim = init_sim_state.batch_size
 
         sim_state = ConcurrentSceneData(
             scene=None,

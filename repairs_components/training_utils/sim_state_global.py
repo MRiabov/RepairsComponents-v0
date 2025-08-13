@@ -27,13 +27,12 @@ class RepairsSimInfo:
     "Cache of fastener links for fastener constraint creation without dict querying."
 
 
-@dataclass
-class RepairsSimState(SimState):
-    "A convenience sim state class to put diff logic out of a step function"
+class RepairsSimState(SimState):  # type: ignore
+    """A SimState class holding all information about the scene.
+    Is a TensorClass.
 
-    scene_batch_dim: int
-    """The batch dim of this scene. This is the number of scenes genesis sim batch.
-    Primarily it for sanity checks."""
+    RepairsSimState will always have to be instantiated with either RepairsSimState(device=device).unsqueeze(0)
+    or torch.stack([RepairsSimState(device=device)]*B). This is because they are expected to be batched with a leading dimension."""
 
     # the main states.
     electronics_state: ElectronicsState = field(default_factory=ElectronicsState)
@@ -41,26 +40,25 @@ class RepairsSimState(SimState):
         default_factory=PhysicalState
     )  # Single TensorClass instance
     # fluid_state: list[FluidState] = field(default_factory=list)
-    tool_state: ToolState = field(default_factory=list)
+    tool_state: ToolState = field(default_factory=ToolState)
 
     # to prevent computation of certain objects if they are not present.
     has_electronics: bool = False
     has_fluid: bool = False
     # has_fasteners: bool = False # maybe add (non-priority)
-    device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # note: device is a temporary mock until migration to sim_state.
+    # NOTE: do not declare a 'device' field here; TensorClass reserves this name.
 
-    def __init__(self, batch_dim: int):
-        super().__init__()
-        # FIXME: this __init__ should be deprecated, and instead to be instantiated directly.
-        self.scene_batch_dim = batch_dim
-        self.electronics_state = torch.stack(
-            [ElectronicsState(device=self.device)] * batch_dim
-        )
-        self.physical_state = torch.stack(
-            [PhysicalState(device=self.device)] * batch_dim
-        )
-        self.tool_state = torch.stack([ToolState(device=self.device)] * batch_dim)
+    # def __init__(self, batch_dim: int):
+    #     super().__init__()
+    #     # FIXME: this __init__ should be deprecated, and instead to be instantiated directly.
+    #     self.batch_size = batch_dim
+    #     self.electronics_state = torch.stack(
+    #         [ElectronicsState(device=self.device)] * batch_dim
+    #     )
+    #     self.physical_state = torch.stack(
+    #         [PhysicalState(device=self.device)] * batch_dim
+    #     )
+    #     self.tool_state = torch.stack([ToolState(device=self.device)] * batch_dim)
 
     def diff(self, other: "RepairsSimState", sim_info: RepairsSimInfo):  # batched diff.
         assert len(self.electronics_state) == len(other.electronics_state), (
@@ -69,13 +67,13 @@ class RepairsSimState(SimState):
         assert self.has_electronics == other.has_electronics, (
             "Electronics present/absent mismatch in sim state diff!"
         )
-        assert self.scene_batch_dim == other.scene_batch_dim, (
+        assert self.batch_size == other.batch_size, (
             "Batch dim mismatch in sim state diff!"
         )
-        assert self.component_info == other.component_info, (
+        assert sim_info.component_info == sim_info.component_info, (
             "Electronics component info mismatch in sim state diff."
         )
-        assert self.component_info is not None, (
+        assert sim_info.component_info is not None, (
             "Electronics component info is not set on RepairsSimState."
         )
         assert (
@@ -87,7 +85,7 @@ class RepairsSimState(SimState):
         physical_diffs = []
         physical_diff_counts = []
         total_diff_counts = []
-        for i in range(self.scene_batch_dim):
+        for i in range(self.batch_size):
             # Electronics diff: only compute if both states have electronics registered
             if self.has_electronics:
                 # Pass single component_info; comparability is validated inside diff
@@ -145,14 +143,14 @@ class RepairsSimState(SimState):
             - Names of bodies located under indices
             - Names of electronics bodies located under indices.
         """
-        assert self.scene_batch_dim > 1, "Expected that batch dim is greater than 1."
+        assert self.batch_size > 1, "Expected that batch dim is greater than 1."
         # ^ note, not a hard constraint, but it should be valid in all cases.
 
         # Create output directory if it doesn't exist
         path.parent.mkdir(parents=True, exist_ok=True)
 
         if env_idx is None:  # save all envs
-            env_idx = torch.arange(self.scene_batch_dim)
+            env_idx = torch.arange(self.batch_size)
 
         # # Generate a unique filename
         # uid = str(uuid.uuid4())
@@ -198,23 +196,12 @@ def get_graph_save_paths(base_dir: Path, scene_id: int, init: bool):
     return mech_graph_path, elec_graph_path
 
 
+# deprecated: do directly.
 def merge_global_states(state_list: list[RepairsSimState]):
     assert len(state_list) > 0, "State list can not be zero."
-    total_batch_dim = sum(state.scene_batch_dim for state in state_list)
-    repairs_sim_state = RepairsSimState(total_batch_dim)
-    repairs_sim_state.electronics_state = torch.cat(
-        [state.electronics_state for state in state_list], dim=0
-    )
-    # For TensorClass, concatenate the physical states along batch dimension
-    physical_states_to_concat = [state.physical_state for state in state_list]
-    repairs_sim_state.physical_state = torch.cat(physical_states_to_concat, dim=0)
-    repairs_sim_state.fluid_state = [
-        fluid for state in state_list for fluid in state.fluid_state
-    ]
-    repairs_sim_state.tool_state = torch.cat(
-        [state.tool_state for state in state_list], dim=0
-    )
-    return repairs_sim_state
+    # FIXME: this should be simple torch.cat now.
+    assert all(len(state.batch_size) == 1 for state in state_list)
+    return torch.cat(state_list)
 
 
 def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
@@ -270,7 +257,9 @@ def reconstruct_sim_state(
     )
 
     batch_dim = len(electronics_graphs)
-    repairs_sim_state = RepairsSimState(batch_dim)
+    repairs_sim_state: RepairsSimState = torch.stack(
+        [RepairsSimState(batch_dim)] * batch_dim
+    )
     # repairs_sim_state.electronics_state = [
     #     ElectronicsStateTC.rebuild_from_graph(graph, electronics_indices)
     #     for graph in electronics_graphs
@@ -279,9 +268,7 @@ def reconstruct_sim_state(
     # Use the PhysicalState object directly - it should already be a single TensorClass instance
     repairs_sim_state.physical_state = mechanical_state
 
-    repairs_sim_state.tool_state = [
-        ToolState.rebuild_from_saved(indices) for indices in tool_data
-    ]
+    repairs_sim_state.tool_state = ToolState.rebuild_from_saved(indices)
     repairs_sim_state = update_hole_locs(
         repairs_sim_state, starting_hole_positions, starting_hole_quats, part_hole_batch
     )

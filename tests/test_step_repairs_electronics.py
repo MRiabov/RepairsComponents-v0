@@ -2,10 +2,11 @@ import pytest
 import genesis as gs
 from repairs_components.geometry.connectors.models.europlug import Europlug
 from repairs_components.training_utils.sim_state_global import RepairsSimState
+from tests.global_test_config import init_gs, test_device
 
 
 @pytest.fixture(scope="module")
-def scene_with_two_connectors(init_gs):
+def scene_with_two_connectors(init_gs, test_device):
     ########################## create a scene ##########################
     scene = gs.Scene(
         sim_options=gs.options.SimOptions(
@@ -53,7 +54,7 @@ def scene_with_two_connectors(init_gs):
         "europlug_0_male@connector": connector_europlug_male,
         "europlug_0_female@connector": connector_europlug_female,
     }
-    repairs_sim_state = RepairsSimState(1)
+    repairs_sim_state = RepairsSimState(device=test_device).unsqueeze(0)
     europlug_male = Europlug(0)
     # hmm, and how do I register electronics? #TODO check translation.
     repairs_sim_state.electronics_state[0].register(europlug_male)

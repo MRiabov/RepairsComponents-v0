@@ -40,7 +40,7 @@ class ElectronicsComponentInfo:
     inverse_component_indices: dict = field(default_factory=dict)
 
 
-class ElectronicsState(TensorClass):
+class ElectronicsState(TensorClass, tensor_only=True):
     """TensorClass-based electronics state.
 
     Represents connectivity in an electronics state.

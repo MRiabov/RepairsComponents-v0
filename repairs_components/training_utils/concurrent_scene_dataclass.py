@@ -282,21 +282,20 @@ def split_scene_config(scene_config: ConcurrentSceneData):
     batch = scene_config.batch_dim
     cfg_list: list[ConcurrentSceneData] = []
     for i in range(batch):
+        # FIXME: make this standard slicing using tensorclass operations.
         # slice global states
         orig_curr = scene_config.current_state
-        curr = RepairsSimState(batch_dim=1)
+        curr = RepairsSimState(device=scene_config.current_state.device).unsqueeze(0)
         curr.electronics_state = orig_curr.electronics_state[i : i + 1]
         curr.physical_state = orig_curr.physical_state[i : i + 1]
         curr.tool_state = orig_curr.tool_state[i : i + 1]
         curr.has_electronics = orig_curr.has_electronics
         curr.has_fluid = orig_curr.has_fluid
         # sanity check: ensure single-item state
-        assert curr.scene_batch_dim == 1, (
-            f"Expected batch_dim=1, got {curr.scene_batch_dim}"
-        )
+        assert curr.batch_size == 1, f"Expected batch_dim=1, got {curr.batch_size}"
 
         orig_des = scene_config.desired_state
-        des = RepairsSimState(batch_dim=1)
+        des = RepairsSimState(device=scene_config.desired_state.device).unsqueeze(0)
         des.electronics_state = orig_des.electronics_state[i : i + 1]
         des.physical_state = orig_des.physical_state[i : i + 1]
         des.tool_state = orig_des.tool_state[i : i + 1]
@@ -304,16 +303,14 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         des.has_fluid = orig_des.has_fluid
 
         orig_init = scene_config.init_state
-        init = RepairsSimState(batch_dim=1)
+        init = RepairsSimState(device=scene_config.init_state.device).unsqueeze(0)
         init.electronics_state = orig_init.electronics_state[i : i + 1]
         init.physical_state = orig_init.physical_state[i : i + 1]
         init.tool_state = orig_init.tool_state[i : i + 1]
         init.has_electronics = orig_init.has_electronics
         init.has_fluid = orig_init.has_fluid
         # sanity check: ensure single-item state
-        assert des.scene_batch_dim == 1, (
-            f"Expected batch_dim=1, got {des.scene_batch_dim}"
-        )
+        assert des.batch_size == 1, f"Expected batch_dim=1, got {des.batch_size}"
 
         # slice voxel and diffs
         vox_init_i = scene_config.vox_init[i].unsqueeze(0)

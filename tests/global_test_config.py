@@ -13,6 +13,12 @@ def init_gs():
 
 
 @pytest.fixture(scope="session")
+def test_device():
+    "Standard device, not for edge-case checks."
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+@pytest.fixture(scope="session")
 def base_data_dir():
     cuda_available = torch.cuda.is_available()
     base_dir = Path(

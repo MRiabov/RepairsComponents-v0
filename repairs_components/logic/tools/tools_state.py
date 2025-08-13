@@ -4,7 +4,6 @@ import numpy as np
 from repairs_components.logic.tools.gripper import Gripper
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum
-from tensordict import TensorClass
 from dataclasses import dataclass, field
 
 
@@ -22,7 +21,7 @@ class ToolInfo:
     )
 
 
-class ToolState(TensorClass, SimState):
+class ToolState(SimState):
     # note: default bdim = (), so no batch. this is expected.
     tool_ids: torch.Tensor = field(
         default_factory=lambda: torch.tensor(ToolsEnum.GRIPPER.value)

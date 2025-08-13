@@ -185,6 +185,7 @@ def untranslated_holes_for_two_parts():
 def fresh_scene_with_fastener_screwdriver_and_two_parts(
     _built_scene_with_fastener_screwdriver_and_two_parts,
     untranslated_holes_for_two_parts,
+    test_device,
 ):
     "Reset the scene."
     scene, entities = _built_scene_with_fastener_screwdriver_and_two_parts
@@ -193,7 +194,7 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
     fastener_data = Fastener(initial_hole_id_a=None)
     standard_fastener_name = fastener_data.name
     # populate current sim state
-    repairs_sim_state = RepairsSimState(1)
+    repairs_sim_state = RepairsSimState(device=test_device).unsqueeze(0)
     sim_info = RepairsSimInfo()
     part_with_holes_1_pos = entities["part_with_holes_1@solid"].get_pos(0)
     part_with_holes_2_pos = entities["part_with_holes_2@solid"].get_pos(0)
@@ -239,7 +240,7 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
     )
 
     # populate desired state
-    desired_sim_state = RepairsSimState(1)
+    desired_sim_state = RepairsSimState(device=test_device).unsqueeze(0)
     desired_physical_state = desired_sim_state.physical_state
     desired_part_with_holes_1_pos = part_with_holes_1_pos + torch.tensor(
         [

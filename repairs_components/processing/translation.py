@@ -156,13 +156,13 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     # sanity-check tool names
     # Allow -1 sentinel for "no fastener"; ensure integer dtype
-    if (sim_state.tool_state.tool_ids == Screwdriver.id).any():
+    if (sim_state.tool_state.tool_ids == ToolsEnum.SCREWDRIVER.value).any():
         ids = sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
-            sim_state.tool_state.tool_ids == Screwdriver.id
+            sim_state.tool_state.tool_ids == ToolsEnum.SCREWDRIVER.value
         ]
         assert ids.dtype == torch.long and (ids >= -1).all(), (
             "picked_up_fastener_id must be int64 with -1 sentinel for screwdriver"
-        ) # should be a single assertion (was already)
+        )  # should be a single assertion (was already)
 
     # loop entities, gather body transforms for batched update; update fasteners directly
     body_names: list[str] = []
@@ -240,7 +240,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
     # handle picked up fastener (tip)
     # fastener_tip_pos
     for env_id in torch.nonzero(
-        (sim_state.tool_state.tool_ids == Screwdriver.id)
+        (sim_state.tool_state.tool_ids == ToolsEnum.SCREWDRIVER.value)
         & sim_state.tool_state.screwdriver_tc.has_picked_up_fastener
     ).squeeze(1):
         fastener_name = sim_state.tool_state.screwdriver_tc.picked_up_fastener_name(
@@ -283,7 +283,7 @@ def translate_compound_to_sim_state(
         "All compounds must have children."
     )
     n_envs = len(batch_b123d_compounds)
-    sim_state = RepairsSimState(batch_dim=n_envs)
+    sim_state = torch.stack([RepairsSimState(device=device)] * n_envs)
 
     # Compute hole data upfront from the first compound
     # (assuming all compounds in the batch have the same hole structure)
@@ -584,7 +584,7 @@ def create_constraints_based_on_graph(
     rigid_solver = scene.sim.rigid_solver
     all_base_links = {}
     if env_idx is None:
-        env_idx = torch.arange(env_state.scene_batch_dim)
+        env_idx = torch.arange(env_state.batch_size)
     # TODO: assert that number of steps is 0 - it should be only in the start. No API for this in genesis atm.
 
     # all_base_links= np.full(

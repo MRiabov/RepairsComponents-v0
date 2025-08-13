@@ -18,11 +18,11 @@ from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tools_state import ToolState
 from tests.test_tool_genesis import move_franka_to_pos
 from genesis.engine.entities import RigidEntity
-from tests.global_test_config import init_gs, base_data_dir
+from tests.global_test_config import init_gs, base_data_dir, test_device
 
 
 @pytest.fixture(scope="session")
-def scene_with_fastener_screwdriver_and_two_parts(init_gs):
+def scene_with_fastener_screwdriver_and_two_parts(init_gs, test_device):
     from repairs_components.logic.tools.screwdriver import Screwdriver
     from repairs_components.logic.tools.tool import attach_tool_to_arm
 

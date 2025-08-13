@@ -19,11 +19,11 @@ from repairs_components.logic.physical_state import (
     register_bodies_batch,
     register_fasteners_batch,
 )
-from tests.global_test_config import init_gs
+from tests.global_test_config import init_gs, test_device
 
 
 @pytest.fixture
-def scene_with_entities(init_gs):
+def scene_with_entities(init_gs, test_device):
     """Create a real Genesis scene with various entity types."""
 
     scene = gs.Scene(
@@ -86,7 +86,7 @@ def scene_with_entities(init_gs):
     }
 
     # create and populate RepairsSimState
-    sim_state = RepairsSimState(1)
+    sim_state = RepairsSimState(device=test_device).unsqueeze(0)
     sim_state.tool_state.tool_ids[0] = ToolsEnum.SCREWDRIVER.value
     sim_state.tool_state.screwdriver_tc = Screwdriver(
         picked_up_fastener_id=torch.tensor([0]),

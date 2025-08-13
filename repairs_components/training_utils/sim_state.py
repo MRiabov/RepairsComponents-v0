@@ -3,12 +3,14 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import numpy as np
+from tensordict import TensorClass
+from typing import Any
 
 
-@dataclass
-class SimState(ABC):  # TODO migrate to TensorClass
-    """Simply a convenience ABC to define the diff method."""
+class SimState(TensorClass):
+    """Simply a convenience ABC to define the diff method.
+    Is a tensorclass."""
 
     @abstractmethod
-    def diff(self, other: "SimState") -> tuple[dict[str, np.ndarray], int]:
+    def diff(self, other: "SimState", info: Any) -> tuple[dict[str, np.ndarray], int]:
         raise NotImplementedError
