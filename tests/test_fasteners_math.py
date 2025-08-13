@@ -14,12 +14,16 @@ def test_simple_match_within_distance():
     # for batch of 1, with two holes, both of which in the first part, test that one close hole is selected.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])  # [B,3]
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04], [0.2, 0.0, 0.0]]])  # [B,H,3]
-    part_hole_batch = torch.tensor([[0, 0]])  # [H]
+    part_hole_batch = torch.tensor([0, 0])  # [H]
+    fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])  # [B,4]
+    hole_quats = torch.tensor([[[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]])  # [B,H,4]
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos,
-        part_hole_positions,
-        part_hole_batch,
+        active_fastener_tip_position=tip_pos,
+        active_fastener_quat=fast_quat,
+        part_hole_positions=part_hole_positions,
+        part_hole_quats=hole_quats,
+        part_hole_batch=part_hole_batch,
         connection_dist_threshold=0.05,
         connection_angle_threshold=torch.full((1,), 30),
     )
@@ -33,12 +37,16 @@ def test_no_hole_within_distance():
     # for batch of 1, with two holes, both of which in the first part, test that all are too far.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.1, 0.0, 0.0], [0.2, 0.0, 0.0]]])
-    part_hole_batch = torch.tensor([[0, 0]])
+    part_hole_batch = torch.tensor([0, 0])
+    fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    hole_quats = torch.tensor([[[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos,
-        part_hole_positions,
-        part_hole_batch,
+        active_fastener_tip_position=tip_pos,
+        active_fastener_quat=fast_quat,
+        part_hole_positions=part_hole_positions,
+        part_hole_quats=hole_quats,
+        part_hole_batch=part_hole_batch,
         connection_dist_threshold=0.05,
         connection_angle_threshold=torch.full((1,), 30),
     )
@@ -50,16 +58,25 @@ def test_no_hole_within_distance():
 
 def test_batch():
     # for batch of 2, with two holes each, test that the closest hole is selected in each part.
-    tip_pos = torch.tensor([[[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]]])
+    tip_pos = torch.tensor([[0.0, 0.0, 0.0], [0.1, 0.0, 0.0]])
     part_hole_positions = torch.tensor(
         [[[0.0, 0.0, 0.04], [0.2, 0.0, 0.0]], [[0.2, 0.0, 0.0], [0.1, 0.0, 0.03]]]
     )
-    hole_batch = torch.tensor([[0, 1], [0, 1]])
+    hole_batch = torch.tensor([0, 1])
+    fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]])  # [B,4]
+    hole_quats = torch.tensor(
+        [
+            [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]],
+            [[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]],
+        ]
+    )  # [B,H,4]
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos,
-        part_hole_positions,
-        hole_batch,
+        active_fastener_tip_position=tip_pos,
+        active_fastener_quat=fast_quat,
+        part_hole_positions=part_hole_positions,
+        part_hole_quats=hole_quats,
+        part_hole_batch=hole_batch,
         connection_dist_threshold=0.05,
         connection_angle_threshold=torch.full((1,), 30),
     )
@@ -73,20 +90,19 @@ def test_orientation_mask_rejects():
     # for batch of 1, with one hole, test that the hole is rejected if it is not within angle threshold.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04]]])
-    part_hole_batch = torch.tensor([[0]])
+    part_hole_batch = torch.tensor([0])
     fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
     hole_quats = torch.tensor(
         [[[0.0, 1.0, 0.0, 0.0]]]
     )  # 180° around x, in WXYZ convention
-
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos,
-        part_hole_positions,
-        part_hole_batch,
+        active_fastener_tip_position=tip_pos,
+        active_fastener_quat=fast_quat,
+        part_hole_positions=part_hole_positions,
+        part_hole_quats=hole_quats,
+        part_hole_batch=part_hole_batch,
         connection_dist_threshold=0.05,
         connection_angle_threshold=torch.full((1,), 30),
-        part_hole_quats=hole_quats,
-        active_fastener_quat=fast_quat,
     )
     assert hole_idx.shape == part_idx.shape
     assert hole_idx.ndim == 1
@@ -98,18 +114,18 @@ def test_orientation_mask_accepts():
     # for batch of 1, with one hole, test that the hole is accepted if it is within angle threshold.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04]]])
-    part_hole_batch = torch.tensor([[0]])
+    part_hole_batch = torch.tensor([0])
     fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
     hole_quats = torch.tensor([[[0.9848, 0.0, 0.1736, 0.0]]])  # ~10° around y
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos,
-        part_hole_positions,
-        part_hole_batch,
+        active_fastener_tip_position=tip_pos,
+        active_fastener_quat=fast_quat,
+        part_hole_positions=part_hole_positions,
+        part_hole_quats=hole_quats,
+        part_hole_batch=part_hole_batch,
         connection_dist_threshold=0.05,
         connection_angle_threshold=torch.full((1,), 30),
-        part_hole_quats=hole_quats,
-        active_fastener_quat=fast_quat,
     )
     assert hole_idx.tolist() == [0]
     assert part_idx.tolist() == [0]
@@ -119,13 +135,17 @@ def test_ignore_part_index_masks():
     # for batch of 1, with two holes, test that the hole in the ignored part is not selected.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04], [0.2, 0.0, 0.0]]])
-    part_hole_batch = torch.tensor([[0, 0]])
+    part_hole_batch = torch.tensor([0, 0])
     ignore_part_idx = torch.tensor([0])
+    fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    hole_quats = torch.tensor([[[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos,
-        part_hole_positions,
-        part_hole_batch,
+        active_fastener_tip_position=tip_pos,
+        active_fastener_quat=fast_quat,
+        part_hole_positions=part_hole_positions,
+        part_hole_quats=hole_quats,
+        part_hole_batch=part_hole_batch,
         connection_dist_threshold=0.05,
         ignore_part_idx=ignore_part_idx,
         connection_angle_threshold=torch.full((1,), 30),
@@ -139,13 +159,17 @@ def test_ignore_part_index_masks():
 def test_ignore_part_index_does_not_mask():
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04], [0.2, 0.0, 0.0]]])
-    part_hole_batch = torch.tensor([[0, 0]])
+    part_hole_batch = torch.tensor([0, 0])
     ignore_part_idx = torch.tensor([-1])
+    fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    hole_quats = torch.tensor([[[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos,
-        part_hole_positions,
-        part_hole_batch,
+        active_fastener_tip_position=tip_pos,
+        active_fastener_quat=fast_quat,
+        part_hole_positions=part_hole_positions,
+        part_hole_quats=hole_quats,
+        part_hole_batch=part_hole_batch,
         connection_dist_threshold=0.05,
         ignore_part_idx=ignore_part_idx,
         connection_angle_threshold=torch.full((1,), 30),
@@ -158,12 +182,16 @@ def test_distance_tie_selects_first():
     # for batch of 1, with two holes, test that the first hole is selected if they are at the same distance.
     tip_pos = torch.tensor([[0.0, 0.0, 0.0]])
     part_hole_positions = torch.tensor([[[0.0, 0.0, 0.04], [0.0, 0.0, -0.04]]])
-    part_hole_batch = torch.tensor([[0, 0]])
+    part_hole_batch = torch.tensor([0, 0])
+    fast_quat = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    hole_quats = torch.tensor([[[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]]])
 
     part_idx, hole_idx = check_fastener_possible_insertion(
-        tip_pos,
-        part_hole_positions,
-        part_hole_batch,
+        active_fastener_tip_position=tip_pos,
+        active_fastener_quat=fast_quat,
+        part_hole_positions=part_hole_positions,
+        part_hole_quats=hole_quats,
+        part_hole_batch=part_hole_batch,
         connection_dist_threshold=0.05,
         connection_angle_threshold=torch.full((1,), 30),
     )

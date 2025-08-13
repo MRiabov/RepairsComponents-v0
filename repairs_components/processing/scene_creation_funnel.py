@@ -391,7 +391,7 @@ def move_entities_to_pos(
     for (
         gs_entity_name,
         entity_idx,
-    ) in starting_sim_state.physical_state.body_indices.items():
+    ) in starting_sim_state.physical_info.body_indices.items():
         entity = gs_entities[gs_entity_name]
         entity_pos = starting_sim_state.physical_state.position[env_idx, entity_idx]
         # No need to move because already centered

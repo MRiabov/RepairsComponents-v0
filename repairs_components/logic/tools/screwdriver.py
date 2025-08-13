@@ -4,9 +4,10 @@ import torch
 from repairs_components.logic.tools.tool import Tool, ToolsEnum, attachment_link_name
 from pathlib import Path
 from build123d import *  # noqa: F403
+from tensordict import TensorClass
 
 
-class Screwdriver(Tool):
+class Screwdriver(Tool, TensorClass):
     @property
     def id(self):
         return ToolsEnum.SCREWDRIVER.value
@@ -17,15 +18,15 @@ class Screwdriver(Tool):
     picked_up_fastener_quat: torch.Tensor = field(
         default_factory=lambda: torch.full((1, 4), float("nan"))
     )
-    # New: numeric id for picked-up fastener. Float tensor to allow NaN when absent.
+    # Numeric id for picked-up fastener. Use -1 to denote "none".
     picked_up_fastener_id: torch.Tensor = field(
-        default_factory=lambda: torch.tensor([float("nan")])  # scalar
+        default_factory=lambda: torch.tensor([-1], dtype=torch.long)
     )
 
     @property
     def has_picked_up_fastener(self):
-        # Prefer numeric id if available; fall back to name for backward compatibility.
-        return torch.isnan(self.picked_up_fastener_id)
+        # True when an id is present (>= 0). Returns a boolean tensor per env.
+        return self.picked_up_fastener_id >= 0
 
     # @property # oudated syntax.
     # def picked_up_fastener_name(self):
@@ -43,15 +44,21 @@ class Screwdriver(Tool):
         "Just a wrapper to make code more readable."
         from repairs_components.geometry.fasteners import Fastener
 
-        return [
+        if env_ids.dtype != torch.long:
+            env_ids = env_ids.to(torch.long)
+        assert (self.picked_up_fastener_id[env_ids] >= 0).all(), (
+            "picked_up_fastener_id should be non-negative when requesting a name"
+        )
+        names = [
             Fastener.fastener_name_in_simulation(fastener_id.item())
-            if not torch.isnan(fastener_id)
-            else None
             for fastener_id in self.picked_up_fastener_id[env_ids]
         ]
+        if env_ids.numel() == 1:
+            return names[0]
+        return names
 
-    @staticmethod
-    def tool_grip_position():  # TODO rename to uppercase and make var.
+    @property
+    def tool_grip_position(self):  # TODO rename to uppercase and make var.
         return torch.tensor([0, 0, 0.15])  # 0.3m?
 
     @staticmethod  # TODO rename to uppercase and make var.
@@ -61,9 +68,9 @@ class Screwdriver(Tool):
     def step(self, action: torch.Tensor, state: dict):
         raise NotImplementedError
 
-    @staticmethod  # TODO rename to uppercase and make var.
-    def dist_from_grip_link():
-        return 5  # 5 meters. for debug.
+    @property
+    def dist_from_grip_link(self):
+        return torch.tensor(5.0)  # meters, for debug.
 
     def get_mjcf(self, base_dir: Path):
         # Get OBJ file
@@ -112,7 +119,7 @@ class Screwdriver(Tool):
     def on_tool_release(self, env_idx: torch.Tensor):
         self.picked_up_fastener_tip_position[env_idx] = torch.full((3,), float("nan"))
         self.picked_up_fastener_quat[env_idx] = torch.full((4,), float("nan"))
-        self.picked_up_fastener_id[env_idx] = torch.tensor(float("nan"))
+        self.picked_up_fastener_id[env_idx] = torch.tensor(-1, dtype=torch.long)
 
 
 def receive_screw_in_action(

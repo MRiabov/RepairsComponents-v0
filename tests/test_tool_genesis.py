@@ -17,7 +17,7 @@ from repairs_components.logic.tools.tool import (
     attach_tool_to_arm,
     detach_tool_from_arm,
 )
-from repairs_components.logic.tools.tools_state import ToolState
+from repairs_components.logic.tools.tools_state import ToolState, ToolInfo
 from repairs_components.processing.geom_utils import get_connector_pos
 from tests.global_test_config import init_gs, base_data_dir
 
@@ -156,6 +156,7 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
         tool_cube,
         end_effector,
         tool_state,
+        ToolInfo(),
         torch.tensor([0]),
     )
     rgb, _, _, _ = camera.render()
@@ -164,7 +165,7 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     expected_tool_pos = get_connector_pos(
         end_effector.get_pos(0).squeeze(1),
         end_effector.get_quat(0).squeeze(1),
-        screwdriver.tool_grip_position().unsqueeze(0),
+        ToolInfo().TOOLS_GRIPPER_POS[tool_state.tool_ids[0]].unsqueeze(0),
     )
     assert torch.isclose(tool_cube.get_pos(0), expected_tool_pos, atol=0.05).all(), (
         f"Tool pos should align with hand grip offset, got {tool_cube.get_pos(0)} vs {expected_tool_pos}"
@@ -186,7 +187,7 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     expected_tool_pos = get_connector_pos(
         end_effector.get_pos(0).squeeze(1),
         end_effector.get_quat(0).squeeze(1),
-        screwdriver.tool_grip_position().unsqueeze(0),
+        ToolInfo().TOOLS_GRIPPER_POS[tool_state.tool_ids[0]].unsqueeze(0),
     )
     assert torch.isclose(tool_cube.get_pos(), expected_tool_pos, atol=0.05).all(), (
         f"Tool pos should align with hand grip offset, got {tool_cube.get_pos()} vs {expected_tool_pos}"
@@ -226,6 +227,7 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
         tool_cube,
         end_effector,
         tool_state,
+        ToolInfo(),
         torch.tensor([0]),
     )
     rgb, _, _, _ = camera.render()
@@ -233,10 +235,12 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
 
     assert torch.isclose(
         tool_cube.get_pos(0),
-        torch.tensor([[0.65, 0.0, 0.5 - screwdriver.tool_grip_position()[2]]]),
+        torch.tensor(
+            [[0.65, 0.0, 0.5 - ToolInfo().TOOLS_GRIPPER_POS[tool_state.tool_ids[0]][2]]]
+        ),
         atol=0.05,
     ).all(), (
-        f"Cube pos expected to be [0.65, 0.0, 0.5 - screwdriver.tool_grip_position()[2]], got {tool_cube.get_pos(0)}"
+        f"Cube pos expected to be [0.65, 0.0, 0.5 - ToolInfo().TOOLS_GRIPPER_POS[tool_state.tool_ids[0]][2]], got {tool_cube.get_pos(0)}"
     )
 
     # move to
@@ -252,7 +256,7 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     expected_tool_pos = get_connector_pos(
         end_effector.get_pos(0).squeeze(1),
         end_effector.get_quat(0).squeeze(1),
-        screwdriver.tool_grip_position().unsqueeze(0),
+        ToolInfo().TOOLS_GRIPPER_POS[tool_state.tool_ids[0]].unsqueeze(0),
     )
     assert torch.isclose(tool_cube.get_pos(0), expected_tool_pos, atol=0.05).all(), (
         f"Tool pos should align with hand grip offset, got {tool_cube.get_pos(0)} vs {expected_tool_pos}"
@@ -305,10 +309,10 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
 
     assert torch.isclose(
         tool_cube.get_pos(0),
-        torch.tensor([[0.65, 0.0, 0.5 - screwdriver.tool_grip_position()[2]]]),
+        torch.tensor([[0.65, 0.0, 0.5 - screwdriver.tool_grip_position[2]]]),
         atol=0.15,
     ).all(), (
-        f"Cube pos expected to be [0.65, 0.0, 0.5 - screwdriver.tool_grip_position()[2]], got {tool_cube.get_pos(0)}"
+        f"Cube pos expected to be [0.65, 0.0, 0.5 - screwdriver.tool_grip_position[2]], got {tool_cube.get_pos(0)}"
     )
     # give it a more efficient trajectory (didn't plan well w/o it.)
     move_franka_to_pos(
@@ -336,10 +340,10 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
 
     assert torch.isclose(
         tool_cube.get_pos(0),
-        torch.tensor([[0.0, 0.65, 0.7 - screwdriver.tool_grip_position()[2]]]),
+        torch.tensor([[0.0, 0.65, 0.7 - screwdriver.tool_grip_position[2]]]),
         atol=0.05,
     ).all(), (
-        f"Cube pos expected to be [0.0, 0.65, 0.7 - screwdriver.tool_grip_position()[2]], got {tool_cube.get_pos(0)}"
+        f"Cube pos expected to be [0.0, 0.65, 0.7 - screwdriver.tool_grip_position[2]], got {tool_cube.get_pos(0)}"
     )
 
     # attach second cube to tool
@@ -347,7 +351,7 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
 
     expected_z = (
         0.7
-        - screwdriver.tool_grip_position()[2]
+        - screwdriver.tool_grip_position[2]
         + screwdriver.fastener_connector_pos_relative_to_center()[2]
     )  # hmm, this isn't even right in tests. "+" and "-" mismatch.
 
@@ -358,7 +362,7 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
         tool_cube,
         tool_state_to_update=screwdriver,
         fastener_id=0,
-        env_id=0,
+        env_ids=0,
     )
     assert torch.isclose(
         fastener_cube.get_pos(0), reposition_cube_to_xyz, atol=0.05

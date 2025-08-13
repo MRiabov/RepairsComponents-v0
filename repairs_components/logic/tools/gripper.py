@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from repairs_components.logic.tools.tool import Tool, ToolsEnum
 
 
@@ -18,11 +19,13 @@ class Gripper(Tool):  # tensorclass by inheritance!
 
     @property
     def dist_from_grip_link(self):
-        raise NotImplementedError("Unnecessary for gripper tool.")
+        #!!! Unnecessary for gripper tool.
+        return torch.tensor(float('nan'))
 
     @property
     def tool_grip_position(self):
-        raise NotImplementedError("Unnecessary for gripper tool.")
+        #!!! Unnecessary for gripper tool.
+        return torch.full((3,), torch.nan)
 
     def on_tool_release(self):
         raise NotImplementedError("Unnecessary for gripper tool.")

@@ -5,9 +5,8 @@ from repairs_components.logic.electronics.electronics_state import (
     ElectronicsState,
     ElectronicsComponentInfo,
 )
-from repairs_components.logic.physical_state import PhysicalState
-from repairs_components.logic.fluid_state import FluidState
-from repairs_components.logic.tools.tools_state import ToolState
+from repairs_components.logic.physical_state import PhysicalState, PhysicalStateInfo
+from repairs_components.logic.tools.tools_state import ToolState, ToolInfo
 from repairs_components.training_utils.sim_state import SimState
 from torch_geometric.data import Batch, Data
 
@@ -19,8 +18,12 @@ class RepairsSimInfo:
     component_info: ElectronicsComponentInfo = field(
         default_factory=ElectronicsComponentInfo
     )
-    physical_body_info: ...  # TODO
-    fastener_links_cache: torch.Tensor = field(default_factory=lambda: torch.empty(0))
+    physical_info: PhysicalStateInfo = field(default_factory=PhysicalStateInfo)
+    tool_info: ToolInfo = field(default_factory=ToolInfo)
+
+    fastener_link_id_cache: torch.Tensor = field(
+        default_factory=lambda: torch.empty(0, dtype=torch.int32)
+    )
     "Cache of fastener links for fastener constraint creation without dict querying."
 
 
@@ -34,11 +37,10 @@ class RepairsSimState(SimState):
 
     # the main states.
     electronics_state: ElectronicsState = field(default_factory=ElectronicsState)
-
     physical_state: PhysicalState = field(
         default_factory=PhysicalState
     )  # Single TensorClass instance
-    fluid_state: list[FluidState] = field(default_factory=list)
+    # fluid_state: list[FluidState] = field(default_factory=list)
     tool_state: ToolState = field(default_factory=list)
 
     # to prevent computation of certain objects if they are not present.
@@ -58,9 +60,8 @@ class RepairsSimState(SimState):
         self.physical_state = torch.stack(
             [PhysicalState(device=self.device) for _ in range(batch_dim)]
         )
-        self.physical_state.__post_init__()
         # note: to avoid complex instantiation logic.
-        self.fluid_state = [FluidState() for _ in range(batch_dim)]
+        # self.fluid_state = [FluidState() for _ in range(batch_dim)]
         self.tool_state = torch.stack(
             [ToolState(device=self.device) for _ in range(batch_dim)]
         )
@@ -119,18 +120,10 @@ class RepairsSimState(SimState):
             physical_diff, physical_diff_count = self_physical_i.diff(other_physical_i)
             physical_diffs.append(physical_diff)
             physical_diff_counts.append(physical_diff_count)
-            fluid_diff, fluid_diff_count = self.fluid_state[i].diff(
-                other.fluid_state[i]
-            )
-            fluid_diffs.append(fluid_diff)
-            fluid_diff_counts.append(fluid_diff_count)
 
         electronics_diff_counts = torch.tensor(electronics_diff_counts)
         physical_diff_counts = torch.tensor(physical_diff_counts)
-        fluid_diff_counts = torch.tensor(fluid_diff_counts)
-        total_diff_counts = (
-            electronics_diff_counts + physical_diff_counts + fluid_diff_counts
-        )
+        total_diff_counts = electronics_diff_counts + physical_diff_counts
 
         return {
             "physical_diff": physical_diffs,
@@ -251,7 +244,6 @@ def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.
     for new_id, old_id in enumerate(old_idx):
         old_state.electronics_state[old_id] = new_state.electronics_state[new_id]
         # For TensorClass, update the specific batch indices
-        old_state.fluid_state[old_id] = new_state.fluid_state[new_id]
         old_state.tool_state[old_id] = new_state.tool_state[new_id]
     # batch update
     old_state.physical_state[old_idx] = new_state.physical_state

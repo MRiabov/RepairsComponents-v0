@@ -5,13 +5,27 @@ from repairs_components.logic.tools.gripper import Gripper
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum
 from tensordict import TensorClass
-from dataclasses import field
+from dataclasses import dataclass, field
+
+
+@dataclass
+class ToolInfo:
+    TOOLS_GRIPPER_POS: torch.Tensor = field(
+        default_factory=lambda: torch.stack(
+            [tool.tool_grip_position for tool in [Gripper(), Screwdriver()]]
+        )
+    )
+    TOOLS_DIST_FROM_GRIP_LINK: torch.Tensor = field(
+        default_factory=lambda: torch.stack(
+            [tool.dist_from_grip_link for tool in [Gripper(), Screwdriver()]]
+        )
+    )
 
 
 class ToolState(TensorClass, SimState):
     tool_ids: torch.Tensor = field(
         default_factory=lambda: torch.tensor([ToolsEnum.GRIPPER.value])
-    )  # scalar to be batched.
+    )  # [B]
     # NOTE: will be renamed to tool_ids (already was), leaving now for backward compatibility.
     gripper_tc: Gripper = field(default_factory=Gripper)
     "Gripper tool state which has `nan` on all values if it's not picked up. '_tc' because of tensorclass"

@@ -9,6 +9,7 @@ from torch_geometric.data import Data
 from repairs_components.processing.voxel_export import sparse_arr_put
 from repairs_components.training_utils.progressive_reward_calc import RewardHistory
 from repairs_components.training_utils.sim_state_global import (
+    RepairsSimInfo,
     RepairsSimState,
     merge_global_states,
     merge_global_states_at_idx,
@@ -27,6 +28,7 @@ class ConcurrentSceneData:
     init_state: RepairsSimState
     current_state: RepairsSimState
     desired_state: RepairsSimState
+    sim_info: RepairsSimInfo
     vox_init: torch.Tensor  # sparse tensor!
     vox_des: torch.Tensor  # sparse tensor!
     initial_diffs: dict[str, list[Data]]
@@ -41,22 +43,6 @@ class ConcurrentSceneData:
     "Step count in every scene. I don't think this should be diffed."
     task_ids: torch.IntTensor
     "Task ids in for every scene."
-
-    # holes
-    starting_hole_positions: torch.Tensor
-    """Starting hole positions for every part, batched with part_hole_batch. 
-    Equal over the batch. Shape: (H, 3)"""
-    starting_hole_quats: torch.Tensor
-    """Starting hole quats for every part, batched with part_hole_batch. 
-    Equal over the batch. Shape: (H, 4)"""
-    hole_depth: torch.Tensor
-    """Hole depths for every part.
-    Equal over the batch. Shape: (H)"""
-    hole_is_through: torch.Tensor
-    """Boolean mask indicating whether each hole is through (True) or blind (False).
-    Equal over the batch. Shape: (H)"""
-    part_hole_batch: torch.Tensor
-    "Part index for every hole. Equal over the batch. Shape: (H)"
 
     # debug
     def __post_init__(self):
@@ -109,24 +95,6 @@ class ConcurrentSceneData:
         assert self.initial_diff_counts.shape[0] == self.batch_dim, (
             f"initial_diff_counts must have the same batch dimension as batch_dim, but got {self.initial_diff_counts.shape[0]} and {self.batch_dim}"
         )
-        # holes
-        self.hole_count = self.starting_hole_positions.shape[0]
-        assert self.starting_hole_positions.shape == (self.hole_count, 3), (
-            f"Starting hole positions must have shape ({self.hole_count}, 3), but got {self.starting_hole_positions.shape}"
-        )  # note the no batch dim.
-        assert self.starting_hole_quats.shape == (self.hole_count, 4), (
-            f"Starting hole quats must have shape ({self.hole_count}, 4), but got {self.starting_hole_quats.shape}"
-        )
-        assert self.part_hole_batch.shape == (self.hole_count,), (
-            "Part hole batch must have shape (H,)"
-        )
-        assert self.hole_depth.shape == (self.hole_count,), (
-            "Hole depths must have shape (H,)"
-        )
-        assert (self.hole_depth > 0).all(), "Hole depths must be positive."
-        assert self.hole_is_through.shape == (self.hole_count,), (
-            "Hole is through must have shape (H,)"
-        )
 
         # init state != current state
         # assert self.init_state != self.current_state, (
@@ -149,13 +117,13 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         for scene_cfg in scene_configs
     )
     assert all(
-        scene_configs[0].starting_hole_positions.shape[0]
-        == scene_cfg.starting_hole_positions.shape[0]
+        scene_configs[0].sim_info.physical_info.part_hole_batch.shape[0]
+        == scene_cfg.sim_info.physical_info.part_hole_batch.shape[0]
         for scene_cfg in scene_configs
     )
     assert all(
-        scene_configs[0].starting_hole_quats.shape[0]
-        == scene_cfg.starting_hole_quats.shape[0]
+        scene_configs[0].sim_info.physical_info.hole_is_through.shape[0]
+        == scene_cfg.sim_info.physical_info.hole_is_through.shape[0]
         for scene_cfg in scene_configs
     )
 
@@ -211,11 +179,7 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         reward_history=reward_history,
         step_count=torch.zeros(new_batch_dim, dtype=torch.int),
         task_ids=torch.cat([data.task_ids for data in scene_configs], dim=0),
-        starting_hole_positions=scene_configs[0].starting_hole_positions,
-        starting_hole_quats=scene_configs[0].starting_hole_quats,
-        hole_depth=scene_configs[0].hole_depth,
-        part_hole_batch=scene_configs[0].part_hole_batch,
-        hole_is_through=scene_configs[0].hole_is_through,
+        sim_info=sim_info,
     )
     return new_scene_config
 
@@ -245,8 +209,8 @@ def merge_scene_configs_at_idx(
         "Count of reset configs must be equal to the batch dimension of the incoming configs."
     )
     assert (
-        old_scene_config.starting_hole_positions.shape[0]
-        == new_scene_config.starting_hole_positions.shape[0]
+        old_scene_config.sim_info.physical_info.part_hole_batch
+        == new_scene_config.sim_info.physical_info.part_hole_batch
     ), "Starting hole positions must have the same shape."
     if torch.any(reset_mask):
         old_idx = torch.nonzero(reset_mask).squeeze(1)
@@ -281,11 +245,7 @@ def merge_scene_configs_at_idx(
             ),
             step_count=old_scene_config.step_count.clone(),
             task_ids=old_scene_config.task_ids.clone(),
-            starting_hole_positions=old_scene_config.starting_hole_positions.clone(),
-            starting_hole_quats=old_scene_config.starting_hole_quats.clone(),
-            hole_depth=old_scene_config.hole_depth.clone(),
-            part_hole_batch=old_scene_config.part_hole_batch.clone(),
-            hole_is_through=old_scene_config.hole_is_through.clone(),
+            sim_info=old_scene_config.sim_info,
         )
         # Update vox_init and vox_des for reset states
         merged_scene_config.vox_init = sparse_arr_put(
@@ -327,7 +287,6 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         curr = RepairsSimState(batch_dim=1)
         curr.electronics_state = orig_curr.electronics_state[i : i + 1]
         curr.physical_state = orig_curr.physical_state[i : i + 1]
-        curr.fluid_state = [orig_curr.fluid_state[i]]
         curr.tool_state = orig_curr.tool_state[i : i + 1]
         curr.has_electronics = orig_curr.has_electronics
         curr.has_fluid = orig_curr.has_fluid
@@ -338,19 +297,17 @@ def split_scene_config(scene_config: ConcurrentSceneData):
 
         orig_des = scene_config.desired_state
         des = RepairsSimState(batch_dim=1)
-        des.electronics_state = [orig_des.electronics_state[i]]
+        des.electronics_state = orig_des.electronics_state[i : i + 1]
         des.physical_state = orig_des.physical_state[i : i + 1]
-        des.fluid_state = [orig_des.fluid_state[i]]
-        des.tool_state = [orig_des.tool_state[i]]
+        des.tool_state = orig_des.tool_state[i : i + 1]
         des.has_electronics = orig_des.has_electronics
         des.has_fluid = orig_des.has_fluid
 
         orig_init = scene_config.init_state
         init = RepairsSimState(batch_dim=1)
-        init.electronics_state = [orig_init.electronics_state[i]]
+        init.electronics_state = orig_init.electronics_state[i : i + 1]
         init.physical_state = orig_init.physical_state[i : i + 1]
-        init.fluid_state = [orig_init.fluid_state[i]]
-        init.tool_state = [orig_init.tool_state[i]]
+        init.tool_state = orig_init.tool_state[i : i + 1]
         init.has_electronics = orig_init.has_electronics
         init.has_fluid = orig_init.has_fluid
         # sanity check: ensure single-item state
@@ -388,12 +345,7 @@ def split_scene_config(scene_config: ConcurrentSceneData):
                 reward_history=RewardHistory(batch_dim=1),
                 step_count=scene_config.step_count[i],
                 task_ids=scene_config.task_ids[i : i + 1],
-                # holes are uniform throughout the batch
-                starting_hole_positions=scene_config.starting_hole_positions.clone(),
-                starting_hole_quats=scene_config.starting_hole_quats.clone(),
-                hole_depth=scene_config.hole_depth.clone(),
-                part_hole_batch=scene_config.part_hole_batch.clone(),
-                hole_is_through=scene_config.hole_is_through.clone(),
+                sim_info=scene_config.sim_info,
             )
         )
     return cfg_list

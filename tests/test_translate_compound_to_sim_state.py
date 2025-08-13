@@ -1,4 +1,4 @@
-from build123d import *
+from build123d import *  # noqa: F403
 import torch
 from repairs_components.geometry.b123d_utils import (
     connect_fastener_to_joint,
@@ -15,7 +15,6 @@ from repairs_components.processing.translation import (
 )
 from repairs_components.training_utils.env_setup import EnvSetup
 from ocp_vscode import show
-
 
 class TestEnv(EnvSetup):
     _positions: torch.Tensor  # note: it's not official, for test and debug only.
@@ -99,7 +98,7 @@ def test_env_geom():
 
 def test_translate_compound_to_sim_state(test_env_geom):
     compound, positions, hole_loc = test_env_geom
-    sim_state, starting_holes = translate_compound_to_sim_state([compound])
+    sim_state, sim_info = translate_compound_to_sim_state([compound])
     expected_num_solids = 5  # solid, fixed solid, solid with hole, two connectors. Fastener is not included.
     expected_num_holes = 1
     expected_num_fasteners = 1
@@ -119,11 +118,11 @@ def test_translate_compound_to_sim_state(test_env_geom):
         expected_num_fasteners,
         4,
     )
-    assert phys_state.fasteners_diam.shape == (
+    assert sim_info.physical_info.fasteners_diam.shape == (
         expected_batch_dim,
         expected_num_fasteners,
     )
-    assert phys_state.fasteners_length.shape == (
+    assert sim_info.physical_info.fasteners_length.shape == (
         expected_batch_dim,
         expected_num_fasteners,
     )
@@ -132,8 +131,8 @@ def test_translate_compound_to_sim_state(test_env_geom):
         expected_num_fasteners,
         2,
     )
-    assert len(phys_state.body_indices) == expected_num_solids
-    assert len(phys_state.inverse_body_indices) == expected_num_solids
+    assert len(sim_info.physical_info.body_indices) == expected_num_solids
+    assert len(sim_info.physical_info.inverse_body_indices) == expected_num_solids
 
     assert phys_state.hole_positions.shape == (
         expected_batch_dim,
@@ -141,10 +140,12 @@ def test_translate_compound_to_sim_state(test_env_geom):
         3,
     )
     assert phys_state.hole_quats.shape == (expected_batch_dim, expected_num_holes, 4)
-    assert phys_state.part_hole_batch.shape == (expected_batch_dim, expected_num_holes)
+    assert sim_info.physical_info.part_hole_batch.shape == (
+        expected_num_holes,
+    )
 
     # assert values.
-    assert set(phys_state.body_indices.keys()) == {
+    assert set(sim_info.physical_info.body_indices.keys()) == {
         "test_solid@solid",
         "test_fixed_solid@fixed_solid",
         "test_solid_with_hole@solid",
@@ -164,16 +165,18 @@ def test_translate_compound_to_sim_state(test_env_geom):
         torch.tensor([[[1, 0, 0, 0]]], dtype=torch.float)
     )
     # Hole expected position = part sim position + local hole offset (identity rotation here)
-    holed_body_idx = phys_state.body_indices["test_solid_with_hole@solid"]
+    holed_body_idx = sim_info.physical_info.body_indices["test_solid_with_hole@solid"]
     local_hole_offset = torch.tensor([[0.0, 0.0, 5.0]]) / 1000.0
     expected_hole_pos_single = (
         compound_pos_to_sim_pos(positions)[holed_body_idx : holed_body_idx + 1]
         + local_hole_offset
     )
     assert phys_state.hole_positions.allclose(expected_hole_pos_single.unsqueeze(0))
-    assert phys_state.part_hole_batch == torch.tensor([[holed_body_idx]])
+    assert torch.equal(
+        sim_info.physical_info.part_hole_batch, torch.tensor([holed_body_idx])
+    )
     assert torch.allclose(
-        phys_state.fasteners_diam,
+        sim_info.physical_info.fasteners_diam,
         torch.tensor([5.0 / 1000]),  # default Fastener diameter
     )
 
@@ -181,7 +184,7 @@ def test_translate_compound_to_sim_state(test_env_geom):
 def test_translate_compound_to_sim_state_batch(test_env_geom):
     compound, positions, hole_loc = test_env_geom
     batch_dim = 2
-    sim_state, starting_holes = translate_compound_to_sim_state([compound] * batch_dim)
+    sim_state, sim_info = translate_compound_to_sim_state([compound] * batch_dim)
     expected_num_solids = 5  # solid, fixed solid, solid with hole, two connectors. Fastener is not included.
     expected_num_holes = 1
     expected_num_fasteners = 1
@@ -192,22 +195,30 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
 
     assert phys_state.fasteners_pos.shape == (batch_dim, expected_num_fasteners, 3)
     assert phys_state.fasteners_quat.shape == (batch_dim, expected_num_fasteners, 4)
-    assert phys_state.fasteners_diam.shape == (batch_dim, expected_num_fasteners)
-    assert phys_state.fasteners_length.shape == (batch_dim, expected_num_fasteners)
+    assert sim_info.physical_info.fasteners_diam.shape == (
+        batch_dim,
+        expected_num_fasteners,
+    )
+    assert sim_info.physical_info.fasteners_length.shape == (
+        batch_dim,
+        expected_num_fasteners,
+    )
     assert phys_state.fasteners_attached_to_body.shape == (
         batch_dim,
         expected_num_fasteners,
         2,
     )
-    assert len(phys_state.body_indices) == expected_num_solids
-    assert len(phys_state.inverse_body_indices) == expected_num_solids
+    assert len(sim_info.physical_info.body_indices) == expected_num_solids
+    assert len(sim_info.physical_info.inverse_body_indices) == expected_num_solids
 
     assert phys_state.hole_positions.shape == (batch_dim, expected_num_holes, 3)
     assert phys_state.hole_quats.shape == (batch_dim, expected_num_holes, 4)
-    assert phys_state.part_hole_batch.shape == (batch_dim, expected_num_holes)
+    assert sim_info.physical_info.part_hole_batch.shape == (
+        expected_num_holes,
+    )
 
     # assert values for batched data
-    assert set(phys_state.body_indices.keys()) == {
+    assert set(sim_info.physical_info.body_indices.keys()) == {
         "test_solid@solid",
         "test_fixed_solid@fixed_solid",
         "test_solid_with_hole@solid",
@@ -231,18 +242,18 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
     )
     # check hole translation:
 
-    holed_body_idx = phys_state.body_indices["test_solid_with_hole@solid"]
+    holed_body_idx = sim_info.physical_info.body_indices["test_solid_with_hole@solid"]
     local_hole_offset = torch.tensor([[0.0, 0.0, 5.0]]) / 1000.0
     expected_hole_pos = (
         compound_pos_to_sim_pos(positions)[holed_body_idx : holed_body_idx + 1]
         + local_hole_offset
     ).expand(batch_dim, -1, -1)
     assert phys_state.hole_positions.allclose(expected_hole_pos)
-    assert phys_state.part_hole_batch.equal(
-        torch.tensor([[holed_body_idx]]).expand(batch_dim, -1)
+    assert sim_info.physical_info.part_hole_batch.equal(
+        torch.tensor([holed_body_idx])
     )
     assert torch.allclose(
-        phys_state.fasteners_diam,
+        sim_info.physical_info.fasteners_diam,
         torch.tensor([5.0 / 1000]).expand(batch_dim, -1),  # default diameter
     )
 

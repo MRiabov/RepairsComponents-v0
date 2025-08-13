@@ -12,7 +12,7 @@ class Multimeter(Tool):
     # wherever the resistance is too high, it can find a broken piece of electronics.
     id: int = ToolsEnum.MULTIMETER.value
 
-    @staticmethod
+    @property
     def tool_grip_position():  # TODO rename to uppercase and make var.
         return torch.tensor([0, 0, 0.1])
 

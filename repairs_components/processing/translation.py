@@ -1,32 +1,24 @@
-from typing_extensions import deprecated
-from build123d import CenterOf, Compound, Part, RevoluteJoint, Unit, Pos
+from build123d import Compound, Part, RevoluteJoint
 import genesis as gs
-import tempfile
 
-from genesis.engine.entities.rigid_entity.rigid_link import RigidLink
 from genesis.engine.entities import RigidEntity
 import torch
-from pathlib import Path
-from repairs_components.geometry.connectors import connectors
 from repairs_components.geometry.connectors.connectors import Connector
-from repairs_components.training_utils.sim_state_global import RepairsSimState
+from repairs_components.training_utils.sim_state_global import (
+    RepairsSimState,
+    RepairsSimInfo,
+)
 from repairs_components.logic.tools.screwdriver import Screwdriver
+from repairs_components.logic.tools.tool import ToolsEnum
 from repairs_components.geometry.fasteners import (
     Fastener,
     get_fastener_singleton_name,
-    get_singleton_fastener_save_path,
 )
-from torch_geometric.data import Data
 import numpy as np
-import torch.nn.functional as F
 from repairs_components.processing.geom_utils import (
     euler_deg_to_quat_wxyz,
     get_connector_pos,
     quat_multiply,
-    quat_conjugate,
-    quat_angle_diff_deg,
-    are_quats_within_angle,
-    sanitize_quaternion,
 )
 from repairs_components.logic.physical_state import (
     register_bodies_batch,
@@ -41,39 +33,39 @@ def translate_state_to_genesis_scene(
     scene: gs.Scene,
     # b123d_assembly: Compound,
     sim_state: RepairsSimState,
+    sim_info: RepairsSimInfo,
     mesh_file_names: dict[str, str],
     random_textures: bool = False,
 ):
     "Translate the first state to genesis scene (unbatched - this is only to populate scene.)"
     "Essentially, populate the scene with meshes."
     # assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
-    assert len(sim_state.physical_state.body_indices) > 0, (
-        "Translated assembly is empty."
-    )
+    assert len(sim_info.physical_info.body_indices) > 0, "Translated assembly is empty."
     assert len(mesh_file_names) > 0, "No meshes provided."
     val_mesh_file_names = {  # val - validation
         k: v for k, v in mesh_file_names.items() if not k.endswith("@fastener")
     }
     assert (
-        len(val_mesh_file_names) == len(sim_state.physical_state.body_indices)
-    ), f"""Number of meshes ({len(val_mesh_file_names)}) does not match number of bodies ({len(sim_state.physical_state.body_indices)}).
+        len(val_mesh_file_names) == len(sim_info.physical_info.body_indices)
+    ), f"""Number of meshes ({len(val_mesh_file_names)}) does not match number of bodies ({len(sim_info.physical_info.body_indices)}).
     Mesh names: {val_mesh_file_names.keys()}
-    Body names: {sim_state.physical_state.body_indices.keys()}
+    Body names: {sim_info.physical_info.body_indices.keys()}
     Original (unfiltered) mesh names: {mesh_file_names.keys()}"""
     assert set(val_mesh_file_names.keys()) == set(
-        sim_state.physical_state.body_indices.keys()
+        sim_info.physical_info.body_indices.keys()
     ), f"""Mesh names do not match body indices.
     Mesh names: {val_mesh_file_names.keys()}
-    Body names: {sim_state.physical_state.body_indices.keys()}
+    Body names: {sim_info.physical_info.body_indices.keys()}
     Original (unfiltered) mesh names: {mesh_file_names.keys()}"""
 
     gs_entities: dict[str, RigidEntity] = {}
 
     physical_state = sim_state.physical_state
-    electronics_state = sim_state.electronics_state[0]
+    physical_info = sim_info.physical_info
+    electronics_state = sim_state.electronics_state[0]  # def should not be [0].
 
     # translate each child into genesis entities
-    for body_name, body_idx in physical_state.body_indices.items():
+    for body_name, body_idx in physical_info.body_indices.items():
         assert body_name is not None and "@" in body_name, "Label must contain '@'"
         # note: body name is equal to build123d label here.
         part_name, part_type = body_name.split("@", 1)
@@ -117,8 +109,8 @@ def translate_state_to_genesis_scene(
     for fastener_id, attached_to in enumerate(
         sim_state.physical_state.fasteners_attached_to_body[0]
     ):
-        fastener_d = sim_state.physical_state.fasteners_diam[0, fastener_id]
-        fastener_h = sim_state.physical_state.fasteners_length[0, fastener_id]
+        fastener_d = physical_info.fasteners_diam[0, fastener_id]
+        fastener_h = physical_info.fasteners_length[0, fastener_id]
 
         fastener_name = get_fastener_singleton_name(
             float(fastener_d * 1000), float(fastener_h * 1000)
@@ -148,9 +140,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
     scene: gs.Scene,
     gs_entities: dict[str, RigidEntity],
     sim_state: RepairsSimState,
-    starting_hole_positions: torch.Tensor,  # [H, 3]
-    starting_hole_quats: torch.Tensor,  # [H, 4]
-    part_hole_batch: torch.Tensor,  # [H]
+    sim_info: RepairsSimInfo,
     device: torch.device | None = None,
 ):
     """
@@ -165,11 +155,14 @@ def translate_genesis_to_python(  # translate to sim state, really.
     env_idx = torch.arange(n_envs)
 
     # sanity-check tool names
-    assert all(
-        (sim_state.tool_state.screwdriver_tc.picked_up_fastener_id >= 0)[
+    # Allow -1 sentinel for "no fastener"; ensure integer dtype
+    if (sim_state.tool_state.tool_ids == Screwdriver.id).any():
+        ids = sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
             sim_state.tool_state.tool_ids == Screwdriver.id
-        ]  # used to check fastener names, pointless now?
-    ), "picked_up_fastener_id must be non-negative for screwdriver"
+        ]
+        assert ids.dtype == torch.long and (ids >= -1).all(), (
+            "picked_up_fastener_id must be int64 with -1 sentinel for screwdriver"
+        ) # should be a single assertion (was already)
 
     # loop entities, gather body transforms for batched update; update fasteners directly
     body_names: list[str] = []
@@ -271,7 +264,10 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     # update holes
     sim_state = update_hole_locs(
-        sim_state, starting_hole_positions, starting_hole_quats, part_hole_batch
+        sim_state,
+        sim_info.physical_info.starting_hole_positions,
+        sim_info.physical_info.starting_hole_quats,
+        sim_info.physical_info.part_hole_batch,
     )  # would be ideal if starting_hole_positions, hole_quats and hole_batch were batched already.
     max_pos = sim_state.physical_state[0].fasteners_pos.max()
     assert max_pos <= 50, f"massive out of bounds, at env_id 0, max_pos {max_pos}"
@@ -280,7 +276,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
 def translate_compound_to_sim_state(
     batch_b123d_compounds: list[Compound], connected_bodies: list[list[str]] = []
-) -> tuple[RepairsSimState, tuple]:
+) -> tuple[RepairsSimState, RepairsSimInfo]:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
     assert len(batch_b123d_compounds) > 0, "Batch must not be empty."
     assert all(len(compound.leaves) > 0 for compound in batch_b123d_compounds), (
@@ -327,7 +323,7 @@ def translate_compound_to_sim_state(
     all_body_names = []
     all_positions = torch.zeros((n_envs, count_bodies, 3), dtype=torch.float32)
     all_rotations = torch.zeros((n_envs, count_bodies, 4), dtype=torch.float32)
-    fixed = torch.zeros((count_bodies), dtype=torch.bool)
+    fixed = torch.zeros((count_bodies,), dtype=torch.bool)
 
     # gather data upfront.
     for env_idx in range(n_envs):
@@ -416,18 +412,20 @@ def translate_compound_to_sim_state(
                 )
 
     # Register all bodies at once using batch processing
-    sim_state.physical_state = register_bodies_batch(
-        sim_state.physical_state,
+    physical_state, physical_state_info = register_bodies_batch(
         all_body_names,
         all_positions,
         all_rotations,
         fixed,
         connector_positions_relative,
     )
+    sim_state.physical_state = physical_state
 
-    # Set part_hole_batch for all environments
-    sim_state.physical_state.part_hole_batch = part_hole_batch.tile(
-        (sim_state.physical_state.batch_size[0], 1)
+    # Build sim info and set singleton PhysicalStateInfo
+    sim_info = RepairsSimInfo()
+    sim_info.physical_info = physical_state_info
+    sim_info.physical_info.part_hole_batch = part_hole_batch.to(
+        device=sim_state.physical_state.device
     )
     sim_state = update_hole_locs(
         sim_state, part_holes_pos, part_holes_quat, part_hole_batch
@@ -509,8 +507,9 @@ def translate_compound_to_sim_state(
                 fastener_idx += 1
 
     # Register this body across all environments
-    sim_state.physical_state = register_fasteners_batch(
+    sim_state.physical_state, sim_info.physical_info = register_fasteners_batch(
         sim_state.physical_state,
+        sim_info.physical_info,
         fastener_positions,
         fastener_rotations,
         fastener_init_hole_a,
@@ -572,7 +571,7 @@ def translate_compound_to_sim_state(
     assert (
         max_pos <= (torch.tensor(env_size_compound, device=max_pos.device) / 2 / 1000)
     ).all(), f"massive out of bounds, at env_id {max_pos.indices[0]}, max_pos {max_pos}"
-    return sim_state, starting_holes
+    return sim_state, sim_info
 
 
 def create_constraints_based_on_graph(

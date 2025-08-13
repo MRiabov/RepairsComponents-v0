@@ -9,7 +9,10 @@ from repairs_components.geometry.fasteners import Fastener
 from repairs_components.logic.tools.tool import ToolsEnum
 from repairs_components.processing.geom_utils import get_connector_pos, quat_multiply
 from repairs_components.processing.translation import translate_genesis_to_python
-from repairs_components.training_utils.sim_state_global import RepairsSimState
+from repairs_components.training_utils.sim_state_global import (
+    RepairsSimInfo,
+    RepairsSimState,
+)
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.geometry.connectors.models.europlug import Europlug
 from repairs_components.logic.physical_state import (
@@ -87,13 +90,14 @@ def scene_with_entities(init_gs):
     sim_state.tool_state.tool_ids[0] = ToolsEnum.SCREWDRIVER.value
     sim_state.tool_state.screwdriver_tc = Screwdriver(
         picked_up_fastener_id=torch.tensor([0]),
-        picked_up_fastener_tip_position=torch.tensor([-1.0, -1.0, -1.0]),
-        picked_up_fastener_quat=torch.tensor([1.0, 0.0, 0.0, 0.0]),
+        picked_up_fastener_tip_position=torch.tensor([[-1.0, -1.0, -1.0]]),
+        picked_up_fastener_quat=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
         # ^ note: the expected is 0,0,0, so this is predictably incorrect.
         # it is expected to change.
     )
 
-    sim_state.electronics_state[0].register(Europlug(0))
+    # sim_state.electronics_state[0].register(Europlug(0))
+    # Electronics registration is not required for this translation test
 
     # Batch register bodies (parts and connectors)
     names = [
@@ -122,7 +126,7 @@ def scene_with_entities(init_gs):
         ],
         dim=1,
     )
-    fixed = torch.zeros((1, len(names)), dtype=torch.bool, device=device)
+    fixed = torch.zeros((len(names),), dtype=torch.bool, device=device)
     terminal_position_relative_to_center = torch.cat(
         [
             torch.full((2, 3), float("nan"), device=device, dtype=dtype),
@@ -140,8 +144,7 @@ def scene_with_entities(init_gs):
         dim=0,
     )
 
-    register_bodies_batch(
-        sim_state.physical_state,
+    sim_state.physical_state, physical_state_info = register_bodies_batch(
         names=names,
         positions=positions,
         rotations=rotations,
@@ -151,8 +154,8 @@ def scene_with_entities(init_gs):
     # Register fasteners in batch (replace deprecated single registration)
     # Prepare a minimal placeholder part_hole_batch to satisfy fastener registration
     # (fastener is not attached initially, so -1 holes are used)
-    sim_state.physical_state.part_hole_batch = torch.zeros(
-        (1, 1), dtype=torch.long, device=device
+    physical_state_info.part_hole_batch = torch.tensor(
+        [0], dtype=torch.long, device=device
     )
 
     fastener_name = Fastener().name  # e.g., "fastener_d5.00_l15.00@fastener"
@@ -161,16 +164,18 @@ def scene_with_entities(init_gs):
     init_hole_a = torch.full((1, 1), -1, dtype=torch.long, device=device)
     init_hole_b = torch.full((1, 1), -1, dtype=torch.long, device=device)
 
-    register_fasteners_batch(
+    sim_state.physical_state, physical_state_info = register_fasteners_batch(
         sim_state.physical_state,
+        physical_state_info,
         fastener_pos=fastener_pos,
         fastener_quat=fastener_quat,
         fastener_init_hole_a=init_hole_a,
         fastener_init_hole_b=init_hole_b,
         fastener_compound_names=[fastener_name],
     )
+    sim_info = RepairsSimInfo(physical_info=physical_state_info)
 
-    return scene, entities, sim_state
+    return scene, entities, sim_state, sim_info
 
 
 @pytest.fixture
@@ -212,17 +217,20 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     4. Test holes translated (and moved).
     5. Test fastener tip translated.
     """
-    scene, entities, sim_state = scene_with_entities
+    scene, entities, sim_state, sim_info = scene_with_entities
     starting_hole_positions, starting_hole_quats, part_hole_batch = sample_hole_data
+
+    # Provide hole metadata to sim_info.physical_info (source of truth)
+    sim_info.physical_info.starting_hole_positions = starting_hole_positions
+    sim_info.physical_info.starting_hole_quats = starting_hole_quats
+    sim_info.physical_info.part_hole_batch = part_hole_batch
 
     # Call the translation function
     translate_genesis_to_python(
         scene=scene,
         gs_entities=entities,
         sim_state=sim_state,
-        starting_hole_positions=starting_hole_positions,
-        starting_hole_quats=starting_hole_quats,
-        part_hole_batch=part_hole_batch,
+        sim_info=sim_info,
         device=starting_hole_positions.device,
     )
 
@@ -231,7 +239,7 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     gs_device = entities["part_1@solid"].get_pos(0).device
 
     # body 1
-    part_1_id = sim_state.physical_state.body_indices["part_1@solid"]
+    part_1_id = sim_info.physical_info.body_indices["part_1@solid"]
     assert torch.allclose(
         sim_state.physical_state.position[0, part_1_id],
         entities["part_1@solid"].get_pos(0).squeeze(0).to(graph_device),
@@ -241,7 +249,7 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
         entities["part_1@solid"].get_quat(0).squeeze(0).to(graph_device),
     )
 
-    part_2_id = sim_state.physical_state.body_indices["part_2@solid"]
+    part_2_id = sim_info.physical_info.body_indices["part_2@solid"]
     assert torch.allclose(
         sim_state.physical_state.position[0, part_2_id],
         entities["part_2@solid"].get_pos(0).squeeze(0).to(graph_device),
@@ -263,7 +271,7 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     )
 
     # europlug physical positions
-    male_id = sim_state.physical_state.body_indices["europlug_0_male@connector"]
+    male_id = sim_info.physical_info.body_indices["europlug_0_male@connector"]
     assert torch.allclose(
         sim_state.physical_state.position[0, male_id],
         entities["europlug_0_male@connector"].get_pos(0).squeeze(0).to(graph_device),
@@ -273,7 +281,7 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
         entities["europlug_0_male@connector"].get_quat(0).squeeze(0).to(graph_device),
     )
 
-    female_id = sim_state.physical_state.body_indices["europlug_0_female@connector"]
+    female_id = sim_info.physical_info.body_indices["europlug_0_female@connector"]
     assert torch.allclose(
         sim_state.physical_state.position[0, female_id],
         entities["europlug_0_female@connector"].get_pos(0).squeeze(0).to(graph_device),
@@ -296,9 +304,7 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
 
     # terminal_def pos should be at their positions too.
     # Get male connector index and position from tensor-based structure
-    male_connector_idx = sim_state.physical_state[0].terminal_indices_from_name[
-        male_name
-    ]
+    male_connector_idx = sim_info.physical_info.terminal_indices_from_name[male_name]
     terminal_def_actual_m = sim_state.physical_state.male_terminal_positions[
         0, male_connector_idx
     ].to(gs_device)
@@ -311,7 +317,7 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
 
     # terminal_def pos should be at their positions too.
     # Get female connector index and position from tensor-based structure
-    female_connector_idx = sim_state.physical_state[0].terminal_indices_from_name[
+    female_connector_idx = sim_info.physical_info.terminal_indices_from_name[
         female_name
     ]
     terminal_def_actual_f = sim_state.physical_state.female_terminal_positions[

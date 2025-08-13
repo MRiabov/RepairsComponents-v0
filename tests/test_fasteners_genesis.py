@@ -15,6 +15,7 @@ from repairs_components.geometry.fasteners import (
     detach_fastener_from_screwdriver,
 )
 from repairs_components.logic.tools.screwdriver import Screwdriver
+from repairs_components.logic.tools.tools_state import ToolState
 from tests.test_tool_genesis import move_franka_to_pos
 from genesis.engine.entities import RigidEntity
 from tests.global_test_config import init_gs, base_data_dir
@@ -138,36 +139,37 @@ def test_attach_and_detach_fastener_to_screwdriver(
     # move_franka_to_pos()
     camera = scene.visualizer.cameras[0]
     entities["screwdriver@tool"].set_pos(screwdriver_pos)
-    screwdriver = Screwdriver()
+    tool_state = ToolState()
     attach_fastener_to_screwdriver(
         scene,
         entities["0@fastener"],
         entities["screwdriver@tool"],
-        tool_state_to_update=screwdriver,
+        tool_state_to_update=tool_state,
         fastener_id=0,
-        env_id=0,
+        env_ids=torch.tensor([0]),
     )
     fastener_grip_pos = Screwdriver.fastener_connector_pos_relative_to_center()
     assert torch.isclose(
         entities["0@fastener"].get_pos(0), screwdriver_pos + fastener_grip_pos
     ).all(), (
         f"Fastener cube should be attached to screwdriver cube at the fastener connector position. "
-        f"Fastener cube pos: {entities['fastener_cube'].get_pos(0)}, screwdriver pos: {screwdriver_pos}, fastener grip pos: {fastener_grip_pos}"
+        f"Fastener cube pos: {entities['0@fastener'].get_pos(0)}, screwdriver pos: {screwdriver_pos}, fastener grip pos: {fastener_grip_pos}"
     )
     assert torch.isclose(
         entities["0@fastener"].get_quat(), entities["screwdriver@tool"].get_quat()
     ).all(), (
         "Fastener cube should be attached to screwdriver cube at the fastener connector position"
     )  # FIXME: this is likely wrong - a) screwdriver may be inherently incorrectly imported, b) franka is rotated as 0,1,0,0 as base.
-    assert screwdriver.has_picked_up_fastener == True
+    assert tool_state.screwdriver_tc.has_picked_up_fastener == True
     assert torch.isclose(
-        screwdriver.picked_up_fastener_tip_position, screwdriver_pos + fastener_grip_pos
+        tool_state.screwdriver_tc.picked_up_fastener_tip_position,
+        screwdriver_pos + fastener_grip_pos,
     ).all()
     assert torch.isclose(
-        screwdriver.picked_up_fastener_quat,
+        tool_state.screwdriver_tc.picked_up_fastener_quat,
         entities["screwdriver@tool"].get_quat(),
     ).all()
-    assert screwdriver.picked_up_fastener_id[0] == 0
+    assert tool_state.screwdriver_tc.picked_up_fastener_id[0] == 0
 
     # detach fastener from screwdriver and assert they fall down.
 
@@ -175,14 +177,14 @@ def test_attach_and_detach_fastener_to_screwdriver(
         scene,
         entities["0@fastener"],
         entities["screwdriver@tool"],
-        screwdriver,
-        env_id=0,
+        tool_state,
+        env_ids=torch.tensor([0]),
     )
     # assert tool state # note: all should have shape (1,)
-    assert not screwdriver.has_picked_up_fastener
-    assert torch.isnan(screwdriver.picked_up_fastener_tip_position[0])
-    assert torch.isnan(screwdriver.picked_up_fastener_quat[0])
-    assert torch.isnan(screwdriver.picked_up_fastener_id[0])
+    assert not tool_state.screwdriver_tc.has_picked_up_fastener
+    assert torch.isnan(tool_state.screwdriver_tc.picked_up_fastener_tip_position[0])
+    assert torch.isnan(tool_state.screwdriver_tc.picked_up_fastener_quat[0])
+    assert tool_state.screwdriver_tc.picked_up_fastener_id[0].item() == -1
 
     for i in range(100):
         scene.step()
@@ -207,14 +209,14 @@ def test_attach_and_detach_fastener_to_part(
     screwdriver_pos = torch.tensor([[0.0, 0.0, 1.0]])
     camera = scene.visualizer.cameras[0]
     entities["screwdriver@tool"].set_pos(screwdriver_pos)
-    screwdriver = Screwdriver()
+    tool_state = ToolState()
     attach_fastener_to_screwdriver(
         scene,
         entities["0@fastener"],
         entities["screwdriver@tool"],
-        tool_state_to_update=screwdriver,
+        tool_state_to_update=tool_state,
         fastener_id=0,
-        env_id=0,
+        env_ids=torch.tensor([0]),
     )
     fastener_grip_pos = Screwdriver.fastener_connector_pos_relative_to_center()
     assert torch.isclose(

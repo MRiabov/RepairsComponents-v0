@@ -4,6 +4,7 @@ import torch
 # Import the implementations
 from repairs_components.logic.physical_state import (
     PhysicalState,
+    PhysicalStateInfo,
     register_bodies_batch,
     register_fasteners_batch,
 )
@@ -89,21 +90,22 @@ def test_physical_state_diff_fastener_attr_flags():
     # Create batched states by stacking before registration (B=1)
     A_batched: PhysicalState = torch.stack([A])  # type: ignore
     B_batched: PhysicalState = torch.stack([B])  # type: ignore
-    A_batched = register_bodies_batch(A_batched, names, pos, rot, fixed)
-    B_batched = register_bodies_batch(B_batched, names, pos.clone(), rot.clone(), fixed)
+    A_batched, physical_info = register_bodies_batch(names, pos, rot, fixed)
+    B_batched, _ = register_bodies_batch(names, pos.clone(), rot.clone(), fixed)
 
     # Deterministic hole->body mapping: 4 holes, first two on body0, next two on body1
     hole_map = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=A_batched.device)
-    A_batched.part_hole_batch = hole_map.unsqueeze(0)
-    B_batched.part_hole_batch = hole_map.unsqueeze(0).clone()
+    physical_info.part_hole_batch = hole_map
+    physical_info.part_hole_batch = hole_map.clone()
 
     # One fastener attached between hole 0 (body0) and hole 2 (body1)
     fa = torch.tensor([[0]], dtype=torch.long)
     fb = torch.tensor([[2]], dtype=torch.long)
 
     # State A fastener: d=3mm, L=10mm, at origin, identity quaternion
-    A_batched = register_fasteners_batch(
+    A_batched, physical_info = register_fasteners_batch(
         A_batched,
+        physical_info,
         fastener_pos=torch.zeros(1, 1, 3),
         fastener_quat=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]], dtype=torch.float32),
         fastener_init_hole_a=fa,
@@ -116,8 +118,9 @@ def test_physical_state_diff_fastener_attr_flags():
     qz = torch.tensor(
         [[[(torch.cos(theta / 2)).item(), 0.0, 0.0, (torch.sin(theta / 2)).item()]]]
     )
-    B_batched = register_fasteners_batch(
+    B_batched, _ = register_fasteners_batch(
         B_batched,
+        physical_info,
         fastener_pos=torch.tensor([[[0.01, 0.00, 0.00]]], dtype=torch.float32),
         fastener_quat=qz.to(torch.float32),
         fastener_init_hole_a=fa.clone(),
@@ -154,6 +157,7 @@ def test_physical_state_diff_fastener_added_removed_and_count_diffs():
 
     A = PhysicalState(device=device)
     B = PhysicalState(device=device)
+    physical_info = PhysicalStateInfo(device=device)
 
     names = ["body0@solid", "body1@solid"]
     Bsz, N = 1, len(names)
@@ -166,19 +170,19 @@ def test_physical_state_diff_fastener_added_removed_and_count_diffs():
     # Create batched states by stacking before registration (B=1)
     A_batched: PhysicalState = torch.stack([A])  # type: ignore
     B_batched: PhysicalState = torch.stack([B])  # type: ignore
-    A_batched = register_bodies_batch(A_batched, names, pos, rot, fixed)
-    B_batched = register_bodies_batch(B_batched, names, pos.clone(), rot.clone(), fixed)
+    A_batched, physical_info = register_bodies_batch(names, pos, rot, fixed)
+    B_batched, _ = register_bodies_batch(names, pos.clone(), rot.clone(), fixed)
 
     # Hole mapping
     hole_map = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=A_batched.device)
-    A_batched.part_hole_batch = hole_map.unsqueeze(0)
-    B_batched.part_hole_batch = hole_map.unsqueeze(0).clone()
+    physical_info.part_hole_batch = hole_map
 
     # B has a single fastener between body0 and body1; A has none
     fa = torch.tensor([[0]], dtype=torch.long)
     fb = torch.tensor([[2]], dtype=torch.long)
-    B_batched = register_fasteners_batch(
+    B_batched, physical_info = register_fasteners_batch(
         B_batched,
+        physical_info,
         fastener_pos=torch.zeros(1, 1, 3),
         fastener_quat=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]], dtype=torch.float32),
         fastener_init_hole_a=fa,
@@ -231,13 +235,13 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
     # Create batched states by stacking (B=2)
     A_batched: PhysicalState = torch.stack([A0, A1])  # type: ignore
     B_batched: PhysicalState = torch.stack([B0, B1])  # type: ignore
-    A_batched = register_bodies_batch(A_batched, names, pos, rot, fixed)
-    B_batched = register_bodies_batch(B_batched, names, pos.clone(), rot.clone(), fixed)
+    A_batched, physical_info = register_bodies_batch(names, pos, rot, fixed)
+    B_batched, _ = register_bodies_batch(names, pos.clone(), rot.clone(), fixed)
 
     # Hole mapping replicated across batch: 4 holes, 0-1 on body0, 2-3 on body1
     hole_map = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=A_batched.device)
-    A_batched.part_hole_batch = hole_map.unsqueeze(0).expand(Bsz, -1).contiguous()
-    B_batched.part_hole_batch = hole_map.unsqueeze(0).expand(Bsz, -1).contiguous()
+    A_batched.part_hole_batch = hole_map
+    B_batched.part_hole_batch = hole_map.clone()
 
     # One fastener attached between hole 0 (body0) and hole 2 (body1), replicated across batch
     fa = torch.tensor([[0], [0]], dtype=torch.long)
