@@ -350,6 +350,7 @@ def step_screw_in_or_out(
                 sim_info.physical_info,
                 fastener_id,
                 part_name,
+                hole_id,
                 torch.tensor([env_id], device=actions.device),
             )
 

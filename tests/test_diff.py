@@ -45,6 +45,7 @@ def test_physical_state_diff_basic():
 
     assert isinstance(diff_graph, Data)
     assert isinstance(total_diff, int)
+    assert total_diff == 1
 
 
 def test_physical_state_no_changes():
@@ -73,8 +74,6 @@ def test_physical_state_no_changes():
     assert total_diff == 0
 
 
-@pytest.mark.xfail(reason="wrong test: it's not supposed to diff physical_info.")
-# NOTE: it is supposed to diff fastener pos/quaternion though! And if the equivalent (by length/diam) fasteners are inserted.
 def test_physical_state_diff_fastener_attr_flags():
     """Verify that fastener attribute flags and aligned deltas are set in the diff."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -102,7 +101,8 @@ def test_physical_state_diff_fastener_attr_flags():
     # Deterministic hole->body mapping: 4 holes, first two on body0, next two on body1
     hole_map = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=A_batched.device)
     physical_info.part_hole_batch = hole_map
-    physical_info.part_hole_batch = hole_map.clone()
+    # Set hole diameters (meters) to match the fastener diameter used during diff (4mm)
+    physical_info.hole_diameter = torch.tensor([0.004, 0.004, 0.004, 0.004], dtype=torch.float32)
 
     # One fastener attached between hole 0 (body0) and hole 2 (body1)
     fa = torch.tensor([[0]], dtype=torch.long)
@@ -134,6 +134,10 @@ def test_physical_state_diff_fastener_attr_flags():
         fastener_compound_names=[get_fastener_singleton_name(4.0, 12.0)],
     )
 
+    # PhysicalStateInfo fastener params should be 1D for diff
+    physical_info.fasteners_diam = physical_info.fasteners_diam[0]
+    physical_info.fasteners_length = physical_info.fasteners_length[0]
+
     diff_graph, total = A_batched.diff(B_batched, physical_info)
 
     # We expect exactly one changed edge and no added/removed
@@ -143,7 +147,8 @@ def test_physical_state_diff_fastener_attr_flags():
     # Flags: [is_added, is_removed, diam, length, pos, quat]
     flags = diff_graph.edge_attr[0]
     assert flags[0] == 0 and flags[1] == 0
-    assert flags[2] == 1 and flags[3] == 1  # diam & length changed
+    # physical_info (diam/length) is not diffed; only state pos/quat are
+    assert flags[2] == 0 and flags[3] == 0  # diam & length unchanged across states
     assert flags[4] == 1 and flags[5] == 1  # pos & quat changed
 
     # Detailed aligned deltas should be present for changed edge
@@ -155,6 +160,70 @@ def test_physical_state_diff_fastener_attr_flags():
     assert torch.linalg.norm(diff_graph.fastener_quat_delta[0]) > 0
 
     assert isinstance(total, int)
+    assert total == 1
+
+
+def test_fastener_hole_diameter_incompatibility_detected():
+    """Mix 5mm and 6mm hole diameters and attempt to insert a 6mm fastener into a [5mm,6mm] hole pair.
+    The diff should assert due to diameter incompatibility.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    A = PhysicalState(device=device).unsqueeze(0)
+    B = PhysicalState(device=device).unsqueeze(0)
+
+    names = ["body0@solid", "body1@solid"]
+    Bsz, N = 1, len(names)
+
+    pos = torch.tensor([[[0.00, 0.00, 0.10], [0.10, 0.00, 0.10]]], dtype=torch.float32)
+    rot = torch.zeros(Bsz, N, 4, dtype=torch.float32)
+    rot[..., 0] = 1.0  # WXYZ identity
+    fixed = torch.tensor([False, False])
+
+    # Create batched states by stacking before registration (B=1)
+    A_batched: PhysicalState = torch.stack([A])  # type: ignore
+    B_batched: PhysicalState = torch.stack([B])  # type: ignore
+    A_batched, physical_info = register_bodies_batch(names, pos, rot, fixed)
+    B_batched, _ = register_bodies_batch(names, pos.clone(), rot.clone(), fixed)
+
+    # Holes: 0-1 on body0 (5mm), 2-3 on body1 (6mm)
+    hole_map = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=A_batched.device)
+    physical_info.part_hole_batch = hole_map
+    physical_info.hole_diameter = torch.tensor(
+        [0.005, 0.005, 0.006, 0.006], dtype=torch.float32
+    )
+
+    # Attach a single 6mm fastener between hole 0 (5mm) and hole 2 (6mm)
+    fa = torch.tensor([[0]], dtype=torch.long)
+    fb = torch.tensor([[2]], dtype=torch.long)
+
+    A_batched, physical_info = register_fasteners_batch(
+        A_batched,
+        physical_info,
+        fastener_pos=torch.zeros(1, 1, 3),
+        fastener_quat=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]], dtype=torch.float32),
+        fastener_init_hole_a=fa,
+        fastener_init_hole_b=fb,
+        fastener_compound_names=[get_fastener_singleton_name(6.0, 12.0)],
+    )
+
+    B_batched, _ = register_fasteners_batch(
+        B_batched,
+        physical_info,
+        fastener_pos=torch.zeros(1, 1, 3),
+        fastener_quat=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]], dtype=torch.float32),
+        fastener_init_hole_a=fa.clone(),
+        fastener_init_hole_b=fb.clone(),
+        fastener_compound_names=[get_fastener_singleton_name(6.0, 12.0)],
+    )
+
+    # PhysicalStateInfo singleton fastener params should be 1D
+    physical_info.fasteners_diam = physical_info.fasteners_diam[0]
+    physical_info.fasteners_length = physical_info.fasteners_length[0]
+
+    # Since hole 0 is 5mm and fastener is 6mm, compatibility check should assert
+    with pytest.raises(AssertionError):
+        _ = A_batched.diff(B_batched, physical_info)
 
 
 def test_physical_state_diff_fastener_added_removed_and_count_diffs():
@@ -182,8 +251,23 @@ def test_physical_state_diff_fastener_added_removed_and_count_diffs():
     # Hole mapping
     hole_map = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=A_batched.device)
     physical_info.part_hole_batch = hole_map
+    # Set hole diameters (meters) to match fastener 3mm used in this test
+    physical_info.hole_diameter = torch.tensor([0.003, 0.003, 0.003, 0.003], dtype=torch.float32)
 
-    # B has a single fastener between body0 and body1; A has none
+    # Register the same fastener on A but unattached (-1, -1) so counts match while edges differ
+    fa_empty = torch.tensor([[-1]], dtype=torch.long)
+    fb_empty = torch.tensor([[-1]], dtype=torch.long)
+    A_batched, physical_info = register_fasteners_batch(
+        A_batched,
+        physical_info,
+        fastener_pos=torch.zeros(1, 1, 3),
+        fastener_quat=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]], dtype=torch.float32),
+        fastener_init_hole_a=fa_empty,
+        fastener_init_hole_b=fb_empty,
+        fastener_compound_names=[get_fastener_singleton_name(3.0, 10.0)],
+    )
+
+    # B has a single fastener between body0 and body1
     fa = torch.tensor([[0]], dtype=torch.long)
     fb = torch.tensor([[2]], dtype=torch.long)
     B_batched, physical_info = register_fasteners_batch(
@@ -196,7 +280,11 @@ def test_physical_state_diff_fastener_added_removed_and_count_diffs():
         fastener_compound_names=[get_fastener_singleton_name(3.0, 10.0)],
     )
 
-    diff_graph, _ = A_batched.diff(B_batched, physical_info)
+    # Ensure singleton fastener params are 1D for diff
+    physical_info.fasteners_diam = physical_info.fasteners_diam[0]
+    physical_info.fasteners_length = physical_info.fasteners_length[0]
+
+    diff_graph, total = A_batched.diff(B_batched, physical_info)
 
     # One added edge
     assert diff_graph.edge_attr.shape[1] == 6
@@ -212,11 +300,10 @@ def test_physical_state_diff_fastener_added_removed_and_count_diffs():
     )
     # Node mask marks both bodies
     assert diff_graph.node_mask.sum().item() == 2
+    assert isinstance(total, int)
+    assert total == 1
 
 
-@pytest.mark.xfail(
-    reason="WRONG TEST: tests for diff in fastener length/diam which is unchanged across batch"
-)
 def test_physical_state_diff_fastener_attr_flags_batch_two():
     """Same as attr flags test but with batch size B=2 (identical envs)."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -252,10 +339,14 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
     physical_info.part_hole_batch = (
         hole_map  # uuh, it should be already per registration, is it not?
     )
+    # Set hole diameters (meters) to match the fastener diameter used during diff (4mm)
+    physical_info.hole_diameter = torch.tensor(
+        [0.004, 0.004, 0.004, 0.004], dtype=torch.float32
+    )
 
-    # One fastener attached between hole 0 (body0) and hole 2 (body1), replicated across batch
-    fa = torch.tensor([[0], [0]], dtype=torch.long)
-    fb = torch.tensor([[2], [2]], dtype=torch.long)
+    # One fastener attached in env 0 only (env 1 unattached) to keep singleton physical_info consistent
+    fa = torch.tensor([[0], [-1]], dtype=torch.long)
+    fb = torch.tensor([[2], [-1]], dtype=torch.long)
 
     # State A fastener: d=3mm, L=10mm, at origin, identity quaternion
     A_batched, physical_info = register_fasteners_batch(
@@ -289,6 +380,14 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
         fastener_compound_names=[get_fastener_singleton_name(4.0, 12.0)],
     )
 
+    # Sanity: second env's fastener should be unattached (-1, -1)
+    assert (A_batched.fasteners_attached_to_hole[1, 0] == torch.tensor([-1, -1])).all()
+    assert (B_batched.fasteners_attached_to_hole[1, 0] == torch.tensor([-1, -1])).all()
+
+    # PhysicalStateInfo is singleton; fastener params are 1D for diff
+    physical_info.fasteners_diam = physical_info.fasteners_diam[0]
+    physical_info.fasteners_length = physical_info.fasteners_length[0]
+
     diff_graph, total = A_batched.diff(B_batched, physical_info)
 
     # We still expect one changed edge and no added/removed (edge dedup across batch)
@@ -296,7 +395,8 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
     assert diff_graph.edge_attr.shape == (1, 6)
     flags = diff_graph.edge_attr[0]
     assert flags[0] == 0 and flags[1] == 0
-    assert flags[2] == 1 and flags[3] == 1  # diam & length changed
+    # physical_info (diam/length) is not diffed; only state pos/quat are
+    assert flags[2] == 0 and flags[3] == 0  # diam & length unchanged across states
     assert flags[4] == 1 and flags[5] == 1  # pos & quat changed
 
     # Detailed aligned deltas should be present for changed edge
@@ -308,6 +408,7 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
     assert torch.linalg.norm(diff_graph.fastener_quat_delta[0]) > 0
 
     assert isinstance(total, int)
+    assert total == 1
 
 
 if __name__ == "__main__":

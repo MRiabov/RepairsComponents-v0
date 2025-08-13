@@ -163,6 +163,10 @@ def untranslated_holes_for_two_parts():
     hole_is_through = torch.tensor(
         [True] * num_holes_first_part + [True] * num_holes_second_part
     )  # [H]
+    # Hole diameters in meters: match default fastener diameter (5 mm -> 0.005 m)
+    hole_diameter = torch.tensor(
+        [0.005] * total_num_holes, dtype=torch.float32
+    )  # [H]
     # /unsure
     assert (
         total_num_holes
@@ -178,6 +182,7 @@ def untranslated_holes_for_two_parts():
         hole_indices_batch,
         hole_depths,
         hole_is_through,
+        hole_diameter,
     )
 
 
@@ -218,6 +223,7 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
         sim_info.physical_info.part_hole_batch,
         sim_info.physical_info.hole_depth,
         sim_info.physical_info.hole_is_through,
+        sim_info.physical_info.hole_diameter,
     ) = untranslated_holes_for_two_parts
 
     # compute translated hole positions/quats based on current part poses
@@ -313,6 +319,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
         )
     ).all(), "Fastener is expected to be marked as attached to a part"
     assert (
+        physical_state.fasteners_attached_to_hole
+        == torch.tensor([[0, -1]], device=graph_device)
+    ).all(), "Fastener is expected to be marked as inserted into the hole id 0"
+    assert (
         fastener_entity.get_pos(0)
         == repairs_sim_state.physical_state.hole_positions[0, 0]
     ).all(), "Fastener is expected to move to hole position"
@@ -332,6 +342,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
         physical_state.fasteners_attached_to_body
         == torch.tensor([[-1, -1]], device=graph_device)
     ).all(), "Fastener is expected to be marked as detached from a part"
+    assert (
+        physical_state.fasteners_attached_to_hole
+        == torch.tensor([[-1, -1]], device=graph_device)
+    ).all(), "Fastener is expected to be marked as detached from any hole"
     # TODO: when genesis implements constraints checks, assert that fastener is not attached to a part
     assert screwdriver.picked_up_fastener_id[0].item() >= 0, (
         "Screwdriver is expected to not have released a fastener after screw out."
@@ -371,6 +385,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
         physical_state.fasteners_attached_to_body
         == torch.tensor([[[connected_part_1_id, -1]]], device=graph_device)
     ).all(), "Fastener is expected to be marked as attached to a part"
+    assert (
+        repairs_sim_state.physical_state.fasteners_attached_to_hole
+        == torch.tensor([[0, -1]], device=graph_device)
+    ).all(), "Hole attachment should reflect first hole id"
     assert (fastener_entity.get_pos(0) == physical_state.hole_positions[0, 0]).all(), (
         "Fastener is expected to move to hole position"
     )
@@ -395,6 +413,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
             [[connected_part_1_id, connected_part_2_id]], device=graph_device
         )
     ).all(), "Fastener is expected to be marked as attached to both parts"
+    assert (
+        repairs_sim_state.physical_state.fasteners_attached_to_hole
+        == torch.tensor([[0, 2]], device=graph_device)
+    ).all(), "Hole attachment should reflect both hole ids in order"
     assert (fastener_entity.get_pos(0) == hole_pos_part_2).all(), (
         "Fastener is expected to move to hole position on second part"
     )

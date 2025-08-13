@@ -364,10 +364,18 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
         )
         # Generate one "chunk" of data for this scene # even though I don't need to generate a chunk.
 
+        # device: if save to disk, always to CPU (no point in GPU)
+        device = (
+            torch.device("gpu")
+            if not save_to_disk and torch.cuda.is_available()
+            else torch.device("cpu")
+        )
+
         scene_configs_per_scene, mesh_file_names = create_env_configs(
             env_setups=self.env_setups,
             tasks=self.tasks,
             num_configs_to_generate_per_scene=num_configs_to_generate_per_scene,
+            device=device,
             save=save_to_disk,
             save_path=Path(self.offline_data_dir),
         )

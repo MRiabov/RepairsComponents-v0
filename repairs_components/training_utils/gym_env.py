@@ -273,13 +273,7 @@ class RepairsEnv(gym.Env):
                 batch_dim=self.per_scene_batch_dim,
                 step_count=torch.zeros(self.per_scene_batch_dim, dtype=torch.int),
                 task_ids=partial_env_configs[scene_id].task_ids,
-                starting_hole_positions=partial_env_configs[
-                    scene_id
-                ].starting_hole_positions,
-                starting_hole_quats=partial_env_configs[scene_id].starting_hole_quats,
-                hole_depth=partial_env_configs[scene_id].hole_depth,
-                part_hole_batch=partial_env_configs[scene_id].part_hole_batch,
-                hole_is_through=partial_env_configs[scene_id].hole_is_through,
+                sim_info=partial_env_configs[scene_id].sim_info,
             )
 
             # store built scene and data

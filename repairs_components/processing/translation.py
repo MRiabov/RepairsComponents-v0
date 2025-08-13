@@ -275,7 +275,9 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
 
 def translate_compound_to_sim_state(
-    batch_b123d_compounds: list[Compound], connected_bodies: list[list[str]] = []
+    batch_b123d_compounds: list[Compound],
+    device: torch.device,
+    connected_bodies: list[list[str]] = [],
 ) -> tuple[RepairsSimState, RepairsSimInfo]:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
     assert len(batch_b123d_compounds) > 0, "Batch must not be empty."

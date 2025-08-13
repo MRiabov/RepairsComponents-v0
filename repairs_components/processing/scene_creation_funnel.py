@@ -37,6 +37,7 @@ import torch
 import genesis as gs
 from repairs_components.training_utils.progressive_reward_calc import RewardHistory
 from repairs_components.training_utils.sim_state_global import (
+    RepairsSimInfo,
     RepairsSimState,
     merge_global_states,
 )
@@ -53,6 +54,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
     ],  # note: there must be one gs scene per EnvSetup. So this could be done in for loop.
     tasks: list[Task],
     num_configs_to_generate_per_scene: torch.Tensor,  # int [len]
+    device: torch.device,
     save: bool = False,
     save_path: pathlib.Path | None = None,
     vox_res: int = 256,  # should be equal
@@ -133,10 +135,10 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
 
             # create RepairsSimState for both
             starting_sim_state, starting_holes = translate_compound_to_sim_state(
-                [starting_scene_geom_]
+                [starting_scene_geom_], device=device
             )
             desired_sim_state, _starting_holes = translate_compound_to_sim_state(
-                [desired_state_geom_]
+                [desired_state_geom_], device=device
             )
 
             # starting, as "per part, relative to 0,0,0 position"
@@ -252,6 +254,7 @@ def desired_state_geom(
 def initialize_and_build_scene(
     scene: gs.Scene,
     desired_sim_state: RepairsSimState,
+    sim_info: RepairsSimInfo,  # I'll just assume it's necessary
     mesh_file_names: dict[str, str],
     batch_dim: int,
     base_dir: Path,

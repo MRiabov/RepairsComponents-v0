@@ -30,7 +30,9 @@ from typing_extensions import deprecated
 
 @dataclass
 class PhysicalStateInfo:
-    """A dataclass holding all singleton values for PhysicalState, e.g. body indices, fixed, starting holes, fasteners diam, hole through/starting positions, etc."""
+    """A dataclass holding all singleton values for PhysicalState, e.g. body indices, fixed,
+    starting holes, fasteners diam/length, hole metadata (positions, quats, depth, through, diameter), etc.
+    """
 
     # --- bodies ---
 
@@ -88,6 +90,11 @@ class PhysicalStateInfo:
     )
     """Boolean mask indicating whether each hole is through (True) or blind (False).
     Equal over the batch. Shape: (H)"""
+    hole_diameter: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.float32)
+    )
+    """Hole diameters in meters.
+    Equal over the batch. Shape: (H)"""
     part_hole_batch: torch.Tensor = field(
         default_factory=lambda: torch.empty((0,), dtype=torch.long)
     )
@@ -117,6 +124,12 @@ class PhysicalStateInfo:
         )
         assert self.hole_depth.shape == (self.hole_count,), (
             "Hole depths must have shape (H,)"
+        )
+        assert self.hole_is_through.shape == (self.hole_count,), (
+            "hole_is_through must have shape (H,)"
+        )
+        assert self.hole_diameter.shape == (self.hole_count,), (
+            "hole_diameter must have shape (H,)"
         )
         assert (self.hole_depth > 0).all(), "Hole depths must be positive."
         assert self.hole_is_through.shape == (self.hole_count,), (
@@ -624,6 +637,8 @@ def _diff_fastener_features(
         For each hole id, get which fastener is in it (by a tensor lookup), works since fasteners are unique (however there may be two indices of them as hole A and B). From there, get all fasteners' parameters (doable via a single tensor operation), and assert isclose of both fasteners' parameters. You have an equal set of fasteners in each parameter, but they may be in the wrong holes.
         (The whole diff shouldn't take more than 10 lines, it seems.)
 
+    Additionally enforces fastener-hole compatibility: if a fastener is attached to a pair of holes, its diameter must equal the diameters of both holes it occupies. This is validated for both input states and uses strict equality within 1e-6. A mismatch raises an AssertionError.
+
     Returns a dict with:
         - added: list[(u, v)] added edges (by body indices, undirected)
         - removed: list[(u, v)] removed edges (by body indices, undirected)
@@ -683,6 +698,41 @@ def _diff_fastener_features(
 
     a_atb, a_ath, a_pos, a_quat = _unbatch_fastener_tensors(data_a)
     b_atb, b_ath, b_pos, b_quat = _unbatch_fastener_tensors(data_b)
+
+    # Enforce fastener-hole diameter compatibility on both states. We assert that for
+    # every attached fastener (both holes valid), the fastener diameter equals the
+    # diameters of the holes it occupies. Fastener params are singleton over batch
+    # with length N; when attachments are flattened across batch, the i-th row maps
+    # to fastener index (i % N).
+    N_fast = int(physical_info.fasteners_length.shape[0])
+
+    def _assert_fastener_hole_diameter_match(
+        attached_to_hole: torch.Tensor, label: str
+    ):
+        if attached_to_hole.numel() == 0:
+            return
+        valid = (attached_to_hole[:, 0] >= 0) & (attached_to_hole[:, 1] >= 0)
+        idxs = torch.nonzero(valid, as_tuple=False).squeeze(1)
+        # Assert hole_diameter is provided for all referenced holes
+        assert physical_info.hole_diameter.ndim == 1, "hole_diameter must be 1D"
+        max_hole = int(attached_to_hole[valid].max().item()) if valid.any() else -1
+        if max_hole >= 0:
+            assert physical_info.hole_diameter.shape[0] > max_hole, (
+                f"physical_info.hole_diameter must cover all referenced holes in {label}"
+            )
+        for i in idxs.tolist():
+            ha = int(attached_to_hole[i, 0].item())
+            hb = int(attached_to_hole[i, 1].item())
+            f_idx = i % N_fast
+            f_d = float(physical_info.fasteners_diam[f_idx].item())
+            da = float(physical_info.hole_diameter[ha].item())
+            db = float(physical_info.hole_diameter[hb].item())
+            assert abs(f_d - da) <= 1e-6 and abs(f_d - db) <= 1e-6, (
+                f"Fastener-hole diameter mismatch in {label}: fastener[{f_idx}] d={f_d} vs holes ({ha},{hb}) d=({da},{db})"
+            )
+
+    _assert_fastener_hole_diameter_match(a_ath, "state_a")
+    _assert_fastener_hole_diameter_match(b_ath, "state_b")
 
     def attachments_to_edge_set(attached_to_body: torch.Tensor) -> set[tuple[int, int]]:
         if attached_to_body.numel() == 0:
@@ -1419,13 +1469,42 @@ def connect_fastener_to_one_body(
     physical_info: PhysicalStateInfo,
     fastener_id: int,
     body_name: str,
+    hole_id: int,
     env_idx: torch.Tensor,
 ):
-    """Connect a fastener to a body. Used during screw-in and initial construction."""
-    # TODO: will batch in the near future.
+    """Connect a fastener to a body and a specific hole.
+
+    Contract:
+    - hole_id must be valid and belong to body_name (via part_hole_batch)
+    - hole diameter must closely match fastener diameter (meters)
+    - fasteners_attached_to_body and fasteners_attached_to_hole are updated
+      in the same free slot (0 or 1)
+    """
+    # Validate available slot
     assert (
         physical_state.fasteners_attached_to_body[env_idx, fastener_id] == -1
     ).any(), "Fastener is already connected to two bodies."
+
+    # Validate hole_id
+    H = int(physical_info.part_hole_batch.shape[0])
+    assert 0 <= hole_id < H, f"hole_id out of range: {hole_id} not in [0, {H})"
+
+    # Validate hole belongs to the target body
+    target_body_idx = physical_info.body_indices[body_name]
+    assert physical_info.part_hole_batch[hole_id].item() == target_body_idx, (
+        f"Hole {hole_id} does not belong to body '{body_name}' (expected part index {target_body_idx}, "
+        f"got {int(physical_info.part_hole_batch[hole_id].item())})"
+    )
+
+    # Assert hole/fastener diameter closeness in meters
+    # Note: diameters are stored in meters across the project
+    fastener_d = float(physical_info.fasteners_diam[fastener_id].item())
+    hole_d = float(physical_info.hole_diameter[hole_id].item())
+    tol = 0.0005  # 0.5 mm
+    assert abs(hole_d - fastener_d) <= tol, (
+        f"Hole/fastener diameter mismatch: hole_d={hole_d}m, fastener_d={fastener_d}m, tol={tol}m"
+    )
+
     # Choose slot 0 if it is free, otherwise use slot 1
     slot0_free = (
         physical_state.fasteners_attached_to_body[env_idx, fastener_id, 0] == -1
@@ -1435,8 +1514,14 @@ def connect_fastener_to_one_body(
         slot0_free = bool(slot0_free.item())
     free_slot = 0 if slot0_free else 1
 
+    # Update body and hole slots consistently
     physical_state.fasteners_attached_to_body[env_idx, fastener_id, free_slot] = (
-        physical_info.body_indices[body_name]
+        target_body_idx
     )
+    # Ensure hole slot is also free in the same position
+    assert (
+        physical_state.fasteners_attached_to_hole[env_idx, fastener_id, free_slot] == -1
+    ), "Target hole slot already occupied for this fastener."
+    physical_state.fasteners_attached_to_hole[env_idx, fastener_id, free_slot] = hole_id
 
     return physical_state
