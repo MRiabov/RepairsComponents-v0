@@ -13,14 +13,14 @@ class Screwdriver(Tool, TensorClass):
         return ToolsEnum.SCREWDRIVER.value
 
     picked_up_fastener_tip_position: torch.Tensor = field(
-        default_factory=lambda: torch.full((1, 3), float("nan"))
+        default_factory=lambda: torch.full((3,), float("nan"))
     )
     picked_up_fastener_quat: torch.Tensor = field(
-        default_factory=lambda: torch.full((1, 4), float("nan"))
+        default_factory=lambda: torch.full((4,), float("nan"))
     )
     # Numeric id for picked-up fastener. Use -1 to denote "none".
     picked_up_fastener_id: torch.Tensor = field(
-        default_factory=lambda: torch.tensor([-1], dtype=torch.long)
+        default_factory=lambda: torch.tensor(-1, dtype=torch.long)
     )
 
     @property

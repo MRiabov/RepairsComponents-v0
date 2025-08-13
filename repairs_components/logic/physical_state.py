@@ -123,12 +123,8 @@ class PhysicalStateInfo:
 
 
 class PhysicalState(TensorClass):
-    # device: torch.device = field(
-    #     default_factory=lambda: torch.device(
-    #         "cuda" if torch.cuda.is_available() else "cpu"
-    #     )
-    # ) #already included in tensordict
-    # Node attributes (previously in graph)
+    """NOTE: PhysicalState will always have to be instantiated with either PhysicalState(device=device).unsqueeze(0)
+    or torch.stack([PhysicalState(device=device)]*B). This is because they are expected to be batched with a leading dimension."""
 
     # TODO: batch size field?
     position: torch.Tensor = field(
@@ -456,6 +452,7 @@ class PhysicalState(TensorClass):
     #     return self  # maybe that would fix view issues.
 
     # TODO deprecate and set to functions
+    @deprecated("Use connect_fastener_to_body function instead.")
     def connect_fastener_to_one_body(
         self, fastener_id: int, body_name: str, env_idx: torch.Tensor
     ):
@@ -1176,9 +1173,7 @@ def register_bodies_batch(
     B = positions.shape[0]
     num_bodies = len(names)
     device = positions.device
-    physical_states: PhysicalState = torch.stack(
-        [PhysicalState(device=device) for _ in range(B)]
-    )
+    physical_states: PhysicalState = torch.stack([PhysicalState(device=device)] * B)
     physical_info = PhysicalStateInfo(device=device)
 
     assert B > 0 and num_bodies > 0
@@ -1294,7 +1289,8 @@ def register_bodies_batch(
                     male_body_indices, dtype=torch.long, device=device
                 )
                 # Expand to batch dimension if needed
-                if len(male_batch_tensor.shape) == 1:
+                if male_batch_tensor.ndim == 1:
+                    # FIXME: this is wrong. male_batch_tensor is meant to be ndim=1!
                     male_batch_tensor = male_batch_tensor.unsqueeze(0).expand(B, -1)
                 physical_info.male_terminal_batch = male_batch_tensor
                 # Update connector indices for all batch elements
@@ -1318,6 +1314,7 @@ def register_bodies_batch(
                 )
                 # Expand to batch dimension if needed
                 if len(female_batch_tensor.shape) == 1:
+                    # FIXME: this is wrong. female_batch_tensor is meant to be ndim=1!
                     female_batch_tensor = female_batch_tensor.unsqueeze(0).expand(B, -1)
                 physical_info.female_terminal_batch = female_batch_tensor
                 # Update connector indices for all batch elements

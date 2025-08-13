@@ -134,7 +134,7 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     tool_cube = entities["tool_cube"]
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
-    tool_state = ToolState(batch_size=1)
+    tool_state = ToolState().unsqueeze(0)
     tool_state.screwdriver_tc = Screwdriver()
     tool_state.tool_ids = torch.tensor([ToolsEnum.SCREWDRIVER.value])
     # move to pre-grasp pose
@@ -203,11 +203,9 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     tool_cube = entities["tool_cube"]
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
-    tool_state = ToolState(
-        batch_size=1,
-        screwdriver_tc=Screwdriver(batch_size=1),
-        tool_ids=torch.tensor([ToolsEnum.SCREWDRIVER.value]),
-    )
+    tool_state = ToolState().unsqueeze(0)
+    tool_state.screwdriver_tc = Screwdriver()
+    tool_state.tool_ids = torch.tensor([ToolsEnum.SCREWDRIVER.value])
 
     move_franka_to_pos(
         scene,

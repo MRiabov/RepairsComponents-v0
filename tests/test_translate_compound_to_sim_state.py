@@ -16,6 +16,7 @@ from repairs_components.processing.translation import (
 from repairs_components.training_utils.env_setup import EnvSetup
 from ocp_vscode import show
 
+
 class TestEnv(EnvSetup):
     _positions: torch.Tensor  # note: it's not official, for test and debug only.
     _hole_loc: torch.Tensor  # for debug too.
@@ -140,9 +141,7 @@ def test_translate_compound_to_sim_state(test_env_geom):
         3,
     )
     assert phys_state.hole_quats.shape == (expected_batch_dim, expected_num_holes, 4)
-    assert sim_info.physical_info.part_hole_batch.shape == (
-        expected_num_holes,
-    )
+    assert sim_info.physical_info.part_hole_batch.shape == (expected_num_holes,)
 
     # assert values.
     assert set(sim_info.physical_info.body_indices.keys()) == {
@@ -213,9 +212,7 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
 
     assert phys_state.hole_positions.shape == (batch_dim, expected_num_holes, 3)
     assert phys_state.hole_quats.shape == (batch_dim, expected_num_holes, 4)
-    assert sim_info.physical_info.part_hole_batch.shape == (
-        expected_num_holes,
-    )
+    assert sim_info.physical_info.part_hole_batch.shape == (expected_num_holes,)
 
     # assert values for batched data
     assert set(sim_info.physical_info.body_indices.keys()) == {
@@ -249,9 +246,7 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
         + local_hole_offset
     ).expand(batch_dim, -1, -1)
     assert phys_state.hole_positions.allclose(expected_hole_pos)
-    assert sim_info.physical_info.part_hole_batch.equal(
-        torch.tensor([holed_body_idx])
-    )
+    assert sim_info.physical_info.part_hole_batch.equal(torch.tensor([holed_body_idx]))
     assert torch.allclose(
         sim_info.physical_info.fasteners_diam,
         torch.tensor([5.0 / 1000]).expand(batch_dim, -1),  # default diameter

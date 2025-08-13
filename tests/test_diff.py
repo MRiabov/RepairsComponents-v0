@@ -17,8 +17,8 @@ def test_physical_state_diff_basic():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Create two single-environment states (B=1) with the same bodies
-    state1 = PhysicalState(device=device)
-    state2 = PhysicalState(device=device)
+    state1 = PhysicalState(device=device).unsqueeze(0)
+    state2 = PhysicalState(device=device).unsqueeze(0)
 
     names = ["body1@solid", "body2@solid"]
     B, N = 1, len(names)
@@ -51,8 +51,8 @@ def test_physical_state_no_changes():
     """Diff should report zero changes for identical batched states."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    state1 = PhysicalState(device=device)
-    state2 = PhysicalState(device=device)
+    state1 = PhysicalState(device=device).unsqueeze(0)
+    state2 = PhysicalState(device=device).unsqueeze(0)
 
     names = ["body1@solid", "body2@solid"]
     B, N = 1, len(names)
@@ -76,8 +76,8 @@ def test_physical_state_diff_fastener_attr_flags():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Two states with the same two bodies and hole mapping
-    A = PhysicalState(device=device)
-    B = PhysicalState(device=device)
+    A = PhysicalState(device=device).unsqueeze(0)
+    B = PhysicalState(device=device).unsqueeze(0)
 
     names = ["body0@solid", "body1@solid"]
     Bsz, N = 1, len(names)
@@ -155,8 +155,8 @@ def test_physical_state_diff_fastener_added_removed_and_count_diffs():
     """Verify added edges and node count_fasteners_held diffs are detected."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    A = PhysicalState(device=device)
-    B = PhysicalState(device=device)
+    A = PhysicalState(device=device).unsqueeze(0)
+    B = PhysicalState(device=device).unsqueeze(0)
     physical_info = PhysicalStateInfo(device=device)
 
     names = ["body0@solid", "body1@solid"]
@@ -213,10 +213,10 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Two single-environment states which we'll stack into B=2
-    A0 = PhysicalState(device=device)
-    A1 = PhysicalState(device=device)
-    B0 = PhysicalState(device=device)
-    B1 = PhysicalState(device=device)
+    A0 = PhysicalState(device=device).unsqueeze(0)
+    A1 = PhysicalState(device=device).unsqueeze(0)
+    B0 = PhysicalState(device=device).unsqueeze(0)
+    B1 = PhysicalState(device=device).unsqueeze(0)
 
     names = ["body0@solid", "body1@solid"]
     Bsz, N = 2, len(names)

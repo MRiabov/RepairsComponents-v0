@@ -113,7 +113,7 @@ def detach_tool_from_arm(
     arm_hand_link: RigidLink,
     gs_entities: dict[str, RigidEntity],
     tool_state_to_update: ToolState,
-    env_idx: torch.Tensor,
+    env_idx: torch.Tensor,  # [B]
 ):
     # assert env_idx.shape[0] == 1, "Only one environment is supported for now."
     # ^ this will become valid if I have more tools.
@@ -122,19 +122,20 @@ def detach_tool_from_arm(
     tool_base_link = tool_entity.base_link.idx
     arm_hand_link = arm_hand_link.idx
     rigid_solver.delete_weld_constraint(tool_base_link, arm_hand_link, env_idx)
-    # drop fasteners if present.
-    fastener_ids_if_present = tool_state_to_update.screwdriver_tc.picked_up_fastener_id
-    env_ids_w_fastener = torch.nonzero(~torch.isnan(fastener_ids_if_present)).squeeze(0)
-    # ^ note: this likely is code duplication from repairs_sim_step, but it'll be integrated there anyhow.
-    for env_id in env_ids_w_fastener:
-        fastener_id = fastener_ids_if_present[env_id]
-        fastener_entity = gs_entities[
-            tool_state_to_update.screwdriver_tc.picked_up_fastener_name(env_id)
-        ]
-        rigid_solver.delete_weld_constraint(
-            tool_base_link, fastener_entity.base_link.idx, env_idx
-        )
-        tool_state_to_update.screwdriver_tc[
-            env_id
-        ].on_tool_release()  # must be >1 bdim.
+    # Drop fasteners if present (we use -1 sentinel for "none").
+    fastener_ids = tool_state_to_update.screwdriver_tc.picked_up_fastener_id  # [B]
+    local_mask = fastener_ids[env_idx] >= 0  # [k]
+    if local_mask.any():
+        local_ids = torch.nonzero(local_mask).squeeze(1)  # [m]
+        for li in local_ids.tolist():
+            env_id = env_idx[li]
+            fid = int(fastener_ids[env_id].item())
+            fastener_name = tool_state_to_update.screwdriver_tc.picked_up_fastener_name(
+                env_id
+            )
+            fastener_entity = gs_entities[fastener_name]
+            rigid_solver.delete_weld_constraint(
+                tool_base_link, fastener_entity.base_link.idx, env_id
+            )
+            tool_state_to_update.screwdriver_tc.on_tool_release(env_id)
         # for screwdriver:

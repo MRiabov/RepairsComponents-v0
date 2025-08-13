@@ -11,40 +11,6 @@ from repairs_components.logic.physical_state import (
 from repairs_components.geometry.fasteners import get_fastener_singleton_name
 
 
-@pytest.fixture
-def single_physical_state():
-    """Create a single PhysicalState with some bodies for testing."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    state = PhysicalState(device=device)
-    info = PhysicalStateInfo(device=device)
-
-    # Add some bodies using register_bodies_batch approach
-    # We'll create the body indices manually and set tensors
-    num_bodies = 3
-    num_holes = 6
-
-    # Create body indices
-    for i in range(num_bodies):
-        body_name = f"body_{i}@solid"
-        info.body_indices[body_name] = i
-        info.inverse_body_indices[i] = body_name
-
-    # Set tensors for single state (no batch dimension yet)
-    state.position = torch.rand(num_bodies, 3, device=device) * 0.32 - 0.16
-    state.position[:, 2] = torch.abs(state.position[:, 2])  # Ensure z >= 0
-
-    quat = torch.randn(num_bodies, 4, device=device)
-    state.quat = quat / torch.norm(quat, dim=-1, keepdim=True)
-
-    info.fixed = torch.zeros(num_bodies, dtype=torch.bool, device=device)
-    info.count_fasteners_held = torch.zeros(num_bodies, dtype=torch.int8, device=device)
-
-    # Set part_hole_batch mapping holes to bodies
-    info.part_hole_batch = torch.randint(0, num_bodies, (num_holes,), device=device)
-
-    return state, info
-
-
 class TestRegisterFastenersBatch:
     """Test suite for register_fasteners_batch function."""
 
@@ -52,44 +18,41 @@ class TestRegisterFastenersBatch:
         """Set up test fixtures before each test method."""
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def create_batched_physical_state(self, batch_size: int = 2, single_state=None):
+    def create_batched_physical_state(self, batch_size: int = 2):
         """Create a batched PhysicalState by stacking single states."""
         physical_info = PhysicalStateInfo(device=self.device)
-        if single_state is None:
-            # Create a simple single state
-            single_state = PhysicalState(device=self.device)
+        # Create a simple single state
+        batched_state: PhysicalState = torch.stack(
+            [PhysicalState(device=self.device)] * batch_size
+        )
 
-            # Add some bodies
-            num_bodies = 3
-            num_holes = 6
+        # Add some bodies
+        num_bodies = 3
+        num_holes = 6
 
-            for i in range(num_bodies):
-                body_name = f"body_{i}@solid"
-                physical_info.body_indices[body_name] = i
-                physical_info.inverse_body_indices[i] = body_name
+        for i in range(num_bodies):
+            body_name = f"body_{i}@solid"
+            physical_info.body_indices[body_name] = i
+            physical_info.inverse_body_indices[i] = body_name
 
-            # Set minimal tensors
-            single_state.position = (
-                torch.rand(num_bodies, 3, device=self.device) * 0.32 - 0.16
-            )
-            single_state.position[:, 2] = torch.abs(single_state.position[:, 2])
+        # Set minimal tensors
+        batched_state.position = (
+            torch.rand(batch_size, num_bodies, 3, device=self.device) * 0.32 - 0.16
+        )
+        # set z to positive
+        batched_state.position[:, 2] = torch.abs(batched_state.position[:, 2])
+        quat = torch.randn(batch_size, num_bodies, 4, device=self.device)
+        batched_state.quat = quat / torch.norm(quat, dim=-1, keepdim=True)
 
-            quat = torch.randn(num_bodies, 4, device=self.device)
-            single_state.quat = quat / torch.norm(quat, dim=-1, keepdim=True)
-
-            physical_info.fixed = torch.zeros(
-                num_bodies, dtype=torch.bool, device=self.device
-            )
-            single_state.count_fasteners_held = torch.zeros(
-                num_bodies, dtype=torch.int8, device=self.device
-            )
-            physical_info.part_hole_batch = torch.randint(
-                0, num_bodies, (num_holes,), device=self.device
-            )
-
-        # Stack to create batched state
-        states = [single_state for _ in range(batch_size)]
-        batched_state: PhysicalState = torch.stack(states)  # type: ignore
+        physical_info.fixed = torch.zeros(
+            (num_bodies,), dtype=torch.bool, device=self.device
+        )
+        batched_state.count_fasteners_held = torch.zeros(
+            (batch_size, num_bodies), dtype=torch.int8, device=self.device
+        )
+        physical_info.part_hole_batch = torch.randint(
+            0, num_bodies, (num_holes,), device=self.device
+        )
 
         return batched_state, physical_info
 

@@ -23,9 +23,10 @@ class ToolInfo:
 
 
 class ToolState(TensorClass, SimState):
+    # note: default bdim = (), so no batch. this is expected.
     tool_ids: torch.Tensor = field(
-        default_factory=lambda: torch.tensor([ToolsEnum.GRIPPER.value])
-    )  # [B]
+        default_factory=lambda: torch.tensor(ToolsEnum.GRIPPER.value)
+    )
     # NOTE: will be renamed to tool_ids (already was), leaving now for backward compatibility.
     gripper_tc: Gripper = field(default_factory=Gripper)
     "Gripper tool state which has `nan` on all values if it's not picked up. '_tc' because of tensorclass"
@@ -48,4 +49,8 @@ class ToolState(TensorClass, SimState):
         # else:
         #     raise ValueError(f"Invalid tool id: {current_tool_id}")
 
-        return ToolState(tool_ids=current_tool_id)  # as before, it is unpopulated.
+        tool_state = ToolState(device=current_tool_id.device).expand(
+            current_tool_id.shape[0], -1
+        )  # as before, it is unpopulated.
+        tool_state.tool_ids = current_tool_id
+        return tool_state

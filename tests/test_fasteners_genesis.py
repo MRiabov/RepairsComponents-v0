@@ -139,7 +139,7 @@ def test_attach_and_detach_fastener_to_screwdriver(
     # move_franka_to_pos()
     camera = scene.visualizer.cameras[0]
     entities["screwdriver@tool"].set_pos(screwdriver_pos)
-    tool_state = ToolState()
+    tool_state = ToolState().unsqueeze(0)
     attach_fastener_to_screwdriver(
         scene,
         entities["0@fastener"],
@@ -209,7 +209,7 @@ def test_attach_and_detach_fastener_to_part(
     screwdriver_pos = torch.tensor([[0.0, 0.0, 1.0]])
     camera = scene.visualizer.cameras[0]
     entities["screwdriver@tool"].set_pos(screwdriver_pos)
-    tool_state = ToolState()
+    tool_state = ToolState().unsqueeze(0)
     attach_fastener_to_screwdriver(
         scene,
         entities["0@fastener"],

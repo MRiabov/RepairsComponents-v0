@@ -52,19 +52,15 @@ class RepairsSimState(SimState):
 
     def __init__(self, batch_dim: int):
         super().__init__()
+        # FIXME: this __init__ should be deprecated, and instead to be instantiated directly.
         self.scene_batch_dim = batch_dim
         self.electronics_state = torch.stack(
-            [ElectronicsState(device=self.device) for _ in range(batch_dim)]
+            [ElectronicsState(device=self.device)] * batch_dim
         )
-        # Use the simpler approach: create list and stack
         self.physical_state = torch.stack(
-            [PhysicalState(device=self.device) for _ in range(batch_dim)]
+            [PhysicalState(device=self.device)] * batch_dim
         )
-        # note: to avoid complex instantiation logic.
-        # self.fluid_state = [FluidState() for _ in range(batch_dim)]
-        self.tool_state = torch.stack(
-            [ToolState(device=self.device) for _ in range(batch_dim)]
-        )
+        self.tool_state = torch.stack([ToolState(device=self.device)] * batch_dim)
 
     def diff(self, other: "RepairsSimState"):  # batched diff.
         assert len(self.electronics_state) == len(other.electronics_state), (
@@ -90,8 +86,6 @@ class RepairsSimState(SimState):
         electronics_diff_counts = []
         physical_diffs = []
         physical_diff_counts = []
-        fluid_diffs = []
-        fluid_diff_counts = []
         total_diff_counts = []
         for i in range(self.scene_batch_dim):
             # Electronics diff: only compute if both states have electronics registered
@@ -128,7 +122,7 @@ class RepairsSimState(SimState):
         return {
             "physical_diff": physical_diffs,
             "electronics_diff": electronics_diffs,
-            "fluid_diff": fluid_diffs,
+            # "fluid_diff": fluid_diffs,
             # "physical_diff_count": physical_diff_counts,  # probably unnecessary.
             # "electronics_diff_count": electronics_diff_counts,
             # "fluid_diff_count": fluid_diff_counts,
