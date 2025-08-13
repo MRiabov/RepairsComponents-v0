@@ -286,7 +286,10 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
     fastener_cube = entities["0@fastener"]  # note: this is cube geom.
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
-    screwdriver = Screwdriver()
+    tool_state = ToolState().unsqueeze(0)
+    tool_state.screwdriver_tc = Screwdriver()
+    tool_state.tool_ids = torch.tensor([ToolsEnum.SCREWDRIVER.value])
+    tool_info = ToolInfo()
 
     move_franka_to_pos(
         scene,
@@ -301,16 +304,20 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
     print("end_effector.get_quat(): ", end_effector.get_quat())
 
     # attach tool to arm
-    attach_tool_to_arm(scene, tool_cube, end_effector, screwdriver, torch.tensor([0]))
+    attach_tool_to_arm(
+        scene, tool_cube, end_effector, tool_state, tool_info, torch.tensor([0])
+    )
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
 
     assert torch.isclose(
         tool_cube.get_pos(0),
-        torch.tensor([[0.65, 0.0, 0.5 - screwdriver.tool_grip_position[2]]]),
+        torch.tensor(
+            [[0.65, 0.0, 0.5 - tool_state.screwdriver_tc.tool_grip_position[2]]]
+        ),
         atol=0.15,
     ).all(), (
-        f"Cube pos expected to be [0.65, 0.0, 0.5 - screwdriver.tool_grip_position[2]], got {tool_cube.get_pos(0)}"
+        f"Cube pos expected to be [0.65, 0.0, 0.5 - tool_state.screwdriver_tc.tool_grip_position[2]], got {tool_cube.get_pos(0)}"
     )
     # give it a more efficient trajectory (didn't plan well w/o it.)
     move_franka_to_pos(
@@ -338,10 +345,12 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
 
     assert torch.isclose(
         tool_cube.get_pos(0),
-        torch.tensor([[0.0, 0.65, 0.7 - screwdriver.tool_grip_position[2]]]),
+        torch.tensor(
+            [[0.0, 0.65, 0.7 - tool_state.screwdriver_tc.tool_grip_position[2]]]
+        ),
         atol=0.05,
     ).all(), (
-        f"Cube pos expected to be [0.0, 0.65, 0.7 - screwdriver.tool_grip_position[2]], got {tool_cube.get_pos(0)}"
+        f"Cube pos expected to be [0.0, 0.65, 0.7 - tool_state.screwdriver_tc.tool_grip_position[2]], got {tool_cube.get_pos(0)}"
     )
 
     # attach second cube to tool

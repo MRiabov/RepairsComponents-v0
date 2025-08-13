@@ -20,7 +20,7 @@ def calculate_reward_and_done(
     """returns:
     - Reward [ml_batch_dim,]
     - terminated [ml_batch_dim,]"""
-    _diff, diff_count = scene_data.current_state.diff(scene_data.desired_state)
+    _diff, diff_count = scene_data.current_state.diff(scene_data.desired_state, scene_data.sim_info)
     completion_rate = calculate_partial_reward(
         scene_data.initial_diff_counts, diff_count
     )

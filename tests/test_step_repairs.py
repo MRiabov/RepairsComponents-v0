@@ -429,7 +429,7 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
     fastener_entity = gs_entities["0@fastener"]
     physical_state = repairs_sim_state.physical_state
     graph_device = physical_state.fasteners_attached_to_body.device
-    sc = Screwdriver()
+    sc = Screwdriver().unsqueeze(0)
     sc.picked_up_fastener_id = torch.tensor([0], dtype=torch.long)
     sc.picked_up_fastener_tip_position[0] = physical_state.hole_positions[0, 0]
     sc.picked_up_fastener_quat[0] = physical_state.hole_quats[0, 0]
@@ -668,8 +668,7 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
 
     # Test 1b: picked_up_fastener_id should be set (>= 0)
     assert (
-        updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[0].item()
-        >= 0
+        updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[0].item() >= 0
     ), "Tool should have picked_up_fastener_id set after picking up"
 
     # Test 1c: Tool has picked_up_fastener_name set to fastener name

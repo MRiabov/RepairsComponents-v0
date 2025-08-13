@@ -62,7 +62,7 @@ class RepairsSimState(SimState):
         )
         self.tool_state = torch.stack([ToolState(device=self.device)] * batch_dim)
 
-    def diff(self, other: "RepairsSimState"):  # batched diff.
+    def diff(self, other: "RepairsSimState", sim_info: RepairsSimInfo):  # batched diff.
         assert len(self.electronics_state) == len(other.electronics_state), (
             "Batch dim mismatch in sim state diff!"
         )
@@ -93,7 +93,7 @@ class RepairsSimState(SimState):
                 # Pass single component_info; comparability is validated inside diff
                 electronics_diff, electronics_diff_count = self.electronics_state[
                     i
-                ].diff(other.electronics_state[i], self.component_info)
+                ].diff(other.electronics_state[i], sim_info.component_info)
             else:
                 # valid case when electronics is really not registered in either
                 electronics_diff = Data(
@@ -107,11 +107,13 @@ class RepairsSimState(SimState):
             electronics_diffs.append(electronics_diff)
             electronics_diff_counts.append(electronics_diff_count)
             # For TensorClass, we need to slice to get individual batch elements
-            self_physical_i = self.physical_state[
+            self_physical_state_i = self.physical_state[
                 i : i + 1
             ]  # Get slice for batch element i
-            other_physical_i = other.physical_state[i : i + 1]
-            physical_diff, physical_diff_count = self_physical_i.diff(other_physical_i)
+            other_physical_state_i = other.physical_state[i : i + 1]
+            physical_diff, physical_diff_count = self_physical_state_i.diff(
+                other_physical_state_i, sim_info.physical_info
+            )
             physical_diffs.append(physical_diff)
             physical_diff_counts.append(physical_diff_count)
 

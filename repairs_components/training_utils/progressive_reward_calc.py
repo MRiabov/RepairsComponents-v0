@@ -167,5 +167,7 @@ def calculate_done(scene_data):
     Args:
         scene_data: ConcurrentSceneData
     """
-    _diff, diff_count = scene_data.current_state.diff(scene_data.desired_state)
+    _diff, diff_count = scene_data.current_state.diff(
+        scene_data.desired_state, scene_data.sim_info
+    )
     return diff_count == 0
