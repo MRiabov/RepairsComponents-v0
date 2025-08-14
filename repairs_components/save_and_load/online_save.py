@@ -1,8 +1,11 @@
 from typing import Optional
+from pathlib import Path
 import torch
 import os
 from concurrent.futures import ThreadPoolExecutor
-from repairs_components.training_utils.sim_state_global import RepairsSimState
+from repairs_components.training_utils.sim_state_global import (
+    RepairsSimState,
+)
 from genesis.vis.visualizer import Camera
 
 # Executor for asynchronous saving of tensors
@@ -25,6 +28,7 @@ def optional_save(
     video_len=-1,
     current_step=-1,
     sim_state: Optional[RepairsSimState] = None,
+    scene_id: int | None = None,
     obs_image: Optional[torch.Tensor] = None,
     voxel_grids_initial: Optional[torch.Tensor] = None,
     voxel_grids_desired: Optional[torch.Tensor] = None,
@@ -34,7 +38,8 @@ def optional_save(
 
     if save_any:
         if save_state:
-            sim_state.save(save_path, scene_id, init=True)  # saves graphs too
+            assert sim_state is not None and scene_id is not None
+            sim_state.save(Path(save_path), scene_id, init=True)
         if save_image:
             assert obs_image is not None, "obs_image must be provided to save_image"
             img_path = os.path.join(save_path, "obs_image.pt")

@@ -6,10 +6,7 @@ from typing import List
 import numpy as np
 
 import torch
-from torch_geometric.data import Batch, Data
 
-from repairs_components.logic.electronics.electronics_state import ElectronicsState
-from repairs_components.logic.physical_state import PhysicalState
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     merge_concurrent_scene_configs,
@@ -18,8 +15,9 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
 from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.progressive_reward_calc import RewardHistory
 from repairs_components.training_utils.sim_state_global import (
-    get_graph_save_paths,
-    reconstruct_sim_state,
+    get_state_and_info_save_paths,
+    RepairsSimState,
+    RepairsSimInfo,
 )
 
 # During the loading of the data we load:
@@ -50,10 +48,10 @@ class OfflineDataloader:
         self.data_dir = Path(data_dir)
         self.scene_ids = scene_ids
 
-        self.loaded_pyg_batch_dict_mech_init = {}
-        self.loaded_pyg_batch_dict_elec_init = {}
-        self.loaded_pyg_batch_dict_mech_des = {}
-        self.loaded_pyg_batch_dict_elec_des = {}
+        # Cached full states and info per scene
+        self.loaded_init_states: dict[int, RepairsSimState] = {}
+        self.loaded_des_states: dict[int, RepairsSimState] = {}
+        self.loaded_sim_info: dict[int, RepairsSimInfo] = {}
 
         self.vox_init_dict = {}
         self.vox_des_dict = {}
@@ -140,54 +138,12 @@ class OfflineDataloader:
             f"Loaded vox init dict for scene_id {scene_id} with shape: {self.vox_init_dict[scene_id].shape}",
         )
         # ^ memory calculation: 100k samples*max 15 items * 10 datapoints * float16 =36mil = 36mbytes
-        # graphs
-        mech_graphs_init, elec_graphs_init, mech_graphs_des, elec_graphs_des = (
-            self._load_sim_states(scene_id)
-        )
+        # states and info
+        init_state, des_state, sim_info = self._load_sim_states(scene_id)
 
-        # tool idx
-        tool_idx_path_init = self.data_dir / f"tool_idx_{scene_id}.pt"
-        tool_idx_path_des = self.data_dir / f"tool_idx_{scene_id}.pt"
-        tool_data_init = torch.load(tool_idx_path_init)
-        tool_data_des = torch.load(tool_idx_path_des)
-
-        # holes
-        starting_hole_positions = torch.load(
-            self.data_dir / f"scene_{scene_id}" / "starting_hole_positions.pt"
-        )
-        starting_hole_quats = torch.load(
-            self.data_dir / f"scene_{scene_id}" / "starting_hole_quats.pt"
-        )
-        hole_depth = torch.load(self.data_dir / f"scene_{scene_id}" / "hole_depth.pt")
-        part_hole_batch = torch.load(
-            self.data_dir / f"scene_{scene_id}" / "part_hole_batch.pt"
-        )
-        hole_is_through = torch.load(
-            self.data_dir / f"scene_{scene_id}" / "hole_is_through.pt"
-        )
-        # TODO update them during load based on pos.
-
-        # load RepairsEnvState
-        init_sim_state = reconstruct_sim_state(
-            electronics_graphs=elec_graphs_init,
-            mechanical_state=mech_graphs_init,  # Now PhysicalState objects
-            electronics_indices=scene_metadata["electronics_indices"],
-            mechanical_indices=scene_metadata["mechanical_indices"],
-            tool_data=tool_data_init,
-            starting_hole_positions=starting_hole_positions,
-            starting_hole_quats=starting_hole_quats,
-            part_hole_batch=part_hole_batch,
-        )
-        des_sim_state = reconstruct_sim_state(
-            electronics_graphs=elec_graphs_des,
-            mechanical_state=mech_graphs_des,  # Now PhysicalState objects
-            electronics_indices=scene_metadata["electronics_indices"],
-            mechanical_indices=scene_metadata["mechanical_indices"],
-            tool_data=tool_data_des,
-            starting_hole_positions=starting_hole_positions,
-            starting_hole_quats=starting_hole_quats,
-            part_hole_batch=part_hole_batch,
-        )
+        # Use loaded full states directly
+        init_sim_state = init_state
+        des_sim_state = des_state
 
         batch_dim = init_sim_state.batch_size
 
@@ -206,11 +162,7 @@ class OfflineDataloader:
             batch_dim=batch_dim,
             task_ids=torch.zeros(batch_dim, dtype=torch.int32),
             step_count=torch.zeros(batch_dim, dtype=torch.int32),
-            starting_hole_positions=starting_hole_positions,
-            starting_hole_quats=starting_hole_quats,
-            hole_depth=hole_depth,
-            part_hole_batch=part_hole_batch,
-            hole_is_through=hole_is_through,
+            sim_info=sim_info,
         )
 
         return sim_state
@@ -230,129 +182,52 @@ class OfflineDataloader:
 
     def _load_sim_states(
         self, scene_id: int, env_idx: torch.Tensor | None = None
-    ) -> tuple[PhysicalState, ElectronicsState]:
-        # ^ Returns: (mech_init_states, elec_init_graphs, mech_des_states, elec_des_graphs)
-        """Load the physical states and electronics graphs for a scene."""
+    ) -> tuple[RepairsSimState, RepairsSimState, RepairsSimInfo]:
+        """Load full sim states and info for a scene."""
         if (
-            scene_id not in self.loaded_pyg_batch_dict_mech_init
-            or scene_id not in self.loaded_pyg_batch_dict_elec_init
+            scene_id not in self.loaded_init_states
+            or scene_id not in self.loaded_des_states
         ):
-            # load initial and desired: mech init, mech des (PhysicalState lists), elec init, elec des (graph batches)
-            mech_graph_init_path, elec_graph_init_path = get_graph_save_paths(
+            state_init_path, info_path = get_state_and_info_save_paths(
                 self.data_dir, scene_id, init=True
             )
-            mech_graph_des_path, elec_graph_des_path = get_graph_save_paths(
+            state_des_path, _ = get_state_and_info_save_paths(
                 self.data_dir, scene_id, init=False
             )
 
-            # Load mechanical data (now a single PhysicalState)
-            assert mech_graph_init_path.exists(), (
-                f"Mechanical file not found at {mech_graph_init_path}"
+            assert state_init_path.exists(), (
+                f"State file not found at {state_init_path}"
             )
-            assert mech_graph_des_path.exists(), (
-                f"Mechanical file not found at {mech_graph_des_path}"
+            assert state_des_path.exists(), f"State file not found at {state_des_path}"
+            assert info_path.exists(), f"Info file not found at {info_path}"
+
+            init_state = torch.load(state_init_path)
+            des_state = torch.load(state_des_path)
+            sim_info = torch.load(info_path)
+
+            assert isinstance(init_state, RepairsSimState), (
+                f"Expected RepairsSimState at {state_init_path}, got {type(init_state)}"
+            )
+            assert isinstance(des_state, RepairsSimState), (
+                f"Expected RepairsSimState at {state_des_path}, got {type(des_state)}"
+            )
+            assert isinstance(sim_info, RepairsSimInfo), (
+                f"Expected RepairsSimInfo at {info_path}, got {type(sim_info)}"
             )
 
-            mech_init_states = torch.load(mech_graph_init_path)
-            mech_des_states = torch.load(mech_graph_des_path)
+            self.loaded_init_states[scene_id] = init_state
+            self.loaded_des_states[scene_id] = des_state
+            self.loaded_sim_info[scene_id] = sim_info
 
-            assert isinstance(mech_init_states, PhysicalState), (
-                f"Mechanical data under path {mech_graph_init_path} is not a PhysicalState, it is {type(mech_init_states)}"
-            )
-            assert isinstance(mech_des_states, PhysicalState), (
-                f"Mechanical data under path {mech_graph_des_path} is not a PhysicalState, it is {type(mech_des_states)}"
-            )
-
-            # validate physical state
-            assert isinstance(mech_init_states, PhysicalState), (
-                f"Expected PhysicalState object during load, got {type(mech_init_states)}"
-            )
-
-            # Validate dataclass fields - check that all expected keys exist and tensor shapes are consistent
-            expected_keys = set(PhysicalState.__dataclass_fields__.keys())
-
-            init_actual_keys = set(mech_init_states._tensordict.keys())
-            des_actual_keys = set(mech_des_states._tensordict.keys())
-            assert expected_keys == init_actual_keys, (
-                f"PhysicalState has mismatched keys.\n"
-                f"Missing: {expected_keys - init_actual_keys}\n"
-                f"Extra: {init_actual_keys - expected_keys}"
-            )
-            assert expected_keys == des_actual_keys, (
-                f"PhysicalState has mismatched keys.\n"
-                f"Missing: {expected_keys - des_actual_keys}\n"
-                f"Extra: {des_actual_keys - expected_keys}"
-            )
-
-            # Validate tensor shapes are consistent within the state
-            if len(mech_init_states.position) > 0:
-                assert (
-                    mech_init_states.position.shape[0] == mech_init_states.quat.shape[0]
-                ), f"Position and quat tensors must have same batch size"
-                assert (
-                    mech_init_states.position.shape[0]
-                    == mech_init_states.fixed.shape[0]
-                ), f"Position and fixed tensors must have same batch size"
-
-            if len(mech_init_states.fasteners_pos) > 0:
-                assert (
-                    mech_init_states.fasteners_pos.shape[0]
-                    == mech_init_states.fasteners_quat.shape[0]
-                ), "Fastener position and quat tensors must have same batch size"
-
-            # Load electronics data (still graph batches)
-            assert elec_graph_init_path.exists(), (
-                f"Electronics file not found at {elec_graph_init_path}"
-            )
-            assert elec_graph_des_path.exists(), (
-                f"Electronics file not found at {elec_graph_des_path}"
-            )
-
-            elec_init_batch = torch.load(elec_graph_init_path)
-            elec_des_batch = torch.load(elec_graph_des_path)
-
-            assert isinstance(elec_init_batch, Batch), (
-                f"Electronics data under path {elec_graph_init_path} is not a Batch, it is {type(elec_init_batch)}"
-            )
-            assert isinstance(elec_des_batch, Batch), (
-                f"Electronics data under path {elec_graph_des_path} is not a Batch, it is {type(elec_des_batch)}"
-            )
-
-            # Validate batch dimensions match
-            assert len(mech_init_states) == len(mech_des_states), (
-                "Mechanical init and desired states must have the same length."
-            )
-            assert len(mech_init_states) == elec_init_batch.num_graphs, (
-                "Mechanical states and electronics graphs must have the same batch size."
-            )
-            assert elec_init_batch.num_graphs == elec_des_batch.num_graphs, (
-                "Electronics init and desired graphs must have the same batch size."
-            )
-
-            # Store in cache
-            self.loaded_pyg_batch_dict_mech_init[scene_id] = mech_init_states
-            self.loaded_pyg_batch_dict_elec_init[scene_id] = elec_init_batch
-            self.loaded_pyg_batch_dict_mech_des[scene_id] = mech_des_states
-            self.loaded_pyg_batch_dict_elec_des[scene_id] = elec_des_batch
+        init_state = self.loaded_init_states[scene_id]
+        des_state = self.loaded_des_states[scene_id]
+        sim_info = self.loaded_sim_info[scene_id]
 
         if env_idx is None:
-            return (
-                self.loaded_pyg_batch_dict_mech_init[
-                    scene_id
-                ],  # Already a list of PhysicalState
-                self.loaded_pyg_batch_dict_elec_init[scene_id].to_data_list(),
-                self.loaded_pyg_batch_dict_mech_des[
-                    scene_id
-                ],  # Already a list of PhysicalState
-                self.loaded_pyg_batch_dict_elec_des[scene_id].to_data_list(),
-            )
+            return init_state, des_state, sim_info
         else:
-            return (
-                [self.loaded_pyg_batch_dict_mech_init[scene_id][i] for i in env_idx],
-                self.loaded_pyg_batch_dict_elec_init[scene_id][env_idx],
-                [self.loaded_pyg_batch_dict_mech_des[scene_id][i] for i in env_idx],
-                self.loaded_pyg_batch_dict_elec_des[scene_id][env_idx],
-            )
+            # Slice states by env_idx; sim_info is global/static
+            return init_state[env_idx], des_state[env_idx], sim_info
 
 
 def check_if_data_exists(
@@ -372,13 +247,13 @@ def check_if_data_exists(
         metadata_path = data_dir / f"scene_{scene_id}" / "metadata.json"
         if not metadata_path.exists():
             return False
-        # Graphs
-        graphs_dir = data_dir / "graphs"
+        # States and info
+        state_dir = data_dir / "state"
         graph_files = [
-            graphs_dir / f"mechanical_graphs_{scene_id}_init.pt",
-            graphs_dir / f"electronics_graphs_{scene_id}_init.pt",
-            graphs_dir / f"mechanical_graphs_{scene_id}_des.pt",
-            graphs_dir / f"electronics_graphs_{scene_id}_des.pt",
+            state_dir / f"state_{scene_id}_init.pt",
+            state_dir / f"info_{scene_id}_init.pt",
+            state_dir / f"state_{scene_id}_des.pt",
+            state_dir / f"info_{scene_id}_des.pt",
         ]
         # Voxels
         voxels_dir = data_dir / "voxels"

@@ -20,7 +20,7 @@ class Gripper(Tool):  # tensorclass by inheritance!
     @property
     def dist_from_grip_link(self):
         #!!! Unnecessary for gripper tool.
-        return torch.tensor(float('nan'))
+        return torch.tensor(float("nan"))
 
     @property
     def tool_grip_position(self):

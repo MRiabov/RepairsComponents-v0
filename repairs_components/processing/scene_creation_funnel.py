@@ -39,7 +39,7 @@ from repairs_components.training_utils.progressive_reward_calc import RewardHist
 from repairs_components.training_utils.sim_state_global import (
     RepairsSimInfo,
     RepairsSimState,
-    merge_global_states,
+    get_state_and_info_save_paths,
 )
 
 from repairs_components.training_utils.concurrent_scene_dataclass import (
@@ -134,28 +134,21 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             voxel_grids_desired.append(desired_voxel_grid)
 
             # create RepairsSimState for both
-            starting_sim_state, starting_holes = translate_compound_to_sim_state(
+            starting_sim_state, sim_info = translate_compound_to_sim_state(
                 [starting_scene_geom_], device=device
             )
-            desired_sim_state, _starting_holes = translate_compound_to_sim_state(
+            desired_sim_state, _sim_info = translate_compound_to_sim_state(
                 [desired_state_geom_], device=device
             )
-
-            # starting, as "per part, relative to 0,0,0 position"
-            (
-                part_holes_pos,
-                part_holes_quat,
-                part_hole_depth,
-                hole_is_through,
-                part_hole_batch,
-            ) = starting_holes
 
             # store states
             starting_sim_states.append(starting_sim_state)
             desired_sim_states.append(desired_sim_state)
 
             # Store the initial difference count for reward calculation
-            diff, initial_diff_count = starting_sim_state.diff(desired_sim_state)
+            diff, initial_diff_count = starting_sim_state.diff(
+                desired_sim_state, sim_info
+            )
             init_diffs.append(diff)
             init_diff_counts.append(initial_diff_count)
 
@@ -182,8 +175,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
 
         voxel_grids_initial = torch.stack(voxel_grids_initial, dim=0)
         voxel_grids_desired = torch.stack(voxel_grids_desired, dim=0)
-        starting_sim_state = merge_global_states(starting_sim_states)
-        desired_sim_state = merge_global_states(desired_sim_states)
+        starting_sim_state: RepairsSimState = torch.cat(starting_sim_states)
+        desired_sim_state: RepairsSimState = torch.cat(desired_sim_states)
 
         initial_diffs = {k: [d[k][0] for d in init_diffs] for k in init_diffs[0].keys()}
 
@@ -202,18 +195,20 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             reward_history=RewardHistory(batch_dim=scene_gen_count),
             step_count=torch.zeros(scene_gen_count, dtype=torch.int),
             task_ids=task_ids,
-            starting_hole_positions=part_holes_pos,
-            starting_hole_quats=part_holes_quat,
-            hole_depth=part_hole_depth,
-            part_hole_batch=part_hole_batch,
-            hole_is_through=hole_is_through,
+            sim_info=sim_info,
         )  # inttensor and tensor.
         scene_config_batches.append(this_scene_configs)
 
         if save:
-            # get them later by get_graph_save_paths
+            # Save full sim states
             starting_sim_state.save(save_path, scene_idx, init=True)
             desired_sim_state.save(save_path, scene_idx, init=False)
+            # Save sim_info once per scene (info is invariant across init/des)
+            _state_path, info_path = get_state_and_info_save_paths(
+                save_path, scene_idx, init=True
+            )
+            if not info_path.exists():
+                torch.save(sim_info, info_path)
             torch.save(
                 torch.tensor(init_diff_counts),
                 save_path / ("scene_" + str(scene_idx)) / "initial_diff_counts.pt",

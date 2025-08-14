@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Optional
 from pathlib import Path
 import torch
 from repairs_components.logic.electronics.electronics_state import (
@@ -85,7 +86,7 @@ class RepairsSimState(SimState):  # type: ignore
         physical_diffs = []
         physical_diff_counts = []
         total_diff_counts = []
-        for i in range(self.batch_size):
+        for i in range(self.batch_size[0]):
             # Electronics diff: only compute if both states have electronics registered
             if self.has_electronics:
                 # Pass single component_info; comparability is validated inside diff
@@ -129,71 +130,49 @@ class RepairsSimState(SimState):  # type: ignore
         }, total_diff_counts
 
     def save(
-        self, path: Path, scene_id, init: bool, env_idx: torch.Tensor | None = None
+        self,
+        path: Path,
+        scene_id,
+        init: bool,
+        env_idx: torch.Tensor | None = None,
     ):
-        """Save the state to a JSON file with a unique identifier.
+        """Save the full RepairsSimState TensorClass for simple persistence.
 
         Args:
-            path: Path to save the state to.
+            path: Base directory to save under.
             scene_id: ID of the scene.
-            init: A flag necessary to save graphs for initial or desired state.
-            env_idx: Indices of the environments to save. If None, all environments are saved.
-
-        Returns:
-            - Names of bodies located under indices
-            - Names of electronics bodies located under indices.
+            init: Whether saving initial or desired state variant.
+            env_idx: Index of the environment to save. If None, saves all environments.
         """
+        assert isinstance(self.batch_size, int) or len(self.batch_size) == 1, (
+            "Expected that batch dim is int or size of 1."
+        )
         assert self.batch_size > 1, "Expected that batch dim is greater than 1."
-        # ^ note, not a hard constraint, but it should be valid in all cases.
-
-        # Create output directory if it doesn't exist
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # Ensure target directory exists
+        state_path, _info_path = get_state_and_info_save_paths(path, scene_id, init=init)
+        state_path.parent.mkdir(parents=True, exist_ok=True)
 
         if env_idx is None:  # save all envs
             env_idx = torch.arange(self.batch_size)
 
-        # # Generate a unique filename
-        # uid = str(uuid.uuid4())
-        # filename = f"step_state_{uid}.json"
-        # filepath = path / filename
-        # save entire dataclasses directly instead of graphs
-
-        mech_graph_path, elec_graph_path = get_graph_save_paths(
-            path, scene_id, init=init
-        )
-        # For TensorClass, slice the batch dimension to get the required environments
-        physical_states = self.physical_state[env_idx]
-        electronics_graphs = [
-            self.electronics_state[env_id].graph for env_id in env_idx
-        ]
-        # Validation: check that saved data is within bounds
-
-        if physical_states.position.shape[0] > 0:
-            assert (torch.max(physical_states.position) < 1).all(), (
-                "Saved data is out of bounds"
-            )
-
-        torch.save(physical_states, mech_graph_path)
-        torch.save(Batch.from_data_list(electronics_graphs), elec_graph_path)
-
-        torch.save(self.tool_state.tool_ids[env_idx], path / f"tool_idx_{scene_id}.pt")
-
-        electronics_indices = self.electronics_state[0].indices
-        physical_indices = self.physical_state[0].body_indices
-        return electronics_indices, physical_indices
+        torch.save(self[env_idx], state_path)
+        # sim_info is saved separately once per scene.
 
 
-def get_graph_save_paths(base_dir: Path, scene_id: int, init: bool):
+def get_state_and_info_save_paths(base_dir: Path, scene_id: int, init: bool):
     # note: env_id is not used because graphs are batched per scene.
     postfix = "init" if init else "des"
-    mech_graph_path = (
-        base_dir / "graphs" / f"mechanical_graphs_{int(scene_id)}_{postfix}.pt"
-    )
-    elec_graph_path = (
-        base_dir / "graphs" / f"electronics_graphs_{int(scene_id)}_{postfix}.pt"
-    )
+    # mech_graph_path = (
+    #     base_dir / "graphs" / f"mechanical_graphs_{int(scene_id)}_{postfix}.pt"
+    # )
+    # elec_graph_path = (
+    #     base_dir / "graphs" / f"electronics_graphs_{int(scene_id)}_{postfix}.pt"
+    # )
+    state_save_path = base_dir / "state" / f"state_{int(scene_id)}_{postfix}.pt"
+    # info is invariant across init/des; save once without postfix
+    info_save_path = base_dir / "state" / f"info_{int(scene_id)}.pt"
 
-    return mech_graph_path, elec_graph_path
+    return state_save_path, info_save_path
 
 
 # deprecated: do directly.
@@ -245,7 +224,11 @@ def reconstruct_sim_state(
     part_hole_batch: torch.Tensor,
     fluid_data_placeholder: list[dict[str, int]] | None = None,
 ) -> RepairsSimState:
-    """Load a single simulation state from PhysicalState objects and electronics graphs (i.e. from the offline dataset)"""
+    """Rebuild a batched RepairsSimState from saved PhysicalState and electronics graphs.
+
+    Note: ElectronicsState reconstruction from graphs is not yet implemented; this function
+    restores the PhysicalState and ToolState and updates hole locations.
+    """
     from repairs_components.training_utils.sim_state_global import RepairsSimState
     from repairs_components.processing.translation import update_hole_locs
 
@@ -256,19 +239,19 @@ def reconstruct_sim_state(
         "Electronics graphs and mechanical states must have the same length."
     )
 
-    batch_dim = len(electronics_graphs)
+    B = len(electronics_graphs)
+    device = mechanical_state.device
     repairs_sim_state: RepairsSimState = torch.stack(
-        [RepairsSimState(batch_dim)] * batch_dim
+        [RepairsSimState(device=device)] * B
     )
-    # repairs_sim_state.electronics_state = [
-    #     ElectronicsStateTC.rebuild_from_graph(graph, electronics_indices)
-    #     for graph in electronics_graphs
-    # ]
-    # FIXME:  electronics state needs to be persisted and loaded.
-    # Use the PhysicalState object directly - it should already be a single TensorClass instance
+
+    # Physical state is already a batched TensorClass
     repairs_sim_state.physical_state = mechanical_state
 
-    repairs_sim_state.tool_state = ToolState.rebuild_from_saved(indices)
+    # Restore tool ids into ToolState
+    repairs_sim_state.tool_state = ToolState.rebuild_from_saved(tool_data)
+
+    # Update hole locations based on saved metadata
     repairs_sim_state = update_hole_locs(
         repairs_sim_state, starting_hole_positions, starting_hole_quats, part_hole_batch
     )

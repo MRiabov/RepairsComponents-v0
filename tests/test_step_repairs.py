@@ -24,7 +24,7 @@ from repairs_components.logic.tools.gripper import Gripper
 from genesis.engine.entities import RigidEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 import numpy as np
-from tests.global_test_config import init_gs  # noqa: F401
+from tests.global_test_config import init_gs, test_device  # noqa: F401
 
 
 @pytest.fixture
@@ -164,9 +164,7 @@ def untranslated_holes_for_two_parts():
         [True] * num_holes_first_part + [True] * num_holes_second_part
     )  # [H]
     # Hole diameters in meters: match default fastener diameter (5 mm -> 0.005 m)
-    hole_diameter = torch.tensor(
-        [0.005] * total_num_holes, dtype=torch.float32
-    )  # [H]
+    hole_diameter = torch.tensor([0.005] * total_num_holes, dtype=torch.float32)  # [H]
     # /unsure
     assert (
         total_num_holes
@@ -275,6 +273,16 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
             dim=1,
         ),
         fixed=torch.tensor([False, False]),
+    )
+    # Register the same free fastener in the desired state to keep counts consistent for diff
+    desired_physical_state, _ = register_fasteners_batch(
+        desired_physical_state,
+        sim_info.physical_info,
+        entities["0@fastener"].get_pos(0).unsqueeze(1),  # [B=1, 1, 3]
+        entities["0@fastener"].get_quat(0).unsqueeze(1),  # [B=1, 1, 4]
+        torch.tensor([[-1]]),  # init hole a
+        torch.tensor([[-1]]),  # init hole b
+        fastener_compound_names=[standard_fastener_name],
     )
     desired_sim_state.physical_state = desired_physical_state
 
