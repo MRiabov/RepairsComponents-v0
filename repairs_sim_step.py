@@ -61,7 +61,7 @@ def step_repairs(
     )
 
     # sim-to-real assumes a small buffer between implementation and action, so let us just make reward compute first and action second which is equal to getting the reward and stepping the action.
-    diff, total_diff_left = current_sim_state.diff(desired_state)
+    diff, total_diff_left = current_sim_state.diff(desired_state, sim_info)
 
     success = total_diff_left == 0  # Tensor[batch] bool
 

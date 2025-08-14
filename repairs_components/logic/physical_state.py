@@ -660,227 +660,224 @@ def _diff_fastener_features(
         "Batch dim mismatch across fastener features."
     )
 
-    # Reconstruct edges from fastener attachments.
-    # We consider an edge to exist when a fastener is attached to two bodies (both slots are valid).
-    # Each edge is undirected and represented as a sorted (u, v) tuple of body indices.
+    # Flatten batch for fastener features
+    a_atb = (
+        data_a.fasteners_attached_to_body.reshape(-1, 2)
+        if data_a.fasteners_attached_to_body.ndim == 3
+        else data_a.fasteners_attached_to_body
+    )
+    b_atb = (
+        data_b.fasteners_attached_to_body.reshape(-1, 2)
+        if data_b.fasteners_attached_to_body.ndim == 3
+        else data_b.fasteners_attached_to_body
+    )
+    a_ath = (
+        data_a.fasteners_attached_to_hole.reshape(-1, 2)
+        if data_a.fasteners_attached_to_hole.ndim == 3
+        else data_a.fasteners_attached_to_hole
+    )
+    b_ath = (
+        data_b.fasteners_attached_to_hole.reshape(-1, 2)
+        if data_b.fasteners_attached_to_hole.ndim == 3
+        else data_b.fasteners_attached_to_hole
+    )
+    a_pos = (
+        data_a.fasteners_pos.reshape(-1, 3)
+        if data_a.fasteners_pos.ndim == 3
+        else data_a.fasteners_pos
+    )
+    b_pos = (
+        data_b.fasteners_pos.reshape(-1, 3)
+        if data_b.fasteners_pos.ndim == 3
+        else data_b.fasteners_pos
+    )
+    a_quat = (
+        data_a.fasteners_quat.reshape(-1, 4)
+        if data_a.fasteners_quat.ndim == 3
+        else data_a.fasteners_quat
+    )
+    b_quat = (
+        data_b.fasteners_quat.reshape(-1, 4)
+        if data_b.fasteners_quat.ndim == 3
+        else data_b.fasteners_quat
+    )
 
-    # Normalize potentially batched tensors:
-    # - For attachments/poses that can vary per environment, flatten across batch to union info across B
-    # - For scalar fastener params (diam/length) that are equal over batch, validate equality and reduce
-    def _unbatch_fastener_tensors(ps: PhysicalState):
-        atb = ps.fasteners_attached_to_body
-        ath = ps.fasteners_attached_to_hole
-        # diam = pi.fasteners_diam
-        # length = pi.fasteners_length
-        pos = ps.fasteners_pos
-        quat = ps.fasteners_quat
-
-        if atb.ndim == 3:  # [B, N, 2] -> [B*N, 2]
-            atb = atb.reshape(-1, 2)
-        if ath.ndim == 3:  # [B, N, 2] -> [B*N, 2]
-            ath = ath.reshape(-1, 2)
-        # if diam.ndim == 2:  # [B, N] -> [B*N] (validate equality across B)
-        #     assert torch.allclose(diam, diam[:1].expand_as(diam)), (
-        #         "fasteners_diam must be equal across batch"
-        #     )
-        #     diam = diam.reshape(-1)
-        # if length.ndim == 2:  # [B, N] -> [B*N] (validate equality across B)
-        #     assert torch.allclose(length, length[:1].expand_as(length)), (
-        #         "fasteners_length must be equal across batch"
-        #     )
-        #     length = length.reshape(-1)
-        if pos.ndim == 3:  # [B, N, 3] -> [B*N, 3]
-            pos = pos.reshape(-1, 3)
-        if quat.ndim == 3:  # [B, N, 4] -> [B*N, 4]
-            quat = quat.reshape(-1, 4)
-
-        return atb, ath, pos, quat
-
-    a_atb, a_ath, a_pos, a_quat = _unbatch_fastener_tensors(data_a)
-    b_atb, b_ath, b_pos, b_quat = _unbatch_fastener_tensors(data_b)
-
-    # Enforce fastener-hole diameter compatibility on both states. We assert that for
-    # every attached fastener (both holes valid), the fastener diameter equals the
-    # diameters of the holes it occupies. Fastener params are singleton over batch
-    # with length N; when attachments are flattened across batch, the i-th row maps
-    # to fastener index (i % N).
     N_fast = int(physical_info.fasteners_length.shape[0])
+    N_bodies = int(data_a.position.shape[1])
+    H = (
+        int(physical_info.hole_diameter.shape[0])
+        if physical_info.hole_diameter.numel()
+        else 0
+    )
 
-    def _assert_fastener_hole_diameter_match(
-        attached_to_hole: torch.Tensor, label: str
-    ):
+    # Vectorized hole/fastener diameter compatibility for both states
+    def _check_diam(attached_to_hole: torch.Tensor):
         if attached_to_hole.numel() == 0:
             return
         valid = (attached_to_hole[:, 0] >= 0) & (attached_to_hole[:, 1] >= 0)
-        idxs = torch.nonzero(valid, as_tuple=False).squeeze(1)
-        # Assert hole_diameter is provided for all referenced holes
-        assert physical_info.hole_diameter.ndim == 1, "hole_diameter must be 1D"
-        max_hole = int(attached_to_hole[valid].max().item()) if valid.any() else -1
-        if max_hole >= 0:
-            assert physical_info.hole_diameter.shape[0] > max_hole, (
-                f"physical_info.hole_diameter must cover all referenced holes in {label}"
-            )
-        for i in idxs.tolist():
-            ha = int(attached_to_hole[i, 0].item())
-            hb = int(attached_to_hole[i, 1].item())
-            f_idx = i % N_fast
-            f_d = float(physical_info.fasteners_diam[f_idx].item())
-            da = float(physical_info.hole_diameter[ha].item())
-            db = float(physical_info.hole_diameter[hb].item())
-            assert abs(f_d - da) <= 1e-6 and abs(f_d - db) <= 1e-6, (
-                f"Fastener-hole diameter mismatch in {label}: fastener[{f_idx}] d={f_d} vs holes ({ha},{hb}) d=({da},{db})"
-            )
+        if not bool(valid.any()):
+            return
+        idx = torch.nonzero(valid, as_tuple=False).squeeze(1)
+        f_idx = idx % N_fast
+        ha = attached_to_hole[idx, 0].to(torch.long)
+        hb = attached_to_hole[idx, 1].to(torch.long)
+        fd = physical_info.fasteners_diam[f_idx]
+        da = physical_info.hole_diameter[ha]
+        db = physical_info.hole_diameter[hb]
+        close = (fd - da).abs() <= 1e-6
+        close &= (fd - db).abs() <= 1e-6
+        assert bool(close.all()), "Fastener-hole diameter mismatch detected"
 
-    _assert_fastener_hole_diameter_match(a_ath, "state_a")
-    _assert_fastener_hole_diameter_match(b_ath, "state_b")
+    _check_diam(a_ath)
+    _check_diam(b_ath)
 
-    def attachments_to_edge_set(attached_to_body: torch.Tensor) -> set[tuple[int, int]]:
-        if attached_to_body.numel() == 0:
-            return set()
-        # attached_to_body: [num_fasteners, 2] with -1 for unattached
-        # Select rows where both bodies are valid
-        valid = (attached_to_body[:, 0] >= 0) & (attached_to_body[:, 1] >= 0)
-        pairs = attached_to_body[valid].to(torch.long)
+    # Added/removed edges from body attachments (undirected, dedup across batch)
+    def _edges_from_atb(atb: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if atb.numel() == 0:
+            return torch.empty((0,), dtype=torch.long), torch.empty(
+                (0, 2), dtype=torch.long
+            )
+        valid = (atb[:, 0] >= 0) & (atb[:, 1] >= 0)
+        pairs = atb[valid].to(torch.long)
         if pairs.numel() == 0:
-            return set()
-        # Sort each pair to make edges undirected-consistent
+            return torch.empty((0,), dtype=torch.long), torch.empty(
+                (0, 2), dtype=torch.long
+            )
         u = torch.minimum(pairs[:, 0], pairs[:, 1])
         v = torch.maximum(pairs[:, 0], pairs[:, 1])
         edges = torch.stack([u, v], dim=1)
-        return set(map(tuple, edges.tolist()))
+        keys = u * N_bodies + v
+        # Unique keys with first occurrence indices (PyTorch-compatible)
+        order = torch.argsort(keys)
+        keys_sorted = keys[order]
+        keys_u, counts = torch.unique(keys_sorted, return_counts=True)
+        # first index in sorted order per unique key
+        csum = torch.cumsum(counts, dim=0)
+        first_sorted_idx = csum - counts
+        idx_u = order[first_sorted_idx]
+        return keys_u, edges[idx_u]
 
-    a_set = attachments_to_edge_set(a_atb)
-    b_set = attachments_to_edge_set(b_atb)
-
-    # Compute differences for connectivity
-    added = list(b_set - a_set)
-    removed = list(a_set - b_set)
-
-    # Attribute diffs: match fasteners by hole pairs (assumes at most one fastener per hole pair)
-    def build_holepair_map(
-        attached_to_hole: torch.Tensor,
-        attached_to_body: torch.Tensor,
-        diam: torch.Tensor,
-        length: torch.Tensor,
-        pos: torch.Tensor,
-        quat: torch.Tensor,
-    ) -> dict[tuple[int, int], dict]:
-        hole_map: dict[tuple[int, int], dict] = {}
-        if attached_to_hole.numel() == 0:
-            return hole_map
-        valid = (attached_to_hole[:, 0] >= 0) & (attached_to_hole[:, 1] >= 0)
-        idxs = torch.nonzero(valid, as_tuple=False).squeeze(1)
-        for i in idxs.tolist():
-            ha, hb = (
-                int(attached_to_hole[i, 0].item()),
-                int(attached_to_hole[i, 1].item()),
-            )
-            key = (ha, hb) if ha <= hb else (hb, ha)
-            # Also record body pair for this fastener
-            ba, bb = (
-                int(attached_to_body[i, 0].item()),
-                int(attached_to_body[i, 1].item()),
-            )
-            bu, bv = (ba, bb) if ba <= bb else (bb, ba)
-            # For batched inputs flattened across B, multiple entries for the same
-            # hole-pair may appear (from different environments). Prefer the first
-            # occurrence to avoid arbitrary overwrites; diam/length are equal across
-            # batch by design.
-            hole_map.setdefault(
-                key,
-                {
-                    "body_pair": (bu, bv),
-                    "diam": float(diam[i].item()),
-                    "length": float(length[i].item()),
-                    "pos": pos[i].detach(),
-                    "quat": quat[i].detach(),
-                },
-            )
-        return hole_map
-
-    a_holes = build_holepair_map(
-        a_ath,
-        a_atb,
-        physical_info.fasteners_diam,
-        physical_info.fasteners_length,
-        a_pos,
-        a_quat,
-    )
-    b_holes = build_holepair_map(
-        b_ath,
-        b_atb,
-        physical_info.fasteners_diam,
-        physical_info.fasteners_length,
-        b_pos,
-        b_quat,
-    )
-
-    common_hole_pairs = set(a_holes.keys()) & set(b_holes.keys())
-
-    changed_edges: list[tuple[int, int]] = []
-    diam_changed: list[bool] = []
-    length_changed: list[bool] = []
-    pos_diffs: list[torch.Tensor] = []
-    quat_deltas: list[torch.Tensor] = []
-
-    # thresholds consistent with body diffs
-    pos_threshold = 5.0 / 1000
-    deg_threshold = 5.0
-
-    for k in common_hole_pairs:
-        a_v = a_holes[k]
-        b_v = b_holes[k]
-        # Use body pair from 'b' (should match 'a')
-        changed_edges.append(tuple(b_v["body_pair"]))
-
-        # Diameter/length: scalar compare with small tolerance
-        d_diam = abs(b_v["diam"] - a_v["diam"]) > 1e-6
-        d_len = abs(b_v["length"] - a_v["length"]) > 1e-6
-
-        # Position: vector diff with threshold
-        p_raw = b_v["pos"] - a_v["pos"]
-        p_dist = torch.linalg.norm(p_raw)
-        p_diff = torch.zeros_like(p_raw)
-        if p_dist > pos_threshold:
-            p_diff = p_raw
-
-        # Quaternion: use delta and angular threshold
-        q_delta = quaternion_delta(
-            a_v["quat"].unsqueeze(0), b_v["quat"].unsqueeze(0)
-        ).squeeze(0)
-        q_changed = ~are_quats_within_angle(
-            a_v["quat"].unsqueeze(0),
-            b_v["quat"].unsqueeze(0),
-            torch.tensor(deg_threshold, device=q_delta.device),
-        ).squeeze(0)
-        if q_changed.ndim > 0:
-            q_changed = bool(q_changed.item())
-
-        diam_changed.append(bool(d_diam))
-        length_changed.append(bool(d_len))
-        pos_diffs.append(p_diff)
-        quat_deltas.append(q_delta if q_changed else torch.zeros_like(q_delta))
-
-    if changed_edges:
-        changed_edge_tensor = torch.tensor(changed_edges, dtype=torch.long).t()
-        pos_diff_tensor = torch.stack(pos_diffs, dim=0)
-        quat_delta_tensor = torch.stack(quat_deltas, dim=0)
+    a_keys, a_edges = _edges_from_atb(a_atb)
+    b_keys, b_edges = _edges_from_atb(b_atb)
+    if a_keys.numel() == 0 and b_keys.numel() == 0:
+        added_edges = torch.empty((2, 0), dtype=torch.long)
+        removed_edges = torch.empty((2, 0), dtype=torch.long)
     else:
-        changed_edge_tensor = torch.empty((2, 0), dtype=torch.long)
-        pos_diff_tensor = torch.empty((0, 3))
-        quat_delta_tensor = torch.empty((0, 4))
+        add_mask = (
+            (~torch.isin(b_keys, a_keys))
+            if a_keys.numel()
+            else torch.ones_like(b_keys, dtype=torch.bool)
+        )
+        rem_mask = (
+            (~torch.isin(a_keys, b_keys))
+            if b_keys.numel()
+            else torch.ones_like(a_keys, dtype=torch.bool)
+        )
+        added_edges = (
+            b_edges[add_mask].t()
+            if add_mask.any()
+            else torch.empty((2, 0), dtype=torch.long)
+        )
+        removed_edges = (
+            a_edges[rem_mask].t()
+            if rem_mask.any()
+            else torch.empty((2, 0), dtype=torch.long)
+        )
 
-    changed = {
-        "changed_edges": changed_edge_tensor,
-        "diam_changed": torch.tensor(diam_changed, dtype=torch.bool),
-        "length_changed": torch.tensor(length_changed, dtype=torch.bool),
-        "pos_diff": pos_diff_tensor,
-        "quat_delta": quat_delta_tensor,
+    # Changed edges by matching unique hole pairs across states
+    def _unique_hole_keys(ath: torch.Tensor):
+        if ath.numel() == 0 or H == 0:
+            return (
+                torch.empty((0,), dtype=torch.long),
+                torch.empty((0, 2), dtype=torch.long),
+                torch.empty((0,), dtype=torch.long),
+            )
+        valid = (ath[:, 0] >= 0) & (ath[:, 1] >= 0)
+        hp = ath[valid].to(torch.long)
+        if hp.numel() == 0:
+            return (
+                torch.empty((0,), dtype=torch.long),
+                torch.empty((0, 2), dtype=torch.long),
+                torch.empty((0,), dtype=torch.long),
+            )
+        h0 = torch.minimum(hp[:, 0], hp[:, 1])
+        h1 = torch.maximum(hp[:, 0], hp[:, 1])
+        keys = h0 * H + h1
+        order = torch.argsort(keys)
+        keys_sorted = keys[order]
+        keys_u, counts = torch.unique(keys_sorted, return_counts=True)
+        csum = torch.cumsum(counts, dim=0)
+        first_sorted_idx = csum - counts
+        idx_u = order[first_sorted_idx]
+        # map back to original indices among valid rows
+        valid_idx = torch.nonzero(valid, as_tuple=False).squeeze(1)
+        return keys_u, torch.stack([h0, h1], dim=1)[idx_u], valid_idx[idx_u]
+
+    a_hkeys, _a_hpairs, a_sel = _unique_hole_keys(a_ath)
+    b_hkeys, _b_hpairs, b_sel = _unique_hole_keys(b_ath)
+
+    if a_hkeys.numel() == 0 or b_hkeys.numel() == 0:
+        changed_edges = torch.empty((2, 0), dtype=torch.long)
+        pos_diff = torch.empty((0, 3))
+        quat_delta = torch.empty((0, 4))
+        diam_changed = torch.empty((0,), dtype=torch.bool)
+        length_changed = torch.empty((0,), dtype=torch.bool)
+    else:
+        b_sorted, b_order = torch.sort(b_hkeys)
+        pos_in_b = torch.searchsorted(b_sorted, a_hkeys)
+        in_bounds = (pos_in_b >= 0) & (pos_in_b < b_sorted.numel())
+        match_mask = in_bounds & (
+            b_sorted[pos_in_b.clamp(min=0, max=max(b_sorted.numel() - 1, 0))] == a_hkeys
+        )
+        if not bool(match_mask.any()):
+            changed_edges = torch.empty((2, 0), dtype=torch.long)
+            pos_diff = torch.empty((0, 3))
+            quat_delta = torch.empty((0, 4))
+            diam_changed = torch.empty((0,), dtype=torch.bool)
+            length_changed = torch.empty((0,), dtype=torch.bool)
+        else:
+            a_idx = a_sel[match_mask]
+            b_idx = b_sel[b_order[pos_in_b[match_mask]]]
+            # body pairs from B for edge identity (undirected)
+            bp = b_atb[b_idx].to(torch.long)
+            u = torch.minimum(bp[:, 0], bp[:, 1])
+            v = torch.maximum(bp[:, 0], bp[:, 1])
+            changed_edges = torch.stack([u, v], dim=0)
+
+            # feature deltas with thresholds
+            pos_raw = b_pos[b_idx] - a_pos[a_idx]
+            pos_dist = torch.linalg.norm(pos_raw, dim=1)
+            pos_mask = pos_dist > (5.0 / 1000)
+            pos_diff = torch.zeros_like(pos_raw)
+            pos_diff[pos_mask] = pos_raw[pos_mask]
+
+            q_delta = quaternion_delta(a_quat[a_idx], b_quat[b_idx])
+            rot_mask = ~are_quats_within_angle(
+                a_quat[a_idx], b_quat[b_idx], torch.tensor(5.0, device=q_delta.device)
+            )
+            quat_delta = torch.zeros_like(q_delta)
+            quat_delta[rot_mask] = q_delta[rot_mask]
+
+            # physical_info singleton (not diffed): flags remain False
+            K = changed_edges.size(1)
+            diam_changed = torch.zeros((K,), dtype=torch.bool)
+            length_changed = torch.zeros((K,), dtype=torch.bool)
+
+    total = int(
+        added_edges.size(1)
+        + removed_edges.size(1)
+        + (0 if changed_edges.numel() == 0 else changed_edges.size(1))
+    )
+    out = {
+        "added": added_edges,
+        "removed": removed_edges,
+        "changed_edges": changed_edges,
+        "diam_changed": diam_changed,
+        "length_changed": length_changed,
+        "pos_diff": pos_diff,
+        "quat_delta": quat_delta,
     }
-
-    total_count = len(added) + len(removed) + changed_edge_tensor.size(1)
-    out = {"added": added, "removed": removed, **changed}
-    return out, total_count
+    return out, total
 
 
 def compound_pos_to_sim_pos(

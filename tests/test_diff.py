@@ -102,7 +102,9 @@ def test_physical_state_diff_fastener_attr_flags():
     hole_map = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=A_batched.device)
     physical_info.part_hole_batch = hole_map
     # Set hole diameters (meters) to match the fastener diameter used during diff (4mm)
-    physical_info.hole_diameter = torch.tensor([0.004, 0.004, 0.004, 0.004], dtype=torch.float32)
+    physical_info.hole_diameter = torch.tensor(
+        [0.004, 0.004, 0.004, 0.004], dtype=torch.float32
+    )
 
     # One fastener attached between hole 0 (body0) and hole 2 (body1)
     fa = torch.tensor([[0]], dtype=torch.long)
@@ -252,7 +254,9 @@ def test_physical_state_diff_fastener_added_removed_and_count_diffs():
     hole_map = torch.tensor([0, 0, 1, 1], dtype=torch.long, device=A_batched.device)
     physical_info.part_hole_batch = hole_map
     # Set hole diameters (meters) to match fastener 3mm used in this test
-    physical_info.hole_diameter = torch.tensor([0.003, 0.003, 0.003, 0.003], dtype=torch.float32)
+    physical_info.hole_diameter = torch.tensor(
+        [0.003, 0.003, 0.003, 0.003], dtype=torch.float32
+    )
 
     # Register the same fastener on A but unattached (-1, -1) so counts match while edges differ
     fa_empty = torch.tensor([[-1]], dtype=torch.long)
