@@ -451,7 +451,7 @@ def connect_terminal_to_net_or_create_new(
         "terminal_to_component_batch must be non-empty"
     )
     # assert shapes
-    assert len(es.batch_size) > 0 and es.batch_size[0] >= 1, (
+    assert es.ndim > 0 and es.batch_size[0] >= 1, (
         "Expected electronics state to be batched."
     )
     assert batch_ids.ndim == terminal_ids.ndim == 1, (

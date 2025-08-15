@@ -199,7 +199,9 @@ def check_fastener_possible_insertion(
     part_hole_quats: torch.Tensor,  # [B,num_holes,4]
     part_hole_batch: torch.Tensor,  # [num_holes] #NOTE: part_hole_batch is static amongst batch!
     connection_dist_threshold: float = 0.75,  # meters (!)
-    connection_angle_threshold: torch.Tensor = torch.full((1,), 30), # either [1] or [B]  # degrees
+    connection_angle_threshold: torch.Tensor = torch.full(
+        (1,), 30
+    ),  # either [1] or [B]  # degrees
     ignore_part_idx: torch.Tensor | None = None,  # [B]
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
@@ -270,7 +272,7 @@ def attach_fastener_to_screwdriver(
     screwdriver_entity: RigidEntity,
     tool_state_to_update: "ToolState",  # full tool state
     fastener_id: int,  # currently int, will be Tensor [B] soon.
-    env_ids: torch.Tensor, # [B]
+    env_ids: torch.Tensor,  # [B]
 ):
     # avoid circular import
     from repairs_components.logic.tools.screwdriver import Screwdriver
@@ -314,7 +316,7 @@ def detach_fastener_from_screwdriver(
     fastener_entity: RigidEntity,
     screwdriver_entity: RigidEntity,
     tool_state_to_update: "ToolState",  # full tool state
-    env_ids: torch.Tensor,# [B]
+    env_ids: torch.Tensor,  # [B]
 ):
     env = int(env_ids) if torch.is_tensor(env_ids) else env_ids
     rigid_solver = scene.sim.rigid_solver

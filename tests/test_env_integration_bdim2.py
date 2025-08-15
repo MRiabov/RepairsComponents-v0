@@ -120,8 +120,8 @@ def test_env_integration_bdim2_runs_two_steps(tmp_path: Path):
     # Initialize Genesis on CPU, headless
     gs.init(backend=gs.cpu, logging_level="warning", performance_mode=True)
 
-    env_setups, tasks, env_cfg, obs_cfg, io_cfg, reward_cfg, command_cfg = _minimal_configs(
-        tmp_path / "repairs-data-ci"
+    env_setups, tasks, env_cfg, obs_cfg, io_cfg, reward_cfg, command_cfg = (
+        _minimal_configs(tmp_path / "repairs-data-ci")
     )
 
     ml_batch_dim = 2
@@ -158,9 +158,11 @@ def test_env_integration_bdim2_runs_two_steps(tmp_path: Path):
     high = command_cfg["max_bounds"].to(dtype=torch.float32)
 
     def rand_action():
-        return torch.rand((ml_batch_dim, env_cfg["num_actions"]), dtype=torch.float32) * (
-            high - low
-        ) + low
+        return (
+            torch.rand((ml_batch_dim, env_cfg["num_actions"]), dtype=torch.float32)
+            * (high - low)
+            + low
+        )
 
     # Step 1
     (

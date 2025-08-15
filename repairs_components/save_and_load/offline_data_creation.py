@@ -84,22 +84,15 @@ def save_concurrent_scene_metadata(
     os.makedirs(scene_dir, exist_ok=True)
 
     # states and voxel grids are already saved.
-
-    # hole - persist tensors
-    torch.save(data.starting_hole_positions, scene_dir / "starting_hole_positions.pt")
-    torch.save(data.starting_hole_quats, scene_dir / "starting_hole_quats.pt")
-    torch.save(data.hole_depth, scene_dir / "hole_depth.pt")
-    torch.save(data.part_hole_batch, scene_dir / "part_hole_batch.pt")
-    torch.save(data.hole_is_through, scene_dir / "hole_is_through.pt")
-
+    # Holes and other static physical metadata now live in sim_info.physical_info
+    # and are saved once per scene via the single info_{scene_id}.pt file.
+    # Here we only persist lightweight scene metadata used by loaders/viewers.
     # save metadata
     metadata = {
         "scene_id": scene_id,
         "task_ids": data.task_ids.tolist(),
         # note: graphs paths can now be recovered by get_graph_save_paths.
         "mesh_file_names": mesh_file_name_mapping,
-        "electronics_indices": data.current_state.electronics_state[0].indices,
-        "mechanical_indices": data.current_state.physical_info.body_indices,
         "count_generated_envs": data.batch_dim,
         "env_setup_name": scene_setups[scene_id].__class__.__name__,
     }

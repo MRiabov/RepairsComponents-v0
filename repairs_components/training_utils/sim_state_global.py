@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Optional
 from pathlib import Path
 import torch
 from repairs_components.logic.electronics.electronics_state import (
@@ -144,16 +143,22 @@ class RepairsSimState(SimState):  # type: ignore
             init: Whether saving initial or desired state variant.
             env_idx: Index of the environment to save. If None, saves all environments.
         """
-        assert isinstance(self.batch_size, int) or len(self.batch_size) == 1, (
-            "Expected that batch dim is int or size of 1."
+        assert self.ndim == 1, "Expected that batch dim is int or size of 1."
+        # Normalize batch size to an int for comparisons and indexing
+        bs: int = (
+            int(self.batch_size)
+            if isinstance(self.batch_size, int)
+            else int(self.batch_size[0])
         )
-        assert self.batch_size > 1, "Expected that batch dim is greater than 1."
+        assert bs >= 1, "Expected that batch dim is at least 1."
         # Ensure target directory exists
-        state_path, _info_path = get_state_and_info_save_paths(path, scene_id, init=init)
+        state_path, _info_path = get_state_and_info_save_paths(
+            path, scene_id, init=init
+        )
         state_path.parent.mkdir(parents=True, exist_ok=True)
 
         if env_idx is None:  # save all envs
-            env_idx = torch.arange(self.batch_size)
+            env_idx = torch.arange(bs)
 
         torch.save(self[env_idx], state_path)
         # sim_info is saved separately once per scene.
@@ -179,7 +184,7 @@ def get_state_and_info_save_paths(base_dir: Path, scene_id: int, init: bool):
 def merge_global_states(state_list: list[RepairsSimState]):
     assert len(state_list) > 0, "State list can not be zero."
     # FIXME: this should be simple torch.cat now.
-    assert all(len(state.batch_size) == 1 for state in state_list)
+    assert all(state.ndim == 1 for state in state_list)
     return torch.cat(state_list)
 
 

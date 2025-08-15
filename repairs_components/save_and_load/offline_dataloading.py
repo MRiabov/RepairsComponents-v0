@@ -9,7 +9,6 @@ import torch
 
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
-    merge_concurrent_scene_configs,
     split_scene_config,
 )
 from repairs_components.training_utils.env_setup import EnvSetup
@@ -18,6 +17,11 @@ from repairs_components.training_utils.sim_state_global import (
     get_state_and_info_save_paths,
     RepairsSimState,
     RepairsSimInfo,
+)
+from repairs_components.geometry.connectors.connectors import Connector
+from repairs_components.geometry.fasteners import (
+    get_fastener_save_path_from_name,
+    get_fastener_singleton_name,
 )
 
 # During the loading of the data we load:
@@ -145,7 +149,12 @@ class OfflineDataloader:
         init_sim_state = init_state
         des_sim_state = des_state
 
-        batch_dim = init_sim_state.batch_size
+        # Normalize batch_dim to plain int for downstream constructors (e.g., RewardHistory, torch.arange)
+        batch_dim = (
+            int(init_sim_state.batch_size)
+            if isinstance(init_sim_state.batch_size, int)
+            else int(init_sim_state.batch_size[0])
+        )
 
         sim_state = ConcurrentSceneData(
             scene=None,
@@ -223,6 +232,24 @@ class OfflineDataloader:
         des_state = self.loaded_des_states[scene_id]
         sim_info = self.loaded_sim_info[scene_id]
 
+        # # Backward compatibility: ensure mesh_file_names live under physical_info
+        # # 1) Migrate from old RepairsSimInfo.mesh_file_names if present
+        # if hasattr(sim_info, "mesh_file_names") and sim_info.mesh_file_names:
+        #     sim_info.physical_info.mesh_file_names = dict(sim_info.mesh_file_names)
+        #     # do not delete attribute to keep unpickling stability
+
+        # # 2) If still empty, reconstruct from disk
+        # if not sim_info.physical_info.mesh_file_names:
+        #     mapping_list = get_scene_mesh_file_names([scene_id], self.data_dir)
+        #     sim_info.physical_info.mesh_file_names = (
+        #         mapping_list[0] if mapping_list else {}
+        #     )
+
+        assert (
+            sim_info.physical_info.mesh_file_names is not None
+            and len(sim_info.physical_info.mesh_file_names) > 0
+        ), f"Mesh file names not found for scene {scene_id}"
+
         if env_idx is None:
             return init_state, des_state, sim_info
         else:
@@ -249,11 +276,10 @@ def check_if_data_exists(
             return False
         # States and info
         state_dir = data_dir / "state"
-        graph_files = [
+        state_and_info_files = [
             state_dir / f"state_{scene_id}_init.pt",
-            state_dir / f"info_{scene_id}_init.pt",
             state_dir / f"state_{scene_id}_des.pt",
-            state_dir / f"info_{scene_id}_des.pt",
+            state_dir / f"info_{scene_id}.pt",
         ]
         # Voxels
         voxels_dir = data_dir / "voxels"
@@ -261,18 +287,9 @@ def check_if_data_exists(
             voxels_dir / f"vox_init_{scene_id}.pt",
             voxels_dir / f"vox_des_{scene_id}.pt",
         ]
-        # holes
-        holes_dir = data_dir / f"scene_{scene_id}"
-        holes_files = [
-            holes_dir / "starting_hole_positions.pt",
-            holes_dir / "starting_hole_quats.pt",
-            holes_dir / "hole_depth.pt",
-            holes_dir / "part_hole_batch.pt",
-            holes_dir / "hole_is_through.pt",
-        ]
         # Check all
         if not all(
-            file_path.exists() for file_path in graph_files + voxel_files + holes_files
+            file_path.exists() for file_path in state_and_info_files + voxel_files
         ):
             return False
 
@@ -303,23 +320,68 @@ def get_scene_mesh_file_names(
 ) -> list[dict[str, str]]:
     """Get the file names of the meshes to their scene names for the given scene ids."""
     data_dir = Path(data_dir)
-    mesh_file_names = []
+    mesh_file_names: list[dict[str, str]] = []
 
-    # note: all these jsons are probably (?) better be done as a single file.
     for scene_id in scene_ids:
-        metadata_path = data_dir / f"scene_{scene_id}" / "metadata.json"
-        with open(metadata_path, "r") as f:
-            metadata = json.load(f)
+        # Load sim_info saved once per scene
+        # 'init' flag does not affect info path (info is shared), but function requires it
+        # Pass base data_dir directly; get_state_and_info_save_paths appends 'state' internally
+        _, info_path = get_state_and_info_save_paths(data_dir, scene_id, init=True)
+        sim_info: RepairsSimInfo = torch.load(
+            info_path, map_location="cpu", weights_only=False
+        )
+        physical_info = sim_info.physical_info
 
-        # append full path if append_path is True
+        mapping: dict[str, Path] = {}
+
+        # Bodies and connectors
+        for body_name in physical_info.body_indices.keys():
+            assert "@" in body_name, "Label must contain '@'"
+            part_name, part_type = body_name.split("@", 1)
+            part_type = part_type.lower()
+
+            if part_type in ("solid", "fixed_solid"):
+                p = data_dir / f"scene_{scene_id}" / f"{body_name}.glb"
+            elif part_type == "connector":
+                p = Connector.save_path_from_name(data_dir, body_name, suffix="glb")
+            elif part_type in ("button", "led", "switch"):
+                # electronics are exported as MJCF
+                p = data_dir / f"scene_{scene_id}" / f"{body_name}.xml"
+            elif part_type == "fastener":
+                # fasteners are singleton assets and handled separately below
+                continue
+            else:
+                raise NotImplementedError(
+                    f"Not implemented for part type in name: {body_name}"
+                )
+
+            mapping[body_name] = p
+
+        # Fastener singleton assets (dimensions are static per scene)
+        diam = physical_info.fasteners_diam
+        length = physical_info.fasteners_length
+        if isinstance(diam, torch.Tensor) and diam.numel() > 0:
+            # fastener metadata tensors are singleton 1D
+            assert diam.ndim == 1 and length.ndim == 1
+            assert diam.shape == length.shape
+            for i in range(diam.shape[0]):
+                name = get_fastener_singleton_name(
+                    float(diam[i].item() * 1000),
+                    float(length[i].item() * 1000),
+                )
+                mapping[name] = get_fastener_save_path_from_name(name, data_dir)
+
+        # Append as absolute or relative paths
         if append_path:
-            mesh_file_names.append(
-                {
-                    k: data_dir / f"scene_{scene_id}" / v
-                    for k, v in metadata["mesh_file_names"].items()
-                }
-            )  # return path
+            mesh_file_names.append({k: str(v) for k, v in mapping.items()})
         else:
-            mesh_file_names.append(metadata["mesh_file_names"])
+
+            def _rel(p: Path) -> str:
+                try:
+                    return str(p.relative_to(data_dir))
+                except Exception:
+                    return str(p)
+
+            mesh_file_names.append({k: _rel(v) for k, v in mapping.items()})
 
     return mesh_file_names

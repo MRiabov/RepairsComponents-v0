@@ -143,15 +143,12 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
     # Cat diffs
     physical_diffs = []
     electronics_diffs = []
-    fluid_diffs = []
     for data in scene_configs:
         physical_diffs.extend(data.initial_diffs["physical_diff"])
         electronics_diffs.extend(data.initial_diffs["electronics_diff"])
-        fluid_diffs.extend(data.initial_diffs["fluid_diff"])
     initial_diffs = {
         "physical_diff": physical_diffs,
         "electronics_diff": electronics_diffs,
-        "fluid_diff": fluid_diffs,
     }
 
     # Extend tensors and RepairsSimState with items from other scene_configs
@@ -179,7 +176,7 @@ def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
         reward_history=reward_history,
         step_count=torch.zeros(new_batch_dim, dtype=torch.int),
         task_ids=torch.cat([data.task_ids for data in scene_configs], dim=0),
-        sim_info=sim_info,
+        sim_info=scene_configs[0].sim_info,
     )
     return new_scene_config
 
@@ -292,7 +289,8 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         curr.has_electronics = orig_curr.has_electronics
         curr.has_fluid = orig_curr.has_fluid
         # sanity check: ensure single-item state
-        assert curr.batch_size == 1, f"Expected batch_dim=1, got {curr.batch_size}"
+        curr_bs: int = int(curr.batch_size) if isinstance(curr.batch_size, int) else int(curr.batch_size[0])
+        assert curr_bs == 1, f"Expected batch_dim=1, got {curr.batch_size}"
 
         orig_des = scene_config.desired_state
         des = RepairsSimState(device=scene_config.desired_state.device).unsqueeze(0)
@@ -310,7 +308,8 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         init.has_electronics = orig_init.has_electronics
         init.has_fluid = orig_init.has_fluid
         # sanity check: ensure single-item state
-        assert des.batch_size == 1, f"Expected batch_dim=1, got {des.batch_size}"
+        des_bs: int = int(des.batch_size) if isinstance(des.batch_size, int) else int(des.batch_size[0])
+        assert des_bs == 1, f"Expected batch_dim=1, got {des.batch_size}"
 
         # slice voxel and diffs
         vox_init_i = scene_config.vox_init[i].unsqueeze(0)

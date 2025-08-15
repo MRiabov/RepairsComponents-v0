@@ -36,12 +36,10 @@ from repairs_components.save_and_load.multienv_dataloader import (
 from repairs_components.save_and_load.offline_data_creation import create_data
 from repairs_components.save_and_load.offline_dataloading import (
     check_if_data_exists,
-    get_scene_mesh_file_names,
 )
 
 from repairs_components.training_utils.progressive_reward_calc import (
     RewardHistory,
-    calculate_done,
 )
 from repairs_components.save_and_load.online_save import optional_save
 from repairs_sim_step import step_repairs
@@ -224,9 +222,9 @@ class RepairsEnv(gym.Env):
         )  # get a batch of configs size prefetch_memory_size
 
         # scene init setup # note: technically this should be the Dataloader worker init fn.
-        mesh_file_names = get_scene_mesh_file_names(
-            self.env_setup_ids.tolist(), base_dir, append_path=True
-        )
+        # mesh_file_names = get_scene_mesh_file_names(
+        #     self.env_setup_ids.tolist(), base_dir, append_path=True
+        # )
 
         self.concurrent_scenes_data = []
 
@@ -250,7 +248,7 @@ class RepairsEnv(gym.Env):
             scene, gs_entities = initialize_and_build_scene(
                 scene,
                 partial_env_configs[scene_id].desired_state,
-                mesh_file_names[scene_id],
+                partial_env_configs[scene_id].sim_info,
                 self.per_scene_batch_dim,
                 random_textures=use_random_textures,
                 base_dir=base_dir,

@@ -1,0 +1,197 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.1, pluggy-1.6.0 -- /home/maksym/Work/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/maksym/Work/RepairsComponents-v0
+configfile: pyproject.toml
+plugins: dash-3.2.0
+collecting ... collected 1 item
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps FAILED [100%]
+
+=================================== FAILURES ===================================
+__________________ test_env_integration_bdim2_runs_two_steps ___________________
+
+tmp_path = PosixPath('/tmp/pytest-of-maksym/pytest-17/test_env_integration_bdim2_run0')
+
+    @pytest.mark.timeout(180)
+    def test_env_integration_bdim2_runs_two_steps(tmp_path: Path):
+        """Smoke test: construct env with batch dim 2 and run two steps successfully."""
+        # Initialize Genesis on CPU, headless
+        gs.init(backend=gs.cpu, logging_level="warning", performance_mode=True)
+    
+        env_setups, tasks, env_cfg, obs_cfg, io_cfg, reward_cfg, command_cfg = (
+            _minimal_configs(tmp_path / "repairs-data-ci")
+        )
+    
+        ml_batch_dim = 2
+>       env = RepairsEnv(
+            env_setups=env_setups,
+            tasks=tasks,
+            ml_batch_dim=ml_batch_dim,
+            env_cfg=env_cfg,
+            obs_cfg=obs_cfg,
+            io_cfg=io_cfg,
+            reward_cfg=reward_cfg,
+            command_cfg=command_cfg,
+            num_scenes_per_task=1,
+        )
+
+tests/test_env_integration_bdim2.py:128: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+repairs_components/training_utils/gym_env.py:250: in __init__
+    scene, gs_entities = initialize_and_build_scene(
+repairs_components/processing/scene_creation_funnel.py:261: in initialize_and_build_scene
+    first_desired_scene, initial_gs_entities = translate_state_to_genesis_scene(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+scene = [38;5;11m──────────────── [1m[3m<gs.Scene>[0m [38;5;11m────────────────
+             [38;5;159m't'[0m[38;5;247...0m[38;5;121m: 2[0m
+    [38;5;159m'visualizer'[0m[38;5;247m:[0m [38;5;121m[3m<gs.Visualizer>[0m[38;5;121m[0m
+
+sim_state = RepairsSimState(
+    electronics_state=ElectronicsState(
+        net_ids=Tensor(shape=torch.Size([2, 0]), device=cpu, ...2]),
+        device=cpu,
+        is_shared=False),
+    batch_size=torch.Size([2]),
+    device=cpu,
+    is_shared=False)
+sim_info = {'base_box@fixed_solid': '/tmp/pytest-of-maksym/pytest-17/test_env_integration_bdim2_run0/repairs-data-ci/scene_0/base...-maksym/pytest-17/test_env_integration_bdim2_run0/repairs-data-ci/shared/fasteners/fastener_d5.00_l15.00@fastener.xml'}
+mesh_file_names = False, random_textures = False
+
+    def translate_state_to_genesis_scene(
+        scene: gs.Scene,
+        # b123d_assembly: Compound,
+        sim_state: RepairsSimState,
+        sim_info: RepairsSimInfo,
+        mesh_file_names: dict[str, str],
+        random_textures: bool = False,
+    ):
+        "Translate the first state to genesis scene (unbatched - this is only to populate scene.)"
+        "Essentially, populate the scene with meshes."
+        # assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
+>       assert len(sim_info.physical_info.body_indices) > 0, "Translated assembly is empty."
+                   ^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'dict' object has no attribute 'physical_info'
+
+repairs_components/processing/translation.py:43: AttributeError
+----------------------------- Captured stdout call -----------------------------
+Tooling stand mesh not found. Generating...
+Screwdriver mesh not found. Generating...
+Data was not found to exist but force_recreate_data was not called. Still, recreating...
+Loaded vox init dict for scene_id 0 with shape: torch.Size([1, 256, 256, 256])
+Offline dataloader loaded in 0.02 seconds.
+Warning: experiencing environment count starvation. Insufficient_gen: 2 of 2
+--------------------------- Captured stdout teardown ---------------------------
+[38;5;226m[Genesis] [10:52:43] [WARNING] Scene.show_FPS is deprecated. Please use profiling_options.show_FPS[0m
+=============================== warnings summary ===============================
+../.venv/lib/python3.12/site-packages/taichi/_lib/utils.py:70
+  /home/maksym/Work/.venv/lib/python3.12/site-packages/taichi/_lib/utils.py:70: DeprecationWarning: 'locale.getdefaultlocale' is deprecated and slated for removal in Python 3.15. Use setlocale(), getencoding() and getlocale() instead.
+    return path.encode(locale.getdefaultlocale()[1])
+
+../.venv/lib/python3.12/site-packages/pydantic/_internal/_config.py:323
+  /home/maksym/Work/.venv/lib/python3.12/site-packages/pydantic/_internal/_config.py:323: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+tests/test_env_integration_bdim2.py:117
+  /home/maksym/Work/RepairsComponents-v0/tests/test_env_integration_bdim2.py:117: PytestUnknownMarkWarning: Unknown pytest.mark.timeout - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.timeout(180)
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+  /home/maksym/Work/.venv/lib/python3.12/site-packages/tensordict/tensorclass.py:1803: UserWarning: The method <bound method TensorDictBase.__deepcopy__ of TensorDict(
+      fields={
+          electronics_state: ElectronicsState(
+              net_ids=Tensor(shape=torch.Size([1, 0]), device=cpu, dtype=torch.int64, is_shared=False),
+              batch_size=torch.Size([1]),
+              device=cpu,
+              is_shared=False),
+          has_electronics: Tensor(shape=torch.Size([1]), device=cpu, dtype=torch.bool, is_shared=False),
+          has_fluid: Tensor(shape=torch.Size([1]), device=cpu, dtype=torch.bool, is_shared=False),
+          physical_state: PhysicalState(
+              count_fasteners_held=Tensor(shape=torch.Size([1, 1]), device=cpu, dtype=torch.int8, is_shared=False),
+              fasteners_attached_to_body=Tensor(shape=torch.Size([1, 10, 2]), device=cpu, dtype=torch.int64, is_shared=False),
+              fasteners_attached_to_hole=Tensor(shape=torch.Size([1, 10, 2]), device=cpu, dtype=torch.int32, is_shared=False),
+              fasteners_pos=Tensor(shape=torch.Size([1, 10, 3]), device=cpu, dtype=torch.float32, is_shared=False),
+              fasteners_quat=Tensor(shape=torch.Size([1, 10, 4]), device=cpu, dtype=torch.float32, is_shared=False),
+              female_terminal_positions=Tensor(shape=torch.Size([1, 0, 3]), device=cpu, dtype=torch.float32, is_shared=False),
+              hole_positions=Tensor(shape=torch.Size([1, 10, 3]), device=cpu, dtype=torch.float32, is_shared=False),
+              hole_quats=Tensor(shape=torch.Size([1, 10, 4]), device=cpu, dtype=torch.float32, is_shared=False),
+              male_terminal_positions=Tensor(shape=torch.Size([1, 0, 3]), device=cpu, dtype=torch.float32, is_shared=False),
+              position=Tensor(shape=torch.Size([1, 1, 3]), device=cpu, dtype=torch.float32, is_shared=False),
+              quat=Tensor(shape=torch.Size([1, 1, 4]), device=cpu, dtype=torch.float32, is_shared=False),
+              batch_size=torch.Size([1]),
+              device=cpu,
+              is_shared=False),
+          tool_state: ToolState(
+              gripper_tc=Gripper(
+              ,
+                  batch_size=torch.Size([1]),
+                  device=cpu,
+                  is_shared=False),
+              screwdriver_tc=Screwdriver(
+                  picked_up_fastener_id=Tensor(shape=torch.Size([1]), device=cpu, dtype=torch.int64, is_shared=False),
+                  picked_up_fastener_quat=Tensor(shape=torch.Size([1, 4]), device=cpu, dtype=torch.float32, is_shared=False),
+                  picked_up_fastener_tip_position=Tensor(shape=torch.Size([1, 3]), device=cpu, dtype=torch.float32, is_shared=False),
+                  batch_size=torch.Size([1]),
+                  device=cpu,
+                  is_shared=False),
+              tool_ids=Tensor(shape=torch.Size([1]), device=cpu, dtype=torch.int64, is_shared=False),
+              batch_size=torch.Size([1]),
+              device=cpu,
+              is_shared=False)},
+      batch_size=torch.Size([1]),
+      device=cpu,
+      is_shared=False)> wasn't explicitly implemented for tensorclass. This fallback will be deprecated in future releases because it is inefficient and non-compilable. Please raise an issue in tensordict repo to support this method!
+    warnings.warn(
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+  /home/maksym/Work/RepairsComponents-v0/repairs_components/save_and_load/offline_dataloading.py:78: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+    self.initial_diff_dict[scene_id] = torch.load(
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+  /home/maksym/Work/RepairsComponents-v0/repairs_components/save_and_load/offline_dataloading.py:81: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+    self.initial_diff_count_dict[scene_id] = torch.load(
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+  /home/maksym/Work/RepairsComponents-v0/repairs_components/save_and_load/offline_dataloading.py:138: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+    self.vox_init_dict[scene_id] = torch.load(vox_init_path)
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+  /home/maksym/Work/RepairsComponents-v0/repairs_components/save_and_load/offline_dataloading.py:139: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+    self.vox_des_dict[scene_id] = torch.load(vox_des_path)
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+  /home/maksym/Work/RepairsComponents-v0/repairs_components/save_and_load/offline_dataloading.py:213: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+    init_state = torch.load(state_init_path)
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+  /home/maksym/Work/RepairsComponents-v0/repairs_components/save_and_load/offline_dataloading.py:214: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+    des_state = torch.load(state_des_path)
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+  /home/maksym/Work/RepairsComponents-v0/repairs_components/save_and_load/offline_dataloading.py:215: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+    sim_info = torch.load(info_path)
+
+tests/test_env_integration_bdim2.py: 14 warnings
+  /home/maksym/Work/.venv/lib/python3.12/site-packages/genesis/options/options.py:24: PydanticDeprecatedSince211: Accessing the 'model_fields' attribute on the instance is deprecated. Instead, you should access this attribute from the model class. Deprecated in Pydantic V2.11 to be removed in V3.0.
+    allowed_params = self.model_fields.keys()
+
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps
+  /home/maksym/Work/.venv/lib/python3.12/site-packages/genesis/options/options.py:37: PydanticDeprecatedSince211: Accessing the 'model_fields' attribute on the instance is deprecated. Instead, you should access this attribute from the model class. Deprecated in Pydantic V2.11 to be removed in V3.0.
+    for field in options.model_fields:
+
+tests/test_env_integration_bdim2.py: 48 warnings
+  /home/maksym/Work/.venv/lib/python3.12/site-packages/genesis/options/options.py:38: PydanticDeprecatedSince211: Accessing the 'model_fields' attribute on the instance is deprecated. Instead, you should access this attribute from the model class. Deprecated in Pydantic V2.11 to be removed in V3.0.
+    if field in self.model_fields:
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_env_integration_bdim2.py::test_env_integration_bdim2_runs_two_steps - AttributeError: 'dict' object has no attribute 'physical_info'
+======================= 1 failed, 81 warnings in 21.63s ========================

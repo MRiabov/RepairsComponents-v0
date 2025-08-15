@@ -45,6 +45,10 @@ class PhysicalStateInfo:
     permanently_constrained_parts: list[list[str]] = field(default_factory=list)
     """List of lists of permanently constrained parts (linked_groups from EnvSetup)"""
 
+    # --- assets ---
+    mesh_file_names: dict[str, str] = field(default_factory=dict)
+    """Per-scene mapping from body/fastener names to asset file paths (mesh/MJCF)."""
+
     # --- terminals --- # maybe this should be connectors.
     terminal_indices_from_name: dict[str, int] = field(default_factory=dict)
     """Terminal indices per connector name."""
@@ -1256,7 +1260,7 @@ def register_fasteners_batch(
     """
     B = physical_states.batch_size[0]
     # Determine batch size from physical_states
-    assert B is not None and len(physical_states.batch_size) == 1
+    assert B is not None and physical_states.ndim == 1
     num_fasteners = len(fastener_compound_names)
     num_bodies = len(physical_info.body_indices)
     assert fastener_pos.shape == (B, num_fasteners, 3), (
@@ -1276,21 +1280,38 @@ def register_fasteners_batch(
         | ((fastener_init_hole_a == -1) & (fastener_init_hole_b == -1))
     ).all(), "Fastener init holes must be different or empty (-1)."
 
-    device = physical_states.device if hasattr(physical_states, "device") else "cuda"
+    device = (
+        physical_states.device
+        if hasattr(physical_states, "device")
+        else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    )
+
+    # If there are no fasteners, set empty tensors/scalars and return early.
+    if num_fasteners == 0: # unnecessary? just code bloat.
+        physical_info.fasteners_diam = torch.empty((0,), dtype=torch.float32, device=device)
+        physical_info.fasteners_length = torch.empty((0,), dtype=torch.float32, device=device)
+        physical_states.fasteners_pos = torch.empty((B, 0, 3), dtype=torch.float32, device=device)
+        physical_states.fasteners_quat = torch.empty((B, 0, 4), dtype=torch.float32, device=device)
+        physical_states.fasteners_attached_to_hole = torch.empty((B, 0, 2), dtype=torch.int64, device=device)
+        physical_states.fasteners_attached_to_body = torch.empty((B, 0, 2), dtype=torch.int64, device=device)
+        physical_states.count_fasteners_held = torch.zeros((B, num_bodies), dtype=torch.int8, device=device)
+        return physical_states, physical_info
+
+    # PhysicalStateInfo is a singleton store; fastener scalars must be 1D [N]
     physical_info.fasteners_diam = torch.full(
-        (B, num_fasteners), fill_value=-1.0, dtype=torch.float32, device=device
+        (num_fasteners,), fill_value=-1.0, dtype=torch.float32, device=device
     )
     physical_info.fasteners_length = torch.full(
-        (B, num_fasteners), fill_value=-1.0, dtype=torch.float32, device=device
+        (num_fasteners,), fill_value=-1.0, dtype=torch.float32, device=device
     )  # fill with -1 just in case
     for i, name in enumerate(fastener_compound_names):
         diam, length = get_fastener_params_from_name(name)
         # get_fastener_params_from_name returns values in millimeters.
         # Convert to meters for consistency with PhysicalState units.
-        physical_info.fasteners_diam[:, i] = torch.tensor(
+        physical_info.fasteners_diam[i] = torch.tensor(
             diam / 1000.0, dtype=torch.float32, device=device
         )
-        physical_info.fasteners_length[:, i] = torch.tensor(
+        physical_info.fasteners_length[i] = torch.tensor(
             length / 1000.0, dtype=torch.float32, device=device
         )
 

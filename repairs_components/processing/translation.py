@@ -34,13 +34,14 @@ def translate_state_to_genesis_scene(
     # b123d_assembly: Compound,
     sim_state: RepairsSimState,
     sim_info: RepairsSimInfo,
-    mesh_file_names: dict[str, str],
     random_textures: bool = False,
 ):
     "Translate the first state to genesis scene (unbatched - this is only to populate scene.)"
     "Essentially, populate the scene with meshes."
     # assert len(b123d_assembly.children) > 0, "Translated assembly has no children"
     assert len(sim_info.physical_info.body_indices) > 0, "Translated assembly is empty."
+    # Mesh file names are stored as a singleton under sim_info.physical_info
+    mesh_file_names = sim_info.physical_info.mesh_file_names
     assert len(mesh_file_names) > 0, "No meshes provided."
     val_mesh_file_names = {  # val - validation
         k: v for k, v in mesh_file_names.items() if not k.endswith("@fastener")
@@ -109,8 +110,8 @@ def translate_state_to_genesis_scene(
     for fastener_id, attached_to in enumerate(
         sim_state.physical_state.fasteners_attached_to_body[0]
     ):
-        fastener_d = physical_info.fasteners_diam[0, fastener_id]
-        fastener_h = physical_info.fasteners_length[0, fastener_id]
+        fastener_d = physical_info.fasteners_diam[fastener_id]
+        fastener_h = physical_info.fasteners_length[fastener_id]
 
         fastener_name = get_fastener_singleton_name(
             float(fastener_d * 1000), float(fastener_h * 1000)
@@ -234,7 +235,12 @@ def translate_genesis_to_python(  # translate to sim state, really.
         rotations = rotations[:, :fill_idx]
         terminal_rel = terminal_rel[:fill_idx]
         sim_state.physical_state = update_bodies_batch(
-            sim_state.physical_state, body_names, positions, rotations, terminal_rel
+            sim_state.physical_state,
+            sim_info.physical_info,
+            body_names,
+            positions,
+            rotations,
+            terminal_rel,
         )
 
     # handle picked up fastener (tip)
@@ -586,7 +592,8 @@ def create_constraints_based_on_graph(
     rigid_solver = scene.sim.rigid_solver
     all_base_links = {}
     if env_idx is None:
-        env_idx = torch.arange(env_state.batch_size)
+        bs = int(env_state.batch_size) if isinstance(env_state.batch_size, int) else int(env_state.batch_size[0])
+        env_idx = torch.arange(bs)
     # TODO: assert that number of steps is 0 - it should be only in the start. No API for this in genesis atm.
 
     # all_base_links= np.full(

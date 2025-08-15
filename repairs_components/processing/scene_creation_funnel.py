@@ -160,6 +160,8 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 scene_id=scene_idx,
                 solid_export_format="glb",
             )
+            # store mesh mapping on sim_info.physical_info so it will be saved with info_{scene}.pt
+            sim_info.physical_info.mesh_file_names = mesh_file_names
             mesh_file_names_per_scene.append(mesh_file_names)
 
             torch.save(  # only save after all are done
@@ -250,7 +252,6 @@ def initialize_and_build_scene(
     scene: gs.Scene,
     desired_sim_state: RepairsSimState,
     sim_info: RepairsSimInfo,  # I'll just assume it's necessary
-    mesh_file_names: dict[str, str],
     batch_dim: int,
     base_dir: Path,
     scene_id: int = 0,  # logging only
@@ -259,7 +260,7 @@ def initialize_and_build_scene(
     # for starting scene, move it to an appropriate position #no, not here...
     # create a FIRST genesis scene for starting state from desired state; it is to be discarded, however.
     first_desired_scene, initial_gs_entities = translate_state_to_genesis_scene(
-        scene, desired_sim_state, mesh_file_names, random_textures
+        scene, desired_sim_state, sim_info, random_textures=random_textures
     )
 
     # initiate cameras and others in genesis scene:

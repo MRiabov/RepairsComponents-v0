@@ -283,7 +283,8 @@ class Connector(ElectricalComponent):
         )
 
     def get_path(self, base_dir: Path, male: bool) -> Path:
-        return self.save_path_from_name(base_dir, self.name(0, male))
+        # Build path from standardized connector name
+        return self.save_path_from_name(base_dir, self.get_name(self.in_sim_id, male))
 
 
 def check_connections(
