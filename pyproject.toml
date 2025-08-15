@@ -5,6 +5,11 @@ build-backend = "setuptools.build_meta"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+# note: filterwarnigns to not spam LLMs with warnings.
+filterwarnings = [
+    "ignore::Warning",
+]
+addopts = "-p no:warnings"
 
 [tool.coverage.run]
 source = ["src"]
