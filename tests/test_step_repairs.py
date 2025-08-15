@@ -26,6 +26,8 @@ from genesis.engine.entities.rigid_entity import RigidLink
 import numpy as np
 from tests.global_test_config import init_gs, test_device  # noqa: F401
 
+from repairs_components.processing.genesis_utils import is_weld_constraint_present
+
 
 @pytest.fixture
 def fastener():
@@ -300,12 +302,13 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     scene, gs_entities, repairs_sim_state, desired_sim_state, sim_info = (
         fresh_scene_with_fastener_screwdriver_and_two_parts
     )
+    scene: gs.Scene
 
     fastener_entity = gs_entities["0@fastener"]
     physical_state = repairs_sim_state.physical_state
     graph_device = physical_state.fasteners_attached_to_body.device
 
-    screwdriver = Screwdriver()
+    screwdriver = Screwdriver().unsqueeze(0)
     # mark as moved to closest hole.
     screwdriver.picked_up_fastener_id = torch.tensor([0], dtype=torch.long)
     screwdriver.picked_up_fastener_tip_position[0] = physical_state.hole_positions[0, 0]
@@ -319,6 +322,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     repairs_sim_state = step_screw_in_or_out(
         scene, gs_entities, repairs_sim_state, sim_info, actions
     )
+    # Weld constraint should exist between fastener and first part after screw-in
+    assert is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_1@solid"]
+    ), "Expected a weld constraint between fastener and first part after screw-in"
     assert (
         physical_state.fasteners_attached_to_body
         == torch.tensor(
@@ -346,6 +353,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     repairs_sim_state = step_screw_in_or_out(
         scene, gs_entities, repairs_sim_state, sim_info, actions
     )
+    # Weld constraint should be removed after unscrewing
+    assert not is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_1@solid"]
+    ), "Expected no weld constraint between fastener and first part after unscrewing"
     assert (
         physical_state.fasteners_attached_to_body
         == torch.tensor([[-1, -1]], device=graph_device)
@@ -370,7 +381,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     fastener_entity = gs_entities["0@fastener"]
     physical_state = repairs_sim_state.physical_state
     graph_device = physical_state.fasteners_attached_to_body.device
-    screwdriver = Screwdriver()
+    screwdriver = Screwdriver().unsqueeze(0)
     screwdriver.picked_up_fastener_tip_position[0] = physical_state.hole_positions[0, 0]
     screwdriver.picked_up_fastener_quat[0] = physical_state.hole_quats[0, 0]
     screwdriver.picked_up_fastener_id = torch.tensor([0], dtype=torch.long)
@@ -389,6 +400,10 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
         sim_info,
         actions,
     )
+    # Weld should exist between fastener and first part after first screw-in
+    assert is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_1@solid"]
+    ), "Expected a weld constraint between fastener and first part after first screw-in"
     assert (
         physical_state.fasteners_attached_to_body
         == torch.tensor([[[connected_part_1_id, -1]]], device=graph_device)
@@ -415,6 +430,14 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     repairs_sim_state = step_screw_in_or_out(
         scene, gs_entities, repairs_sim_state, sim_info, actions
     )
+    # Welds should exist between fastener and both parts after second screw-in
+    assert is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_1@solid"]
+    ) and is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_2@solid"]
+    ), (
+        "Expected weld constraints between fastener and both parts after attaching second part"
+    )
     assert (
         repairs_sim_state.physical_state.fasteners_attached_to_body
         == torch.tensor(
@@ -438,6 +461,12 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     repairs_sim_state = step_screw_in_or_out(
         scene, gs_entities, repairs_sim_state, sim_info, actions
     )
+    # Welds should be removed from both parts after unscrewing
+    assert not is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_1@solid"]
+    ) and not is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_2@solid"]
+    ), "Expected no weld constraints between fastener and parts after unscrewing"
     assert (
         repairs_sim_state.physical_state.fasteners_attached_to_body
         == torch.tensor([[-1, -1]], device=graph_device)
@@ -475,6 +504,10 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
     repairs_sim_state = step_screw_in_or_out(
         scene, gs_entities, repairs_sim_state, sim_info, actions
     )
+    # After first screw-in, weld should exist only with first part
+    assert is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_1@solid"]
+    ), "Expected a weld constraint between fastener and first part after first screw-in"
     assert (
         repairs_sim_state.physical_state.fasteners_attached_to_body
         == torch.tensor([[connected_part_1_id, -1]], device=graph_device)
@@ -503,11 +536,11 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
         original_quat.unsqueeze(0), large_angle_rotation.unsqueeze(0)
     ).squeeze(0)
 
-    repairs_sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position = (
+    repairs_sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[0] = (
         physical_state.hole_positions[0, 2]
     )  # move it to closest marked hole on second part
-    repairs_sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat = (
-        large_angle_quat
+    repairs_sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[0] = (
+        large_angle_quat  # rotate to be far from alignment
     )
 
     # Store the state before attempting to screw in
@@ -519,6 +552,14 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
     actions[:, 8] = 0.99  # attempt to screw in to attach second part
     repairs_sim_state = step_screw_in_or_out(
         scene, gs_entities, repairs_sim_state, sim_info, actions
+    )
+    # No new weld should be created with second part due to large angle
+    assert is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_1@solid"]
+    ) and not is_weld_constraint_present(
+        scene, fastener_entity, gs_entities["part_with_holes_2@solid"]
+    ), (
+        "Expected weld only with first part; no weld should be created with second part under large angle"
     )
 
     # Assert that the fastener attachment state did not change (still only attached to first part)
@@ -607,6 +648,10 @@ def test_step_pick_up_release_tool_picks_up_or_releases_tool_when_in_proximity(
     assert repairs_sim_state.tool_state.tool_ids[0] == ToolsEnum.SCREWDRIVER.value, (
         "Tool should be picked up when in proximity and action > 0.75"
     )
+    # Weld constraint should exist between screwdriver base link and franka hand link after pickup
+    assert is_weld_constraint_present(scene, screwdriver_entity, franka_hand), (
+        "Expected weld between screwdriver and franka hand after tool pickup"
+    )
 
     # Assert that screwdriver position changed (it should be snapped to franka arm)
     current_screwdriver_pos = screwdriver_entity.get_pos(0)
@@ -623,6 +668,9 @@ def test_step_pick_up_release_tool_picks_up_or_releases_tool_when_in_proximity(
     assert torch.allclose(current_screwdriver_pos, expected_tool_pos, atol=1e-3), (
         "Screwdriver should be positioned at the correct grip position relative to franka hand"
     )
+    assert torch.allclose(
+        current_screwdriver_quat, franka_hand.get_quat(0), atol=1e-3
+    ), "Screwdriver should be oriented at the same orientation as franka hand"
 
     # Test 2: Release tool when in proximity
     actions = torch.zeros((1, 10))
@@ -635,6 +683,10 @@ def test_step_pick_up_release_tool_picks_up_or_releases_tool_when_in_proximity(
     # Assert that tool was released (should now have Gripper again)
     assert repairs_sim_state.tool_state.tool_ids[0] == ToolsEnum.GRIPPER.value, (
         "Tool should be released when action < 0.25"
+    )
+    # Weld constraint should be removed between screwdriver and franka hand after release
+    assert not is_weld_constraint_present(scene, screwdriver_entity, franka_hand), (
+        "Expected no weld between screwdriver and franka hand after tool release"
     )
 
 
@@ -694,15 +746,18 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
     )
 
     # Test 1a: Check that fastener is moved to tool grip position
-    screwdriver_pos = screwdriver_entity.get_pos(0)
-    screwdriver_quat = screwdriver_entity.get_quat(0)
 
-    # Test 1b: picked_up_fastener_id should be set (>= 0)
+    # Test 1b: Weld constraint should exist between fastener and screwdriver after pickup
+    assert is_weld_constraint_present(scene, fastener_entity, screwdriver_entity), (
+        "Expected weld between fastener and screwdriver after fastener pickup"
+    )
+
+    # Test 1c: picked_up_fastener_id should be set (>= 0)
     assert (
         updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[0].item() >= 0
     ), "Tool should have picked_up_fastener_id set after picking up"
 
-    # Test 1c: Tool has picked_up_fastener_name set to fastener name
+    # Test 1d: Tool has picked_up_fastener_name set to fastener name
     assert (
         updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_name(
             torch.tensor([0])
@@ -713,7 +768,7 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
         updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[0].item() == 0
     ), "Tool should have picked_up_fastener_id set to 0"
 
-    # Test 1d: Tool has picked_up_fastener_tip_position set to fastener tip position
+    # Test 1e: Tool has picked_up_fastener_tip_position set to fastener tip position
     assert not torch.isnan(
         updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[0]
     ).any(), "Tool should have picked_up_fastener_tip_position set"
@@ -734,6 +789,10 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
         updated_sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[0].item()
         == -1
     ), "Tool should have picked_up_fastener_id reset to -1 after releasing"
+    # Weld constraint should be removed between fastener and screwdriver after release
+    assert not is_weld_constraint_present(scene, fastener_entity, screwdriver_entity), (
+        "Expected no weld between fastener and screwdriver after fastener release"
+    )
 
     # Test 2b: Do not query picked_up_fastener_name when no fastener is picked up
 

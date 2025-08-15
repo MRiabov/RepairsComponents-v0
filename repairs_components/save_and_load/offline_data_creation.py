@@ -87,17 +87,7 @@ def save_concurrent_scene_metadata(
     # Holes and other static physical metadata now live in sim_info.physical_info
     # and are saved once per scene via the single info_{scene_id}.pt file.
     # Here we only persist lightweight scene metadata used by loaders/viewers.
-    # save metadata
-    metadata = {
-        "scene_id": scene_id,
-        "task_ids": data.task_ids.tolist(),
-        # note: graphs paths can now be recovered by get_graph_save_paths.
-        "mesh_file_names": mesh_file_name_mapping,
-        "count_generated_envs": data.batch_dim,
-        "env_setup_name": scene_setups[scene_id].__class__.__name__,
-    }
-    with open(scene_dir / "metadata.json", "w") as f:
-        json.dump(metadata, f, indent=2)
+    # metadata.json deprecated: all necessary metadata is stored in RepairsSimInfo.
 
     # initial diffs are to be recomputed;
     # cameras are to be loaded in gym_env.step (or elsewhere)

@@ -390,7 +390,7 @@ def step_screw_in_or_out(
                 scene,
                 fastener_entity=fastener_entity,
                 screwdriver_entity=gs_entities["franka@control"],
-                tool_state_to_update=tool_state.screwdriver_tc[env_id],
+                tool_state_to_update=tool_state,
                 fastener_id=int(fastener_id.item()),
                 env_ids=env_id,
             )

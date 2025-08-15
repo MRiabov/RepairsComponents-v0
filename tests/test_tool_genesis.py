@@ -20,6 +20,7 @@ from repairs_components.logic.tools.tool import (
 from repairs_components.logic.tools.tools_state import ToolState, ToolInfo
 from repairs_components.processing.geom_utils import get_connector_pos
 from tests.global_test_config import init_gs, base_data_dir
+from repairs_components.processing.genesis_utils import is_weld_constraint_present
 
 
 @pytest.fixture(scope="module")
@@ -135,7 +136,7 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
     tool_state = ToolState().unsqueeze(0)
-    tool_state.screwdriver_tc = Screwdriver()
+    tool_state.screwdriver_tc = Screwdriver().unsqueeze(0)
     tool_state.tool_ids = torch.tensor([ToolsEnum.SCREWDRIVER.value])
     # move to pre-grasp pose
     move_franka_to_pos(
@@ -150,14 +151,20 @@ def test_attach_tool_to_arm(scene_franka_and_two_cubes, fingers_dof):
     print("end_effector.get_pos(): ", end_effector.get_pos(0))
     print("end_effector.get_quat(): ", end_effector.get_quat(0))
 
+    # Ensure no pre-existing weld from prior runs
+    try:
+        scene.sim.rigid_solver.delete_weld_constraint(
+            tool_cube.base_link.idx, end_effector.idx, torch.tensor([0])
+        )
+    except Exception:
+        pass
     # tested func.
     attach_tool_to_arm(
-        scene,
-        tool_cube,
-        end_effector,
-        tool_state,
-        ToolInfo(),
-        torch.tensor([0]),
+        scene, tool_cube, end_effector, tool_state, ToolInfo(), torch.tensor([0])
+    )
+    # Assert weld constraint between tool and hand was added
+    assert is_weld_constraint_present(scene, tool_cube, end_effector, env_idx=0), (
+        "Expected weld constraint between tool and hand"
     )
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
@@ -204,7 +211,7 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
     tool_state = ToolState().unsqueeze(0)
-    tool_state.screwdriver_tc = Screwdriver()
+    tool_state.screwdriver_tc = Screwdriver().unsqueeze(0)
     tool_state.tool_ids = torch.tensor([ToolsEnum.SCREWDRIVER.value])
 
     move_franka_to_pos(
@@ -219,6 +226,13 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     print("end_effector.get_pos(): ", end_effector.get_pos())
     print("end_effector.get_quat(): ", end_effector.get_quat())
 
+    # Ensure no pre-existing weld from prior runs
+    try:
+        scene.sim.rigid_solver.delete_weld_constraint(
+            tool_cube.base_link.idx, end_effector.idx, torch.tensor([0])
+        )
+    except Exception:
+        pass
     # attach tool to arm
     attach_tool_to_arm(
         scene,
@@ -227,6 +241,10 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
         tool_state,
         ToolInfo(),
         torch.tensor([0]),
+    )
+    # Assert weld constraint between tool and hand was added
+    assert is_weld_constraint_present(scene, tool_cube, end_effector, env_idx=0), (
+        "Expected weld constraint between tool and hand"
     )
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
@@ -264,6 +282,10 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     detach_tool_from_arm(
         scene, tool_cube, end_effector, entities, tool_state, torch.tensor([0])
     )
+    # Assert weld between tool and hand was removed
+    assert not is_weld_constraint_present(scene, tool_cube, end_effector, env_idx=0), (
+        "Weld constraint between tool and hand should be removed after detach"
+    )
     for i in range(100):
         scene.step()
         camera.render()
@@ -272,9 +294,6 @@ def test_detach_tool_from_arm(scene_franka_and_two_cubes, fingers_dof):
     ).all(), f"Expected the tool_cube to fall, got Z pos {tool_cube.get_pos()[2]}"
 
 
-@pytest.mark.xfail(
-    reason="Assertions are incorrect until get_weld_constraints is available in Genesis API."
-)
 def test_attach_and_detach_tool_to_arm_with_fastener(
     scene_franka_and_two_cubes, fingers_dof
 ):
@@ -287,7 +306,9 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
     end_effector = entities["end_effector"]
     camera = scene.visualizer.cameras[0]
     tool_state = ToolState().unsqueeze(0)
-    tool_state.screwdriver_tc = Screwdriver()
+    tool_state.screwdriver_tc = Screwdriver().unsqueeze(
+        0
+    )  # pointless because it's default.
     tool_state.tool_ids = torch.tensor([ToolsEnum.SCREWDRIVER.value])
     tool_info = ToolInfo()
 
@@ -303,9 +324,20 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
     print("end_effector.get_pos(): ", end_effector.get_pos())
     print("end_effector.get_quat(): ", end_effector.get_quat())
 
+    # Ensure no pre-existing weld from prior runs
+    try:
+        scene.sim.rigid_solver.delete_weld_constraint(
+            tool_cube.base_link.idx, end_effector.idx, torch.tensor([0])
+        )
+    except Exception:
+        pass
     # attach tool to arm
     attach_tool_to_arm(
         scene, tool_cube, end_effector, tool_state, tool_info, torch.tensor([0])
+    )
+    # Assert weld constraint between tool and hand was added
+    assert is_weld_constraint_present(scene, tool_cube, end_effector, env_idx=0), (
+        "Expected weld constraint between tool and hand"
     )
     rgb, _, _, _ = camera.render()
     Image.fromarray(rgb).save("cube_tool.png")
@@ -354,53 +386,63 @@ def test_attach_and_detach_tool_to_arm_with_fastener(
     )
 
     # attach second cube to tool
-    screwdriver = Screwdriver()
+    screwdriver = tool_state.screwdriver_tc
 
-    expected_z = (
-        0.7
-        - screwdriver.tool_grip_position[2]
-        + screwdriver.fastener_connector_pos_relative_to_center()[2]
-    )  # hmm, this isn't even right in tests. "+" and "-" mismatch.
-
-    reposition_cube_to_xyz = torch.tensor([0.0, 0.65, expected_z])
+    # Compute expected fastener position using the same helper as production code
+    rel_vec = (
+        screwdriver.fastener_connector_pos_relative_to_center()
+        .unsqueeze(0)
+        .expand(tool_cube.get_pos(0).shape[0], -1)
+    )
+    expected_grip_all = get_connector_pos(
+        tool_cube.get_pos(0), tool_cube.get_quat(0), rel_vec
+    )
+    expected_fastener_base_pos = expected_grip_all[0]
     attach_fastener_to_screwdriver(
         scene,
         fastener_cube,
         tool_cube,
-        tool_state_to_update=screwdriver,
+        tool_state_to_update=tool_state,
         fastener_id=0,
         env_ids=0,
     )
-    assert torch.isclose(
-        fastener_cube.get_pos(0), reposition_cube_to_xyz, atol=0.05
-    ).all(), (
-        f"Cube pos expected to be {reposition_cube_to_xyz}, got {fastener_cube.get_pos(0)}"
+    # Assert weld constraint between fastener and tool was added
+    assert is_weld_constraint_present(scene, fastener_cube, tool_cube, env_idx=0), (
+        "Expected weld constraint between fastener and tool"
     )
-    assert screwdriver.has_picked_up_fastener
+    assert torch.isclose(
+        fastener_cube.get_pos(0)[0], expected_fastener_base_pos, atol=0.05
+    ).all(), (
+        f"Fastener base pos expected to be {expected_fastener_base_pos}, got {fastener_cube.get_pos(0)[0]}"
+    )
+    assert screwdriver.has_picked_up_fastener[0]
     assert screwdriver.picked_up_fastener_name(
-        0
+        torch.tensor([0])
     ) == Fastener.fastener_name_in_simulation(0)
     assert torch.isclose(
         screwdriver.picked_up_fastener_tip_position,
-        get_connector_pos(
-            reposition_cube_to_xyz,
-            tool_cube.get_quat(),
-            Fastener.get_tip_pos_relative_to_center().unsqueeze(0),
-        ),
+        expected_fastener_base_pos,
         atol=0.05,
     ).all()
     assert torch.isclose(
         screwdriver.picked_up_fastener_quat,
-        tool_cube.get_quat(),
+        tool_cube.get_quat(0)[0],
         atol=0.01,
     ).all()
 
     # detach tool from arm
     detach_tool_from_arm(
-        scene, tool_cube, end_effector, entities, [screwdriver], torch.tensor([0])
+        scene, tool_cube, end_effector, entities, tool_state, torch.tensor([0])
     )
-    assert not screwdriver.has_picked_up_fastener
-    assert screwdriver.picked_up_fastener_name is None
+    # Assert welds between tool-hand and tool-fastener were removed
+    assert not is_weld_constraint_present(scene, tool_cube, end_effector, env_idx=0), (
+        "Weld constraint between tool and hand should be removed after detach"
+    )
+    assert not is_weld_constraint_present(scene, tool_cube, fastener_cube, env_idx=0), (
+        "Weld constraint between tool and fastener should be removed after detach"
+    )
+    assert not screwdriver.has_picked_up_fastener[0]
+    assert screwdriver.picked_up_fastener_id[0].item() == -1
     assert torch.isnan(screwdriver.picked_up_fastener_tip_position).all()
     assert torch.isnan(screwdriver.picked_up_fastener_quat).all()
 

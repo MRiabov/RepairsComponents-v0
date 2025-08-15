@@ -20,9 +20,12 @@ from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.gym_env import RepairsEnv
 import pytest
 from pathlib import Path
-from tests.global_test_config import init_gs, base_data_dir  # noqa: F401 
- 
-pytestmark = pytest.mark.skip(reason="All tests in this file are deprecated")
+from tests.global_test_config import init_gs, base_data_dir  # noqa: F401
+
+pytestmark = pytest.mark.skip(
+    reason="All tests in this file are outdated. Use test_env_integration_bdim2.py instead or specialized "
+    "translation tests like test_translate_genesis_to_python or test_translate_compound_to_sim_state."
+)
 
 
 @pytest.fixture

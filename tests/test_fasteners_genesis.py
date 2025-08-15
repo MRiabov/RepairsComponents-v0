@@ -16,9 +16,11 @@ from repairs_components.geometry.fasteners import (
 )
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tools_state import ToolState
+from repairs_components.logic.tools.tool import ToolsEnum
 from tests.test_tool_genesis import move_franka_to_pos
 from genesis.engine.entities import RigidEntity
-from tests.global_test_config import init_gs, base_data_dir, test_device
+from tests.global_test_config import init_gs, base_data_dir, test_device  # noqa: F401
+from repairs_components.processing.genesis_utils import is_weld_constraint_present
 
 
 @pytest.fixture(scope="session")
@@ -140,6 +142,7 @@ def test_attach_and_detach_fastener_to_screwdriver(
     camera = scene.visualizer.cameras[0]
     entities["screwdriver@tool"].set_pos(screwdriver_pos)
     tool_state = ToolState().unsqueeze(0)
+    tool_state.tool_ids = torch.tensor([ToolsEnum.SCREWDRIVER.value])
     attach_fastener_to_screwdriver(
         scene,
         entities["0@fastener"],
@@ -148,6 +151,10 @@ def test_attach_and_detach_fastener_to_screwdriver(
         fastener_id=0,
         env_ids=torch.tensor([0]),
     )
+    # Assert weld fastener<->screwdriver was added
+    assert is_weld_constraint_present(
+        scene, entities["0@fastener"], entities["screwdriver@tool"], env_idx=0
+    ), "Expected weld constraint between fastener and screwdriver"
     fastener_grip_pos = Screwdriver.fastener_connector_pos_relative_to_center()
     assert torch.isclose(
         entities["0@fastener"].get_pos(0), screwdriver_pos + fastener_grip_pos
@@ -180,10 +187,14 @@ def test_attach_and_detach_fastener_to_screwdriver(
         tool_state,
         env_ids=torch.tensor([0]),
     )
+    # Assert weld fastener<->screwdriver was removed
+    assert not is_weld_constraint_present(
+        scene, entities["0@fastener"], entities["screwdriver@tool"], env_idx=0
+    ), "Weld constraint between fastener and screwdriver should be removed"
     # assert tool state # note: all should have shape (1,)
-    assert not tool_state.screwdriver_tc.has_picked_up_fastener
-    assert torch.isnan(tool_state.screwdriver_tc.picked_up_fastener_tip_position[0])
-    assert torch.isnan(tool_state.screwdriver_tc.picked_up_fastener_quat[0])
+    assert not tool_state.screwdriver_tc.has_picked_up_fastener[0]
+    assert torch.isnan(tool_state.screwdriver_tc.picked_up_fastener_tip_position[0]).all()
+    assert torch.isnan(tool_state.screwdriver_tc.picked_up_fastener_quat[0]).all()
     assert tool_state.screwdriver_tc.picked_up_fastener_id[0].item() == -1
 
     for i in range(100):
@@ -247,6 +258,10 @@ def test_attach_and_detach_fastener_to_part(
         envs_idx=torch.tensor([0]),
         already_inserted_into_one_hole=torch.tensor([False]),
     )
+    # Assert weld fastener<->part was added (screwdriver weld may still exist)
+    assert is_weld_constraint_present(
+        scene, entities["0@fastener"], entities["part_with_holes_1@solid"], env_idx=0
+    ), "Expected weld constraint between fastener and part"
     # For blind hole without partial insertion, fastener should be offset by (fastener_length - hole_depth)
     expected_fastener_pos = hole_pos[0] + torch.tensor(
         [0.0, 0.0, 0.015 - 0.005]
@@ -262,7 +277,7 @@ def test_attach_and_detach_fastener_to_part(
     # After attaching fastener to part, screwdriver should maintain its relative position to the fastener
     # If fastener is at expected_fastener_pos, then screwdriver should be at expected_fastener_pos - fastener_grip_pos
     expected_screwdriver_pos = expected_fastener_pos - fastener_grip_pos
-    # TODO: Fix this assertion - screwdriver position behavior needs investigation
+    # FIXME: Fix this assertion - screwdriver position behavior needs investigation
     # assert torch.isclose(
     #     entities["screwdriver@tool"].get_pos(0), expected_screwdriver_pos
     # ).all(), (
@@ -359,6 +374,10 @@ def test_attach_and_detach_fastener_to_two_parts(
         already_inserted_into_one_hole=torch.tensor([False]),
         envs_idx=torch.tensor([0]),
     )  # fastener moves to hole_pos1...
+    # Assert weld fastener<->part1 added
+    assert is_weld_constraint_present(
+        scene, fastener, entities["part_with_holes_1@solid"], env_idx=0
+    ), "Expected weld constraint between fastener and part 1"
     assert torch.isclose(fastener.get_pos(0), hole_pos1[0]).all(), (
         "Fastener should be moved to the part 1 at hole_pos1"
     )
@@ -369,6 +388,9 @@ def test_attach_and_detach_fastener_to_two_parts(
     part_1_pos_pre_attachment_to_second = entities["part_with_holes_1@solid"].get_pos(0)
     fastener_pos_pre_attachment_to_second = fastener.get_pos(0)
     part_2_pos_pre_attachment = entities["part_with_holes_2@solid"].get_pos(0)
+    pos_diff_part_to_part_pre_attachment_to_second = (
+        part_1_pos_pre_attachment_to_second - part_2_pos_pre_attachment
+    )
 
     # second
     # note: the top hole here is the first hole (as it was the first to be inserted.)
@@ -386,6 +408,10 @@ def test_attach_and_detach_fastener_to_two_parts(
         fastener_length=fastener_length,
         already_inserted_into_one_hole=torch.tensor([True]),
     )  # fastener moves to hole_pos_2 with the first part...
+    # Assert weld fastener<->part2 added (part1 weld remains)
+    assert is_weld_constraint_present(
+        scene, fastener, entities["part_with_holes_2@solid"], env_idx=0
+    ), "Expected weld constraint between fastener and part 2"
     # test fastener move after 2nd attachment
     assert torch.isclose(
         fastener.get_pos(0),
@@ -448,13 +474,20 @@ def test_attach_and_detach_fastener_to_two_parts(
         part_entity=entities["part_with_holes_1@solid"],
         envs_idx=torch.tensor([0]),
     )
-
+    # Assert weld fastener<->part1 removed (part2 still attached until next detach)
+    assert not is_weld_constraint_present(
+        scene, fastener, entities["part_with_holes_1@solid"], env_idx=0
+    ), "Weld constraint between fastener and part 1 should be removed"
     detach_fastener_from_part(
         scene,
         fastener,
         part_entity=entities["part_with_holes_2@solid"],
         envs_idx=torch.tensor([0]),
     )
+    # Assert weld fastener<->part2 removed
+    assert not is_weld_constraint_present(
+        scene, fastener, entities["part_with_holes_2@solid"], env_idx=0
+    ), "Weld constraint between fastener and part 2 should be removed"
     # and move (relatively) randomly.
     fastener.set_pos(torch.tensor([[-1.0, 0.0, 1.0]]))
     step_and_render(scene, camera)

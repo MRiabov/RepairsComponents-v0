@@ -208,7 +208,7 @@ def merge_scene_configs_at_idx(
     assert (
         old_scene_config.sim_info.physical_info.part_hole_batch
         == new_scene_config.sim_info.physical_info.part_hole_batch
-    ), "Starting hole positions must have the same shape."
+    ).all(), "Hole batches must be equal."
     if torch.any(reset_mask):
         old_idx = torch.nonzero(reset_mask).squeeze(1)
         new_idx = torch.arange(len(old_idx))
@@ -289,7 +289,11 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         curr.has_electronics = orig_curr.has_electronics
         curr.has_fluid = orig_curr.has_fluid
         # sanity check: ensure single-item state
-        curr_bs: int = int(curr.batch_size) if isinstance(curr.batch_size, int) else int(curr.batch_size[0])
+        curr_bs: int = (
+            int(curr.batch_size)
+            if isinstance(curr.batch_size, int)
+            else int(curr.batch_size[0])
+        )
         assert curr_bs == 1, f"Expected batch_dim=1, got {curr.batch_size}"
 
         orig_des = scene_config.desired_state
@@ -308,7 +312,11 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         init.has_electronics = orig_init.has_electronics
         init.has_fluid = orig_init.has_fluid
         # sanity check: ensure single-item state
-        des_bs: int = int(des.batch_size) if isinstance(des.batch_size, int) else int(des.batch_size[0])
+        des_bs: int = (
+            int(des.batch_size)
+            if isinstance(des.batch_size, int)
+            else int(des.batch_size[0])
+        )
         assert des_bs == 1, f"Expected batch_dim=1, got {des.batch_size}"
 
         # slice voxel and diffs
