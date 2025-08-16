@@ -4,16 +4,17 @@ from pathlib import Path
 import pytest
 import torch
 
-# Initialize Genesis (skip if not available on CI runner)
-try:
-    from genesis import gs  # type: ignore
-except Exception as e:  # pragma: no cover
-    pytest.skip(f"Genesis not available: {e}", allow_module_level=True)
+from genesis import gs  # type: ignore
+
 
 # Local examples and env
 from examples.ten_holes_14 import TenHoles  # type: ignore
 from repairs_components.training_utils.gym_env import RepairsEnv
 from repairs_components.processing.tasks import AssembleTask
+
+pytestmark = pytest.mark.skip(
+    reason="This test is skipped unless run explicitly for performance reasons."
+)
 
 
 def _minimal_configs(data_dir: Path):

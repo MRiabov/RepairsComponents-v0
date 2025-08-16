@@ -97,8 +97,9 @@ class TestRegisterFastenersBatch:
         # Verify the result (function updates in place and returns state)
         assert result_state.fasteners_pos.shape == (batch_size, num_fasteners, 3)
         assert result_state.fasteners_quat.shape == (batch_size, num_fasteners, 4)
-        assert physical_info.fasteners_diam.shape == (batch_size, num_fasteners)
-        assert physical_info.fasteners_length.shape == (batch_size, num_fasteners)
+        # fastener scalars live in PhysicalStateInfo (singleton): 1D [num_fasteners]
+        assert physical_info.fasteners_diam.shape == (num_fasteners,)
+        assert physical_info.fasteners_length.shape == (num_fasteners,)
         assert result_state.fasteners_attached_to_hole.shape == (
             batch_size,
             num_fasteners,
@@ -144,16 +145,16 @@ class TestRegisterFastenersBatch:
         expected_diam_1, expected_length_1 = 4.0 / 1000.0, 12.0 / 1000.0
 
         assert torch.allclose(
-            physical_info.fasteners_diam[0, 0], torch.tensor(expected_diam_0)
+            physical_info.fasteners_diam[0], torch.tensor(expected_diam_0)
         )
         assert torch.allclose(
-            physical_info.fasteners_length[0, 0], torch.tensor(expected_length_0)
+            physical_info.fasteners_length[0], torch.tensor(expected_length_0)
         )
         assert torch.allclose(
-            physical_info.fasteners_diam[0, 1], torch.tensor(expected_diam_1)
+            physical_info.fasteners_diam[1], torch.tensor(expected_diam_1)
         )
         assert torch.allclose(
-            physical_info.fasteners_length[0, 1], torch.tensor(expected_length_1)
+            physical_info.fasteners_length[1], torch.tensor(expected_length_1)
         )
 
     def test_register_fasteners_batch_hole_attachment(self):

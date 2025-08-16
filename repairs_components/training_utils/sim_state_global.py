@@ -8,7 +8,7 @@ from repairs_components.logic.electronics.electronics_state import (
 from repairs_components.logic.physical_state import PhysicalState, PhysicalStateInfo
 from repairs_components.logic.tools.tools_state import ToolState, ToolInfo
 from repairs_components.training_utils.sim_state import SimState
-from torch_geometric.data import Batch, Data
+from torch_geometric.data import Data
 
 
 @dataclass
@@ -25,7 +25,10 @@ class RepairsSimInfo:
         default_factory=lambda: torch.empty(0, dtype=torch.int32)
     )
     "Cache of fastener links for fastener constraint creation without dict querying."
-    env_setup_name: str = "env_setup"  # TODO: move to a separate persistence state info.
+    env_setup_name: str = (
+        "env_setup"  # TODO: move to a separate persistence state info.
+    )
+    # to prevent computation of certain objects if they are not present.
 
 
 class RepairsSimState(SimState):  # type: ignore
@@ -43,30 +46,9 @@ class RepairsSimState(SimState):  # type: ignore
     # fluid_state: list[FluidState] = field(default_factory=list)
     tool_state: ToolState = field(default_factory=ToolState)
 
-    # to prevent computation of certain objects if they are not present.
-    has_electronics: bool = False
-    has_fluid: bool = False
-    # has_fasteners: bool = False # maybe add (non-priority)
-    # NOTE: do not declare a 'device' field here; TensorClass reserves this name.
-
-    # def __init__(self, batch_dim: int):
-    #     super().__init__()
-    #     # FIXME: this __init__ should be deprecated, and instead to be instantiated directly.
-    #     self.batch_size = batch_dim
-    #     self.electronics_state = torch.stack(
-    #         [ElectronicsState(device=self.device)] * batch_dim
-    #     )
-    #     self.physical_state = torch.stack(
-    #         [PhysicalState(device=self.device)] * batch_dim
-    #     )
-    #     self.tool_state = torch.stack([ToolState(device=self.device)] * batch_dim)
-
     def diff(self, other: "RepairsSimState", sim_info: RepairsSimInfo):  # batched diff.
         assert len(self.electronics_state) == len(other.electronics_state), (
             "Batch dim mismatch in sim state diff!"
-        )
-        assert self.has_electronics == other.has_electronics, (
-            "Electronics present/absent mismatch in sim state diff!"
         )
         assert self.batch_size == other.batch_size, (
             "Batch dim mismatch in sim state diff!"
@@ -88,7 +70,7 @@ class RepairsSimState(SimState):  # type: ignore
         total_diff_counts = []
         for i in range(self.batch_size[0]):
             # Electronics diff: only compute if both states have electronics registered
-            if self.has_electronics:
+            if sim_info.component_info.has_electronics:
                 # Pass single component_info; comparability is validated inside diff
                 electronics_diff, electronics_diff_count = self.electronics_state[
                     i

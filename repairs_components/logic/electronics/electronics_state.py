@@ -38,6 +38,9 @@ class ElectronicsComponentInfo:
     # Note that torch.stack(tensorclass(dict)) makes dicts list, so always use __post_init__ to unbatch them after stacking.
     component_indices_from_name: dict = field(default_factory=dict)
     inverse_component_indices: dict = field(default_factory=dict)
+    has_electronics: bool = False
+    "A flag that when False may prevent computation of electronics for speed."
+
 
 
 class ElectronicsState(TensorClass, tensor_only=True):

@@ -286,8 +286,6 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         curr.electronics_state = orig_curr.electronics_state[i : i + 1]
         curr.physical_state = orig_curr.physical_state[i : i + 1]
         curr.tool_state = orig_curr.tool_state[i : i + 1]
-        curr.has_electronics = orig_curr.has_electronics
-        curr.has_fluid = orig_curr.has_fluid
         # sanity check: ensure single-item state
         curr_bs: int = (
             int(curr.batch_size)
@@ -301,16 +299,12 @@ def split_scene_config(scene_config: ConcurrentSceneData):
         des.electronics_state = orig_des.electronics_state[i : i + 1]
         des.physical_state = orig_des.physical_state[i : i + 1]
         des.tool_state = orig_des.tool_state[i : i + 1]
-        des.has_electronics = orig_des.has_electronics
-        des.has_fluid = orig_des.has_fluid
 
         orig_init = scene_config.init_state
         init = RepairsSimState(device=scene_config.init_state.device).unsqueeze(0)
         init.electronics_state = orig_init.electronics_state[i : i + 1]
         init.physical_state = orig_init.physical_state[i : i + 1]
         init.tool_state = orig_init.tool_state[i : i + 1]
-        init.has_electronics = orig_init.has_electronics
-        init.has_fluid = orig_init.has_fluid
         # sanity check: ensure single-item state
         des_bs: int = (
             int(des.batch_size)

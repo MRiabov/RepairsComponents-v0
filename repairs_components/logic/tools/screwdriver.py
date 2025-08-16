@@ -49,13 +49,16 @@ class Screwdriver(Tool, TensorClass):
         assert (self.picked_up_fastener_id[env_ids] >= 0).all(), (
             "picked_up_fastener_id should be non-negative when requesting a name"
         )
-        names = [
-            Fastener.fastener_name_in_simulation(fastener_id.item())
-            for fastener_id in self.picked_up_fastener_id[env_ids]
-        ]
         if env_ids.numel() == 1:
-            return names[0]
-        return names
+            return Fastener.fastener_name_in_simulation(
+                self.picked_up_fastener_id[env_ids].item()
+            ) # just fixed it.
+        else:
+            names = [
+                Fastener.fastener_name_in_simulation(fastener_id.item())
+                for fastener_id in self.picked_up_fastener_id[env_ids]
+            ]
+            return names
 
     @property
     def tool_grip_position(self):  # TODO rename to uppercase and make var.

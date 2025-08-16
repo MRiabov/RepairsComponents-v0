@@ -583,11 +583,7 @@ class RepairsEnv(gym.Env):
         sparse_voxel_des = scene_data.vox_des
 
         # get graph obs (pass info dataclasses explicitly)
-        has_elec_flag = (
-            bool(scene_data.current_state.has_electronics[0].item())
-            if isinstance(scene_data.current_state.has_electronics, torch.Tensor)
-            else bool(scene_data.current_state.has_electronics)
-        )
+        has_elec_flag = bool(scene_data.sim_info.component_info.has_electronics)
         if has_elec_flag:
             elec_graph_init = [
                 state.export_graph(scene_data.sim_info.component_info)

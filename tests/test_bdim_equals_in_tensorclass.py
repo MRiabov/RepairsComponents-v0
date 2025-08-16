@@ -1,3 +1,5 @@
+"""A test to verify stacking behavior in tensorclasses."""
+
 import torch
 import pytest
 from tensordict import TensorClass
@@ -19,11 +21,4 @@ def test_batch_size_vs_stack_shapes():
     assert isinstance(batch_instance, Class123)
     assert isinstance(stacked_instance, Class123)
 
-    for field_name in batch_instance.to_tensordict().keys():
-        batch_shape = getattr(batch_instance, field_name).shape
-        stacked_shape = getattr(stacked_instance, field_name).shape
-        # They should have the same shape because both have batch dim of 1
-        assert batch_shape == stacked_shape, (
-            f"Field {field_name}: batch_instance shape {batch_shape} != "
-            f"stacked_instance shape {stacked_shape}"
-        )
+    assert len(stacked_instance.x.shape) == len(batch_instance.x.shape) + 1

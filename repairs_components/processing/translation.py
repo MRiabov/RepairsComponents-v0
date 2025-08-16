@@ -313,15 +313,7 @@ def translate_compound_to_sim_state(
 
     count_bodies = body_idx
 
-    # Get hole data to populate part_hole_batch # it's recomputed but nobody cares.
-    starting_holes = get_starting_part_holes(first_compound, first_body_indices)
-    (
-        part_holes_pos,
-        part_holes_quat,
-        _part_hole_depth,
-        _hole_is_through,
-        part_hole_batch,
-    ) = starting_holes
+    # Get hole data later after sim_info is instantiated
 
     env_size_compound = np.array((640, 640, 640))
     expected_bounds_min = np.array((0, 0, 0))
@@ -434,11 +426,19 @@ def translate_compound_to_sim_state(
     # Build sim info and set singleton PhysicalStateInfo
     sim_info = RepairsSimInfo()
     sim_info.physical_info = physical_state_info
-    sim_info.physical_info.part_hole_batch = part_hole_batch.to(
-        device=sim_state.physical_state.device
-    )
+    # Persist hole metadata: compute now and store on sim_info, then update batched holes
+    (
+        sim_info.physical_info.starting_hole_positions,
+        sim_info.physical_info.starting_hole_quats,
+        sim_info.physical_info.part_hole_depth,
+        sim_info.physical_info.hole_is_through,
+        sim_info.physical_info.part_hole_batch,
+    ) = get_starting_part_holes(first_compound, first_body_indices, device)
     sim_state = update_hole_locs(
-        sim_state, part_holes_pos, part_holes_quat, part_hole_batch
+        sim_state,
+        sim_info.physical_info.starting_hole_positions,
+        sim_info.physical_info.starting_hole_quats,
+        sim_info.physical_info.part_hole_batch,
     )
 
     fastener_positions = torch.zeros(
@@ -687,30 +687,29 @@ def update_hole_locs(
     3. Calculate the hole positions and quats
     4. Set the hole positions and quats
     """
-    device = starting_hole_positions.device
-
-    # will remove when (if) batch RepairsSimStep.
-    part_pos = current_sim_state.physical_state.position.to(device)  # [B, P, 3]
-    part_quat = current_sim_state.physical_state.quat.to(
-        device, dtype=torch.float32
-    )  # [B, P, 4]
 
     # duplicate (expand) values by batch
-    part_pos_batched = part_pos[:, part_hole_batch]
-    part_quat_batched = part_quat[:, part_hole_batch]
+    part_pos_batched = current_sim_state.physical_state.position[:, part_hole_batch]
+    part_quat_batched = current_sim_state.physical_state.quat[:, part_hole_batch]
 
-    # note: not sure get_connector_pos will be usable with batches.
+    # Expand unbatched starting hole tensors [H,*] -> [B,H,*]
+    B = current_sim_state.physical_state.batch_size[0]
+    rel_pos_batched = starting_hole_positions.unsqueeze(0).expand(B, -1, -1)
+    start_quats_batched = starting_hole_quats.unsqueeze(0).expand(B, -1, -1)
+
     current_sim_state.physical_state.hole_positions = get_connector_pos(
-        part_pos_batched, part_quat_batched, starting_hole_positions.unsqueeze(0)
+        part_pos_batched, part_quat_batched, rel_pos_batched
     )
     current_sim_state.physical_state.hole_quats = quat_multiply(
-        part_quat_batched, starting_hole_quats
+        part_quat_batched, start_quats_batched
     )
     return current_sim_state
 
 
 # now in translation (it should be anyway)
-def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
+def get_starting_part_holes(
+    compound: Compound, body_indices: dict[str, int], device: torch.device
+):
     """Get the starting part holes as 'per part, relative to 0,0,0 position'"""
     part_holes_pos: torch.Tensor = torch.empty((0, 3))
     part_holes_quat: torch.Tensor = torch.empty((0, 4))
@@ -784,9 +783,9 @@ def get_starting_part_holes(compound: Compound, body_indices: dict[str, int]):
             )
     # TODO sort part_hole_batch, although I don't know if that's necessary.
     return (
-        part_holes_pos,
-        part_holes_quat,
-        part_hole_depth,
-        part_hole_is_through,
-        part_hole_batch,
+        part_holes_pos.to(device),
+        part_holes_quat.to(device),
+        part_hole_depth.to(device),
+        part_hole_is_through.to(device),
+        part_hole_batch.to(device),
     )

@@ -15,6 +15,7 @@ from repairs_components.processing.translation import (
 )
 from repairs_components.training_utils.env_setup import EnvSetup
 from ocp_vscode import show
+from tests.global_test_config import test_device
 
 
 class TestEnv(EnvSetup):
@@ -253,7 +254,7 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
     )
 
 
-def test_get_starting_part_holes_origin_and_shift():
+def test_get_starting_part_holes_origin_and_shift(test_device):
     # Build a solid with a through fastener hole at the top face center (like solid_with_hole)
     with BuildPart() as p1:
         b1 = Box(10, 10, 10)
@@ -267,7 +268,7 @@ def test_get_starting_part_holes_origin_and_shift():
     body_indices1 = {part1.label: 0}
 
     pos1, quat1, depth1, through1, batch1 = get_starting_part_holes(
-        compound1, body_indices1
+        compound1, body_indices1, test_device
     )
 
     # Expectations: position is local [0, 0, 5] mm -> meters; quat is identity;
@@ -296,7 +297,7 @@ def test_get_starting_part_holes_origin_and_shift():
     body_indices2 = {part2.label: 0}
 
     pos2, quat2, depth2, through2, batch2 = get_starting_part_holes(
-        compound2, body_indices2
+        compound2, body_indices2, test_device
     )
 
     # The starting hole description is local to the part, so global translation should not change it
