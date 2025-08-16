@@ -45,7 +45,7 @@ class PhysicalStateInfo:
     permanently_constrained_parts: list[list[str]] = field(default_factory=list)
     """List of lists of permanently constrained parts (linked_groups from EnvSetup)"""
 
-    # --- assets ---
+    # --- assets ---  # TODO: move to a separate persistence state info.
     mesh_file_names: dict[str, str] = field(default_factory=dict)
     """Per-scene mapping from body/fastener names to asset file paths (mesh/MJCF)."""
 
@@ -247,7 +247,7 @@ class PhysicalState(TensorClass):
             ],
             dim=-1,
         )
-        edge_attr = self._build_fastener_edge_attr(physical_info)
+        edge_attr, edge_index = self._build_fastener_edge_attr_and_index(physical_info)
         # how would I handle batchsizes in all of this? e.g. here logic would need to cat differently based on batch dim present or not.
 
         graph = Data(  # expected len of x - 8.
@@ -260,7 +260,7 @@ class PhysicalState(TensorClass):
                 ],
                 dim=1,
             ).bfloat16(),
-            edge_index=self.edge_index,
+            edge_index=edge_index,
             edge_attr=edge_attr,  # e.g. fastener size.
             num_nodes=len(physical_info.body_indices),
             global_feat=global_feat_export,
@@ -580,10 +580,10 @@ class PhysicalState(TensorClass):
         # ^batch of environments would be cool, but batch of parts would barely ever happen.
         return (changed == part_id).any()
 
-    def _build_fastener_edge_attr(self, physical_info: PhysicalStateInfo):
+    def _build_fastener_edge_attr_and_index(self, physical_info: PhysicalStateInfo):
         # cat shapes: 1,1,3,4,2 = 11
         # expected shape: [num_fasteners, 11]
-        return torch.cat(
+        edge_attr = torch.cat(
             [
                 physical_info.fasteners_diam.unsqueeze(-1),  #
                 physical_info.fasteners_length.unsqueeze(-1),
@@ -595,6 +595,34 @@ class PhysicalState(TensorClass):
             ],
             dim=1,
         )
+        # -- index --
+        # Build body-body edge_index from fastener attachments (undirected, deduplicated)
+        assert (
+            self.fasteners_attached_to_body.ndim == 2
+            and self.fasteners_attached_to_body.shape[1] == 2
+        )
+        assert self.position.ndim == 2 and self.quat.ndim == 2
+        N_bodies = int(self.position.shape[0])
+        atb = self.fasteners_attached_to_body
+        valid = (atb[:, 0] >= 0) & (atb[:, 1] >= 0)
+        if valid.any():
+            pairs = atb[valid].to(torch.long)
+            u = torch.minimum(pairs[:, 0], pairs[:, 1])
+            v = torch.maximum(pairs[:, 0], pairs[:, 1])
+            keys = u * N_bodies + v
+            order = torch.argsort(keys)
+            keys_sorted = keys[order]
+            keys_u, counts = torch.unique(keys_sorted, return_counts=True)
+            csum = torch.cumsum(counts, dim=0)
+            first_sorted_idx = csum - counts
+            idx_u = order[first_sorted_idx]
+            edge_index = torch.stack([u[idx_u], v[idx_u]], dim=0)
+        else:
+            edge_index = torch.empty(
+                (2, 0), dtype=torch.long, device=self.position.device
+            )
+
+        return edge_attr, edge_index
 
 
 def _diff_body_features(
@@ -1287,14 +1315,28 @@ def register_fasteners_batch(
     )
 
     # If there are no fasteners, set empty tensors/scalars and return early.
-    if num_fasteners == 0: # unnecessary? just code bloat.
-        physical_info.fasteners_diam = torch.empty((0,), dtype=torch.float32, device=device)
-        physical_info.fasteners_length = torch.empty((0,), dtype=torch.float32, device=device)
-        physical_states.fasteners_pos = torch.empty((B, 0, 3), dtype=torch.float32, device=device)
-        physical_states.fasteners_quat = torch.empty((B, 0, 4), dtype=torch.float32, device=device)
-        physical_states.fasteners_attached_to_hole = torch.empty((B, 0, 2), dtype=torch.int64, device=device)
-        physical_states.fasteners_attached_to_body = torch.empty((B, 0, 2), dtype=torch.int64, device=device)
-        physical_states.count_fasteners_held = torch.zeros((B, num_bodies), dtype=torch.int8, device=device)
+    if num_fasteners == 0:  # unnecessary? just code bloat.
+        physical_info.fasteners_diam = torch.empty(
+            (0,), dtype=torch.float32, device=device
+        )
+        physical_info.fasteners_length = torch.empty(
+            (0,), dtype=torch.float32, device=device
+        )
+        physical_states.fasteners_pos = torch.empty(
+            (B, 0, 3), dtype=torch.float32, device=device
+        )
+        physical_states.fasteners_quat = torch.empty(
+            (B, 0, 4), dtype=torch.float32, device=device
+        )
+        physical_states.fasteners_attached_to_hole = torch.empty(
+            (B, 0, 2), dtype=torch.int64, device=device
+        )
+        physical_states.fasteners_attached_to_body = torch.empty(
+            (B, 0, 2), dtype=torch.int64, device=device
+        )
+        physical_states.count_fasteners_held = torch.zeros(
+            (B, num_bodies), dtype=torch.int8, device=device
+        )
         return physical_states, physical_info
 
     # PhysicalStateInfo is a singleton store; fastener scalars must be 1D [N]

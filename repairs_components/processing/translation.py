@@ -21,6 +21,8 @@ from repairs_components.processing.geom_utils import (
     quat_multiply,
 )
 from repairs_components.logic.physical_state import (
+    PhysicalState,
+    PhysicalStateInfo,
     register_bodies_batch,
     register_fasteners_batch,
     compound_pos_to_sim_pos,
@@ -583,7 +585,8 @@ def translate_compound_to_sim_state(
 
 
 def create_constraints_based_on_graph(
-    env_state: RepairsSimState,
+    physical_state: PhysicalState,
+    physical_info: PhysicalStateInfo,
     gs_entities: dict[str, RigidEntity],
     scene: gs.Scene,
     env_idx: torch.Tensor | None = None,
@@ -592,7 +595,11 @@ def create_constraints_based_on_graph(
     rigid_solver = scene.sim.rigid_solver
     all_base_links = {}
     if env_idx is None:
-        bs = int(env_state.batch_size) if isinstance(env_state.batch_size, int) else int(env_state.batch_size[0])
+        bs = (
+            int(physical_state.batch_size)
+            if isinstance(physical_state.batch_size, int)
+            else int(physical_state.batch_size[0])
+        )
         env_idx = torch.arange(bs)
     # TODO: assert that number of steps is 0 - it should be only in the start. No API for this in genesis atm.
 
@@ -602,7 +609,7 @@ def create_constraints_based_on_graph(
     # < note: there is some unnecessary roundtrip that makes me use the `all_base_links` dict.
     # however it doesn't matter, it's minor optimization.
     # assert all_base_links.min() >= 0, "Some base link failed to register."
-    for entity_name in env_state.physical_state[0].body_indices:
+    for entity_name in physical_info.body_indices:
         # NOTE: body_indices does not include fasteners
         entity = gs_entities[entity_name]
         all_base_links[entity_name] = entity.base_link.idx
@@ -616,7 +623,7 @@ def create_constraints_based_on_graph(
     connections: dict[tuple[int, int], list[int]] = {}
 
     for env_id in env_idx.tolist():
-        state = env_state.physical_state
+        state = physical_state
         # FIXME: this kind of works but does not account for fastener constraint
         # should actually be linked to a fastener, and fastener is linked to another body.
 
@@ -636,9 +643,7 @@ def create_constraints_based_on_graph(
                     # Fastener not attached to anything in this position
                     continue
 
-                body_name = env_state.physical_state.inverse_body_indices[
-                    body_id.item()
-                ]
+                body_name = physical_info.inverse_body_indices[body_id.item()]
                 body_base_link_idx = all_base_links[body_name]
 
                 key = (fastener_base_link_idx, body_base_link_idx)

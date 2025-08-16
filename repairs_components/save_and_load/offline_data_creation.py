@@ -1,4 +1,3 @@
-import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Union
@@ -86,8 +85,8 @@ def save_concurrent_scene_metadata(
     # states and voxel grids are already saved.
     # Holes and other static physical metadata now live in sim_info.physical_info
     # and are saved once per scene via the single info_{scene_id}.pt file.
-    # Here we only persist lightweight scene metadata used by loaders/viewers.
-    # metadata.json deprecated: all necessary metadata is stored in RepairsSimInfo.
+    # metadata.json deprecated: do not persist redundant metadata; loaders derive
+    # needed info from RepairsSimInfo and file naming conventions.
 
     # initial diffs are to be recomputed;
     # cameras are to be loaded in gym_env.step (or elsewhere)

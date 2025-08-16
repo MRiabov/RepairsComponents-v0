@@ -25,6 +25,7 @@ class RepairsSimInfo:
         default_factory=lambda: torch.empty(0, dtype=torch.int32)
     )
     "Cache of fastener links for fastener constraint creation without dict querying."
+    env_setup_name: str = "env_setup"  # TODO: move to a separate persistence state info.
 
 
 class RepairsSimState(SimState):  # type: ignore

@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from genesis.vis.visualizer import Camera
 from igl.helpers import os
-from torch_geometric.data import Batch
+from torch_geometric.data import Batch, Data
 
 from repairs_components.processing.scene_creation_funnel import (
     create_env_configs,
@@ -381,11 +381,7 @@ class RepairsEnv(gym.Env):
                 gs_entities=scene_data.gs_entities,
                 current_sim_state=scene_data.current_state,
                 desired_state=scene_data.desired_state,
-                starting_hole_positions=scene_data.starting_hole_positions,
-                starting_hole_quats=scene_data.starting_hole_quats,
-                hole_depth=scene_data.hole_depth,
-                hole_is_through=scene_data.hole_is_through,
-                part_hole_batch=scene_data.part_hole_batch,
+                sim_info=scene_data.sim_info,
             )
 
             # Update the scene data with the new state
@@ -524,11 +520,14 @@ class RepairsEnv(gym.Env):
 
             # Move entities to their starting positions
             move_entities_to_pos(
-                updated_scene_data.gs_entities, updated_scene_data.current_state
+                updated_scene_data.gs_entities,
+                updated_scene_data.current_state,
+                updated_scene_data.sim_info.physical_info,
             )
 
             create_constraints_based_on_graph(
-                updated_scene_data.current_state,
+                updated_scene_data.current_state.physical_state,
+                updated_scene_data.sim_info.physical_info,
                 updated_scene_data.gs_entities,
                 updated_scene_data.scene,
                 env_idx=reset_env_ids_this_scene,
@@ -575,8 +574,6 @@ class RepairsEnv(gym.Env):
 
     def _observe_scene(self, scene_data: ConcurrentSceneData):
         # Process a single environment
-        # Get the scene data for this environment
-
         # Extract cameras from scene data
         cameras = scene_data.scene.visualizer.cameras
         video_obs = _render_all_cameras(cameras, device=self.device)
@@ -585,19 +582,51 @@ class RepairsEnv(gym.Env):
         sparse_voxel_init = scene_data.vox_init
         sparse_voxel_des = scene_data.vox_des
 
-        # TODO partial export of graphs (avoid export when unnecessary.)
-        # get graph obs
-        elec_graph_init = [
-            state.export_graph() for state in scene_data.current_state.electronics_state
-        ]
-        elec_graph_des = [
-            state.export_graph() for state in scene_data.desired_state.electronics_state
-        ]  # return them as lists because they will be stacked to batch as global env.
+        # get graph obs (pass info dataclasses explicitly)
+        has_elec_flag = (
+            bool(scene_data.current_state.has_electronics[0].item())
+            if isinstance(scene_data.current_state.has_electronics, torch.Tensor)
+            else bool(scene_data.current_state.has_electronics)
+        )
+        if has_elec_flag:
+            elec_graph_init = [
+                state.export_graph(scene_data.sim_info.component_info)
+                for state in scene_data.current_state.electronics_state
+            ]
+            elec_graph_des = [
+                state.export_graph(scene_data.sim_info.component_info)
+                for state in scene_data.desired_state.electronics_state
+            ]
+        else:
+            # Produce empty graphs per env to satisfy batching
+            bdim_init = (
+                int(scene_data.current_state.electronics_state.batch_size)
+                if isinstance(
+                    scene_data.current_state.electronics_state.batch_size, int
+                )
+                else int(scene_data.current_state.electronics_state.batch_size[0])
+            )
+            bdim_des = (
+                int(scene_data.desired_state.electronics_state.batch_size)
+                if isinstance(
+                    scene_data.desired_state.electronics_state.batch_size, int
+                )
+                else int(scene_data.desired_state.electronics_state.batch_size[0])
+            )
+            empty_graph = Data(
+                x=torch.empty((0, 4), dtype=torch.bfloat16),
+                edge_index=torch.empty((2, 0), dtype=torch.long),
+                num_nodes=0,
+            )
+            elec_graph_init = [empty_graph for _ in range(bdim_init)]
+            elec_graph_des = [empty_graph for _ in range(bdim_des)]
         mech_graph_init = [
-            state.export_graph() for state in scene_data.current_state.physical_state
+            state.export_graph(scene_data.sim_info.physical_info)
+            for state in scene_data.current_state.physical_state
         ]
         mech_graph_des = [
-            state.export_graph() for state in scene_data.desired_state.physical_state
+            state.export_graph(scene_data.sim_info.physical_info)
+            for state in scene_data.desired_state.physical_state
         ]
 
         return (

@@ -22,6 +22,7 @@ from repairs_components.geometry.fasteners import (
     get_fastener_params_from_name,
     get_fastener_save_path_from_name,
 )
+from repairs_components.logic.physical_state import PhysicalStateInfo
 from repairs_components.logic.tools import screwdriver
 from repairs_components.processing.geom_utils import euler_deg_to_quat_wxyz
 from repairs_components.processing.voxel_export import export_voxel_grid
@@ -381,16 +382,14 @@ def add_base_scene_geometry(scene: gs.Scene, base_dir: Path, batch_dim: int):
 def move_entities_to_pos(
     gs_entities: dict[str, RigidEntity],
     starting_sim_state: RepairsSimState,
+    physical_info: PhysicalStateInfo,
     env_idx: torch.Tensor | None = None,
 ):
     """Move parts to their necessary positions. Can be used both in reset and init."""
     if env_idx is None:
         env_idx = torch.arange(len(starting_sim_state.physical_state))
     # set positions for each entity in batch
-    for (
-        gs_entity_name,
-        entity_idx,
-    ) in starting_sim_state.physical_info.body_indices.items():
+    for gs_entity_name, entity_idx in physical_info.body_indices.items():
         entity = gs_entities[gs_entity_name]
         entity_pos = starting_sim_state.physical_state.position[env_idx, entity_idx]
         # No need to move because already centered

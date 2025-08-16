@@ -1,5 +1,4 @@
 import copy
-import json
 from pathlib import Path
 from typing import List
 
@@ -62,16 +61,6 @@ class OfflineDataloader:
 
         self.initial_diff_dict = {}  # dict[str(scene_id), dict[str(diff_type), Data]]
         self.initial_diff_count_dict = {}  # dict[str(scene_id), torch.Tensor]
-
-        self.metadata = {}
-
-        # Load metadata
-        for scene_id in scene_ids:
-            metadata_path = self.data_dir / f"scene_{scene_id}" / "metadata.json"
-            assert metadata_path.exists(), f"Metadata file not found at {metadata_path}"
-
-            with open(metadata_path, "r") as f:
-                self.metadata["scene_" + str(scene_id)] = json.load(f)
         # Load diffs
 
         for scene_id in scene_ids:
@@ -82,12 +71,10 @@ class OfflineDataloader:
                 self.data_dir / f"scene_{scene_id}" / "initial_diff_counts.pt"
             )
 
-        # Load all scene configs
+        # Load all scene configs (no metadata.json; scene_id is sufficient)
         self.scene_configs = []
         for scene_id in scene_ids:
-            # get this scene metadata
-            scene_metadata = self.metadata["scene_" + str(scene_id)]
-            init_scene_config = self.load_scene_config(scene_metadata)
+            init_scene_config = self.load_scene_config(scene_id)
             self.scene_configs.append(init_scene_config)
 
     def get_processed_offline_data(
@@ -125,9 +112,8 @@ class OfflineDataloader:
             all_cfgs.append(cfgs_this_scene)
         return all_cfgs
 
-    def load_scene_config(self, scene_metadata: dict) -> ConcurrentSceneData:
+    def load_scene_config(self, scene_id: int) -> ConcurrentSceneData:
         """Load a single scene configuration from disk."""
-        scene_id = scene_metadata["scene_id"]
 
         # voxels
         vox_init_path = self.data_dir / "voxels" / f"vox_init_{scene_id}.pt"
@@ -271,9 +257,6 @@ def check_if_data_exists(
 
     # Check per-scene files
     for scene_id in scene_ids:
-        metadata_path = data_dir / f"scene_{scene_id}" / "metadata.json"
-        if not metadata_path.exists():
-            return False
         # States and info
         state_dir = data_dir / "state"
         state_and_info_files = [
@@ -293,22 +276,28 @@ def check_if_data_exists(
         ):
             return False
 
-        # assert that there is enough data:
-        with open(metadata_path, "r") as f:
-            metadata = json.load(f)
-        if metadata["count_generated_envs"] < count_envs_per_scene[scene_id]:
+        # Verify batch count using saved init state (metadata.json deprecated)
+        init_state_path = state_dir / f"state_{scene_id}_init.pt"
+        with open(init_state_path, "rb") as f:
+            init_state = torch.load(f)
+            sim_info = torch.load(state_dir / f"info_{scene_id}.pt")
+
+        assert init_state.ndim == 1, "Expected init_state to be persisted as 1ndim."
+        batch_dim = int(init_state.batch_size[0])
+
+        if batch_dim < int(count_envs_per_scene[scene_id]):
             print(
-                f"Found less data than expected for scene_id: {scene_id}. Found {metadata['count_generated_envs']}, expected {count_envs_per_scene[scene_id]}. Regenerating..."
+                f"Found less data than expected for scene_id: {scene_id}. Found {batch_dim}, expected {int(count_envs_per_scene[scene_id])}. Regenerating..."
             )
             return False
-        elif metadata["count_generated_envs"] > count_envs_per_scene[scene_id] * 3:
+        elif batch_dim > int(count_envs_per_scene[scene_id]) * 3:
             print(
                 "Note: found at least 3 times more data than requested. This may strain the memory. "
                 "Consider regenerating data with a requested size."
             )
-        if metadata["env_setup_name"] != env_setups[scene_id].__class__.__name__:
+        if sim_info.env_setup_name != env_setups[scene_id].__class__.__name__:
             print(
-                f"Found data for different environment setup than requested. Found {metadata['env_setup_name']}, expected {env_setups[scene_id].__class__.__name__}. Regenerating..."
+                f"Found data for different environment setup than requested. Found {sim_info.env_setup_name}, expected {env_setups[scene_id].__class__.__name__}. Regenerating..."
             )
             return False
 
