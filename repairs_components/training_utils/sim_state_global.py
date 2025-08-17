@@ -68,7 +68,13 @@ class RepairsSimState(SimState):  # type: ignore
         physical_diffs = []
         physical_diff_counts = []
         total_diff_counts = []
-        for i in range(self.batch_size[0]):
+        # Normalize batch size to an int (TensorClass may expose it as int or tuple)
+        bs: int = (
+            int(self.batch_size)
+            if isinstance(self.batch_size, int)
+            else int(self.batch_size[0])
+        )
+        for i in range(bs):
             # Electronics diff: only compute if both states have electronics registered
             if sim_info.component_info.has_electronics:
                 # Pass single component_info; comparability is validated inside diff

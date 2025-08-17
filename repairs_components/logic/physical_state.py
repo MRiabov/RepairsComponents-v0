@@ -49,6 +49,17 @@ class PhysicalStateInfo:
     mesh_file_names: dict[str, str] = field(default_factory=dict)
     """Per-scene mapping from body/fastener names to asset file paths (mesh/MJCF)."""
 
+    # --- genesis link indices (singletons, no batch dim) ---
+    body_base_link_idx: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.int32)
+    )
+    """Base link indices for each registered body, aligned with body_indices' integer ids."""
+
+    fastener_base_link_idx: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.int32)
+    )
+    """Base link indices for each registered fastener, aligned with [0..num_fasteners)."""
+
     # --- terminals --- # maybe this should be connectors.
     terminal_indices_from_name: dict[str, int] = field(default_factory=dict)
     """Terminal indices per connector name."""
@@ -138,6 +149,11 @@ class PhysicalStateInfo:
         assert (self.hole_depth > 0).all(), "Hole depths must be positive."
         assert self.hole_is_through.shape == (self.hole_count,), (
             "Hole is through must have shape (H,)"
+        )
+        # link indices are 1D singletons
+        assert self.body_base_link_idx.ndim == 1, "body_base_link_idx must be 1D"
+        assert self.fastener_base_link_idx.ndim == 1, (
+            "fastener_base_link_idx must be 1D"
         )
 
 

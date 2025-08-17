@@ -383,7 +383,8 @@ def attach_fastener_to_part(
         already_inserted_into_one_hole (torch.Tensor): Whether the fastener is already inserted
             into a (top) hole in the same environment. Shape [B] (bool).
         top_hole_depth (torch.Tensor): Depth inserted into the top hole in meters (>= 0). If
-            `already_inserted_into_one_hole` is True, must be > 0; otherwise must be 0. Shape [B].
+            `already_inserted_into_one_hole` is True and the top hole is through, must be 0;
+            otherwise (when not already inserted) must be 0. Shape [B].
         fastener_length (torch.Tensor): Total fastener length in meters (> 0). Shape [B].
         envs_idx (torch.Tensor): Indices of environments to apply the update to. Shape [B].
 
@@ -392,7 +393,7 @@ def attach_fastener_to_part(
         - Units are meters throughout.
         - Preconditions enforced by assertions:
             * Where `already_inserted_into_one_hole` is True: `top_hole_is_through` must be True
-              and `top_hole_depth` > 0
+              and `top_hole_depth` == 0
             * Where `already_inserted_into_one_hole` is False: `top_hole_depth` == 0
             * `inserted_to_hole_depth` > 0 and `fastener_length` > 0
 
@@ -404,14 +405,23 @@ def attach_fastener_to_part(
         f"Where already inserted, must be inserted into a through hole (can't insert when the top hole is blind).\n"
         f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_is_through: {top_hole_is_through}"
     )
-    assert (already_inserted_into_one_hole == (top_hole_depth > 0)).all(), (
-        f"Where marked as uninserted, top hole depth must be 0, and where inserted, >0.\n"
+    # If already inserted into a (top) hole, that top hole must be through, and inserted depth is 0
+    assert (
+        (already_inserted_into_one_hole & top_hole_is_through) == already_inserted_into_one_hole
+    ).all(), (
+        f"Where already inserted, top hole must be through.\n"
+        f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_is_through: {top_hole_is_through}"
+    )
+    assert (top_hole_depth[already_inserted_into_one_hole] == 0).all() and (
+        top_hole_depth[~already_inserted_into_one_hole] == 0
+    ).all(), (
+        f"top_hole_depth must be 0 both when not inserted and when inserted into a through top hole.\n"
         f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_depth: {top_hole_depth}"
     )
-    assert fastener_length > 0, (
+    assert (fastener_length > 0).all(), (
         f"Fastener length must be positive. Fastener_length: {fastener_length}"
     )
-    assert inserted_to_hole_depth > 0, (
+    assert (inserted_to_hole_depth > 0).all(), (
         f"Inserted to hole depth must be positive. Inserted_to_hole_depth: {inserted_to_hole_depth}"
     )
 
@@ -439,6 +449,10 @@ def attach_fastener_to_part(
     fastener_entity.set_pos(fastener_pos, envs_idx)
     fastener_entity.set_quat(inserted_into_hole_quat, envs_idx)
 
+    # # Make idempotent: remove existing weld if present before adding
+    # rigid_solver.delete_weld_constraint(
+    #     fastener_joint, other_body_link, envs_idx
+    # )
     rigid_solver.add_weld_constraint(
         fastener_joint, other_body_link, envs_idx
     )  # works in genesis's examples.

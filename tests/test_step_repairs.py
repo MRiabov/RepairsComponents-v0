@@ -424,7 +424,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
 
     # mark as moved to closest marked hole on second part
     hole_pos_part_2 = physical_state.hole_positions[0, 2]
-    screwdriver.picked_up_fastener_tip_position = hole_pos_part_2
+    screwdriver.picked_up_fastener_tip_position[0] = hole_pos_part_2
     actions = torch.zeros((1, 10))
     actions[:, 8] = 0.99  # screw in to attach second part
     repairs_sim_state = step_screw_in_or_out(

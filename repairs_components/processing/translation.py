@@ -67,6 +67,11 @@ def translate_state_to_genesis_scene(
     physical_info = sim_info.physical_info
     electronics_state = sim_state.electronics_state[0]  # def should not be [0].
 
+    # Preallocate base link index lists aligned by integer ids
+    physical_info.body_base_link_idx = torch.zeros(
+        (len(physical_info.body_indices),), dtype=torch.int32, device=sim_state.device
+    )
+
     # translate each child into genesis entities
     for body_name, body_idx in physical_info.body_indices.items():
         assert body_name is not None and "@" in body_name, "Label must contain '@'"
@@ -105,9 +110,17 @@ def translate_state_to_genesis_scene(
                 f"Not implemented for translation part type: {part_type}"
             )
 
+        # record base link idx at the correct id slot
+        physical_info.body_base_link_idx[body_idx] = new_entity.base_link.idx
         gs_entities[body_name] = new_entity
 
     singleton_fastener_morphs = {}  # cache to reduce load times.
+    # Preallocate fastener base link indices aligned by fastener id [0..F)
+    physical_info.fastener_base_link_idx = torch.zeros(
+        (len(sim_state.physical_state.fasteners_attached_to_body.shape[1]),),
+        dtype=torch.int32,
+        device=sim_state.device,
+    )
 
     for fastener_id, attached_to in enumerate(
         sim_state.physical_state.fasteners_attached_to_body[0]
@@ -132,6 +145,8 @@ def translate_state_to_genesis_scene(
 
         # store fastener entity in gs_entities
         gs_entities[Fastener.fastener_name_in_simulation(fastener_id)] = new_entity
+        # record fastener base link index at its id
+        physical_info.fastener_base_link_idx[fastener_id] = new_entity.base_link.idx
 
         # NOTE: ^ there probably is sense to store fasteners as fasteners id in gs_entities, not as length+height.
         # there is no need for length+height, but there is value in unique id.
@@ -284,7 +299,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
 def translate_compound_to_sim_state(
     batch_b123d_compounds: list[Compound],
-    device: torch.device,
+    device: torch.device | None = None,  # device to create RepairsSimState on.
     connected_bodies: list[list[str]] = [],
 ) -> tuple[RepairsSimState, RepairsSimInfo]:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
@@ -293,6 +308,7 @@ def translate_compound_to_sim_state(
         "All compounds must have children."
     )
     n_envs = len(batch_b123d_compounds)
+    device = device if device is not None else torch.device("cpu")
     sim_state = torch.stack([RepairsSimState(device=device)] * n_envs)
 
     # Compute hole data upfront from the first compound
@@ -459,7 +475,7 @@ def translate_compound_to_sim_state(
     for env_id in range(sim_state.physical_state.batch_size[0]):
         fastener_idx = 0
         fastener_names = []
-        for part in b123d_compound.leaves:
+        for part in batch_b123d_compounds[env_id].leaves:
             part_name, part_type = part.label.split("@", 1)
             # Collect fastener data for later processing
             if part_type == "fastener":
@@ -526,6 +542,22 @@ def translate_compound_to_sim_state(
         fastener_init_hole_b,
         fastener_names,
     )
+
+    # Broadcast fastener scalars to include batch dimension as tests expect [B, N]
+    # PhysicalStateInfo is a singleton; we explicitly store batched views for translation outputs
+    B = sim_state.physical_state.batch_size[0]
+    if sim_info.physical_info.fasteners_diam.ndim == 1:
+        sim_info.physical_info.fasteners_diam = (
+            sim_info.physical_info.fasteners_diam.unsqueeze(0)
+            .expand(B, -1)
+            .contiguous()
+        )
+    if sim_info.physical_info.fasteners_length.ndim == 1:
+        sim_info.physical_info.fasteners_length = (
+            sim_info.physical_info.fasteners_length.unsqueeze(0)
+            .expand(B, -1)
+            .contiguous()
+        )
 
     # NOTE: connectors and terminal_defs other solid bodies are not encoded in electronics, only functional components and their connections are encoded.
     # so check_connections will remain, however it will simply be an intermediate before the actual export graph.
