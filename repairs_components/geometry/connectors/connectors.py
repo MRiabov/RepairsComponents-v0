@@ -29,13 +29,14 @@ import trimesh
 
 
 class Connector(ElectricalComponentInfo):
-    in_sim_id: int
+    in_sim_id: int = -1
     "The connector id in the simulation."
     # NOTE: this should correspond to the physical sim state terminal_pos male/female tensors. It currently does not. (P2)
 
     _terminal_def_size: float = 0.3  # vis only
 
     def __init__(self, in_sim_id: int):
+        assert in_sim_id > 0
         super().__init__(self.get_name(in_sim_id, None))
         self.in_sim_id = in_sim_id  # useful for female and male connector namesF
 

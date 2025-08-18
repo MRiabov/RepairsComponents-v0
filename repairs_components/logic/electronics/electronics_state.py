@@ -16,8 +16,8 @@ from repairs_components.logic.electronics.electronics_control import (
     SwitchInfo,
     SwitchState,
 )
-from repairs_components.logic.electronics.led import LedInfo
-from repairs_components.logic.electronics.motor import MotorInfo
+from repairs_components.logic.electronics.led import LedInfo, LedState
+from repairs_components.logic.electronics.motor import MotorInfo, MotorState
 
 
 # Per-type Info/State classes are defined in their component modules and imported above.
@@ -109,6 +109,9 @@ class ElectronicsState(TensorClass, tensor_only=True):
     )
     # Per-batch dynamic state for control components
     switch_state: SwitchState = field(default_factory=SwitchState)
+    # Per-batch dynamic outputs for effectors
+    led_state: LedState = field(default_factory=LedState)
+    motor_state: MotorState = field(default_factory=MotorState)
 
     def clear_all_connections(self) -> "ElectronicsState":
         """Reset all terminal nets to -1 (no connectivity)."""
@@ -446,12 +449,20 @@ def register_components_batch(
     switch_state_tc = SwitchState(
         state_bits=torch.zeros((batch_size, switch_ids.shape[0]), dtype=torch.bool, device=device)
     )
+    led_state_tc = LedState(
+        luminosity_pct=torch.zeros((batch_size, led_ids.shape[0]), dtype=torch.float32, device=device)
+    )
+    motor_state_tc = MotorState(
+        speed_pct=torch.zeros((batch_size, motor_ids.shape[0]), dtype=torch.float32, device=device)
+    )
     state = ElectronicsState(
         net_ids=torch.full((batch_size, T), -1, dtype=torch.long, device=device),
         state_bits=torch.zeros((batch_size, N), dtype=torch.bool, device=device),
         terminal_voltage=torch.zeros((batch_size, T), dtype=torch.float32, device=device),
         component_branch_current=torch.zeros((batch_size, N), dtype=torch.float32, device=device),
         switch_state=switch_state_tc,
+        led_state=led_state_tc,
+        motor_state=motor_state_tc,
         device=device,
         batch_size=batch_size,
     )

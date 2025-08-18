@@ -14,3 +14,10 @@ class MotorInfo(TensorClass):
     k_tau: torch.Tensor = field(
         default_factory=lambda: torch.empty((0,), dtype=torch.float32)
     )
+
+
+class MotorState(TensorClass):
+    # [B, N_motor]
+    speed_pct: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0, 0), dtype=torch.float32)
+    )
