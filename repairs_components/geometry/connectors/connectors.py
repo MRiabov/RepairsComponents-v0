@@ -18,7 +18,7 @@ from build123d.geometry import Location
 from genesis import gs
 from websockets.typing import Origin
 from repairs_components.logic.electronics.component import (
-    ElectricalComponent,
+    ElectricalComponentInfo,
     ElectricalComponentsEnum,
 )
 import numpy as np
@@ -28,7 +28,7 @@ from typing import Literal, Mapping
 import trimesh
 
 
-class Connector(ElectricalComponent):
+class Connector(ElectricalComponentInfo):
     in_sim_id: int
     "The connector id in the simulation."
     # NOTE: this should correspond to the physical sim state terminal_pos male/female tensors. It currently does not. (P2)

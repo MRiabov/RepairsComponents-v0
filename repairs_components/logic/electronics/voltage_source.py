@@ -1,13 +1,12 @@
-from .component import ElectricalComponent
-import numpy as np
+from dataclasses import field
+import torch
+from tensordict import TensorClass
 
 
-class VoltageSource(ElectricalComponent):
-    def __init__(self, voltage: float, name: str):
-        super().__init__(name)
-        self.voltage = voltage
-        self.connected_to = []
-
-    def propagate(self, voltage: float, current: float):
-        # As the source, set voltage to self.voltage, current is determined by load
-        return self.voltage, current
+class VoltageSourceInfo(TensorClass):
+    component_ids: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.long)
+    )
+    voltage: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.float32)
+    )

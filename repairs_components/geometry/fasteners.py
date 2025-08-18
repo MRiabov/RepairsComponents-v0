@@ -407,7 +407,8 @@ def attach_fastener_to_part(
     )
     # If already inserted into a (top) hole, that top hole must be through, and inserted depth is 0
     assert (
-        (already_inserted_into_one_hole & top_hole_is_through) == already_inserted_into_one_hole
+        (already_inserted_into_one_hole & top_hole_is_through)
+        == already_inserted_into_one_hole
     ).all(), (
         f"Where already inserted, top hole must be through.\n"
         f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_is_through: {top_hole_is_through}"

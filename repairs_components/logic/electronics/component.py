@@ -1,23 +1,27 @@
 from abc import abstractmethod
 from enum import IntEnum
 from pathlib import Path
-from repairs_components.geometry.base import Component
-import numpy as np
+from dataclasses import field
+import torch
+from tensordict import TensorClass
 
 
-class ElectricalComponent(Component):
-    def __init__(self, name: str, max_load: tuple[float, float] | None = None):
-        # Use a list for connections; handle vectorization at the simulation level
-        self.connected_to: list[ElectricalComponent] = []
-        self.name: str = name  # all names must be unique, to be used later.
-        self.max_load = max_load
+class ElectricalComponentInfo(TensorClass):
+    """Base TensorClass for electrical components.
 
-    def connect(self, other: "ElectricalComponent"):
-        self.connected_to.append(other)
+    This class intentionally avoids Python objects (e.g., names) to remain tensor-only.
+    Per-type parameters should be stored in batched arrays (see ElectronicsComponentInfo).
 
-    @abstractmethod
-    def propagate(self, voltage: float, current: float) -> tuple[float, float]:
-        pass
+    This class is meant to be batched only as len(number_components)
+    """
+
+    # Optional per-instance limits (prefer storing globally in ElectronicsComponentInfo)
+    max_voltage: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.float32)
+    )
+    max_current: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.float32)
+    )
 
     @property
     @abstractmethod
@@ -28,26 +32,9 @@ class ElectricalComponent(Component):
     @property
     @abstractmethod
     def get_path(self) -> Path:
-        "Get ElectricalComponent's path in `shared` folder."
+        """Get ElectricalComponent's path in `shared` folder. This is
+        necessary for some components for geometry persistence."""
         raise NotImplementedError
-
-
-class ElectricalConsumer(ElectricalComponent):
-    @abstractmethod
-    def propagate(self, voltage: float, current: float) -> tuple[float, float]:
-        pass
-
-    @abstractmethod
-    def use_current(self, voltage: float, current: float) -> dict:
-        pass
-
-
-class ElectricalGate(ElectricalComponent):
-    @abstractmethod
-    def propagate(
-        self, voltage: float, current: float, property
-    ) -> tuple[float, float]:
-        pass
 
 
 class ElectricalComponentsEnum(IntEnum):
@@ -63,3 +50,27 @@ class ElectricalComponentsEnum(IntEnum):
     LED = 4
     RESISTOR = 5
     VOLTAGE_SOURCE = 6
+
+
+class TerminalRoleEnum(IntEnum):
+    """Standardized terminal roles used by the solver when stamping.
+
+    Keep this minimal; roles are only used to define polarity and special cases.
+    """
+
+    TERM_A = 0
+    TERM_B = 1
+    POS = 2
+    NEG = 3
+    ANODE = 4
+    CATHODE = 5
+    COM = 6
+    NO = 7
+    NC = 8
+
+
+class ControlTypeEnum(IntEnum):
+    NONE = 0
+    CURRENT_THRESHOLD = 1
+    VOLTAGE_THRESHOLD = 2
+    EXTERNAL_ACTION = 3

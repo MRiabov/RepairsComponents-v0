@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 from repairs_components.logic.electronics.electronics_state import (
     ElectronicsState,
-    ElectronicsComponentInfo,
+    ElectronicsInfo,
 )
 from repairs_components.logic.physical_state import PhysicalState, PhysicalStateInfo
 from repairs_components.logic.tools.tools_state import ToolState, ToolInfo
@@ -15,8 +15,8 @@ from torch_geometric.data import Data
 class RepairsSimInfo:
     "Singleton, meta information about the sim state."
 
-    component_info: ElectronicsComponentInfo = field(
-        default_factory=ElectronicsComponentInfo
+    component_info: ElectronicsInfo = field(
+        default_factory=ElectronicsInfo
     )
     physical_info: PhysicalStateInfo = field(default_factory=PhysicalStateInfo)
     tool_info: ToolInfo = field(default_factory=ToolInfo)

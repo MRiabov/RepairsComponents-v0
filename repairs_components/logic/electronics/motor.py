@@ -1,16 +1,16 @@
-from .component import ElectricalConsumer
-import numpy as np
+from dataclasses import dataclass, field
+import torch
+from tensordict import TensorClass
 
 
-class Motor(ElectricalConsumer):
-    def __init__(self, resistance: float, name: str):
-        super().__init__(name)
-        self.resistance = resistance
-        self.speed = 0.0
-
-    def propagate(self, voltage: float, current: float) -> tuple[float, float]:
-        self.speed = current
-        return voltage, current
-
-    def use_current(self, voltage: float, current: float) -> dict:
-        return {"type": "motor", "speed": self.speed, "power": voltage * current}
+@dataclass
+class MotorInfo(TensorClass):
+    component_ids: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.long)
+    )
+    res_ohm: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.float32)
+    )
+    k_tau: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.float32)
+    )

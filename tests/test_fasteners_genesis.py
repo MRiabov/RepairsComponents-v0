@@ -193,7 +193,9 @@ def test_attach_and_detach_fastener_to_screwdriver(
     ), "Weld constraint between fastener and screwdriver should be removed"
     # assert tool state # note: all should have shape (1,)
     assert not tool_state.screwdriver_tc.has_picked_up_fastener[0]
-    assert torch.isnan(tool_state.screwdriver_tc.picked_up_fastener_tip_position[0]).all()
+    assert torch.isnan(
+        tool_state.screwdriver_tc.picked_up_fastener_tip_position[0]
+    ).all()
     assert torch.isnan(tool_state.screwdriver_tc.picked_up_fastener_quat[0]).all()
     assert tool_state.screwdriver_tc.picked_up_fastener_id[0].item() == -1
 

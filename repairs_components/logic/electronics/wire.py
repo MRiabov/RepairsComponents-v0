@@ -1,7 +1,7 @@
-from .component import ElectricalComponent
+from .component import ElectricalComponentInfo
 
 
-class Wire(ElectricalComponent):
+class Wire(ElectricalComponentInfo):
     "Convenience component for connecting/disconnecting other components"
 
     def __init__(self, name: str):

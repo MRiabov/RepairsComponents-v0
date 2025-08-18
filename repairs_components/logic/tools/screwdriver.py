@@ -52,7 +52,7 @@ class Screwdriver(Tool, TensorClass):
         if env_ids.numel() == 1:
             return Fastener.fastener_name_in_simulation(
                 self.picked_up_fastener_id[env_ids].item()
-            ) # just fixed it.
+            )  # just fixed it.
         else:
             names = [
                 Fastener.fastener_name_in_simulation(fastener_id.item())

@@ -5,12 +5,31 @@ from tensordict import TensorClass
 from torch_geometric.data import Data
 
 
-from repairs_components.logic.electronics.component import ElectricalComponentsEnum
+from repairs_components.logic.electronics.component import (
+    ElectricalComponentsEnum,
+    TerminalRoleEnum,
+    ControlTypeEnum,
+)
+from repairs_components.logic.electronics.resistor import ResistorInfo
+from repairs_components.logic.electronics.voltage_source import VoltageSourceInfo
+from repairs_components.logic.electronics.electronics_control import (
+    SwitchInfo,
+    SwitchState,
+)
+from repairs_components.logic.electronics.led import LedInfo
+from repairs_components.logic.electronics.motor import MotorInfo
+
+
+# Per-type Info/State classes are defined in their component modules and imported above.
 
 
 @dataclass
-class ElectronicsComponentInfo:
-    """Information about the ElectronicsState components."""
+class ElectronicsInfo:
+    """Singleton information about all ElectricalComponentInfo components. Never has a batch dimension.
+
+    Co-dependent with ElectronicsState, where ElectronicsInfo represents singleton info and ElectronicsState represents batch info.
+    
+    Holds ElectricalComponentInfo which represents per-component-type info."""
 
     component_type: torch.Tensor = field(
         default_factory=lambda: torch.empty((0,), dtype=torch.long)
@@ -41,6 +60,30 @@ class ElectronicsComponentInfo:
     has_electronics: bool = False
     "A flag that when False may prevent computation of electronics for speed."
 
+    # ------------------------------------------------------------------
+    # Derived terminal indexing helpers
+    # ------------------------------------------------------------------
+    component_first_terminal_index: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.long)
+    )
+    """Prefix sum over terminals_per_component to slice terminals of component i quickly."""
+
+    terminal_role: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.long)
+    )
+    """Role per terminal (enum TerminalRoleEnum). Shape: [T]."""
+    # Component parameters moved into type-specific ComponentInfo tensorclasses
+    
+    # Type-specific singleton component infos (unbatched over envs; sized by count per type)
+    resistors: ResistorInfo = field(default_factory=ResistorInfo)
+    vsources: VoltageSourceInfo = field(default_factory=VoltageSourceInfo)
+    switches: SwitchInfo = field(default_factory=SwitchInfo)
+    leds: LedInfo = field(default_factory=LedInfo)
+    motors: MotorInfo = field(default_factory=MotorInfo)
+
+    @property
+    def num_terminals(self):
+        return self.terminal_to_component_batch.shape[0]
 
 
 class ElectronicsState(TensorClass, tensor_only=True):
@@ -54,7 +97,18 @@ class ElectronicsState(TensorClass, tensor_only=True):
     )
     """Per-env terminal-to-net assignments. Varies over batches. 
     Values: -1 for unassigned else non-negative net id."""
-    # note: in the future there will be more fields.
+    # Dynamic per-env fields used by solver and measurements
+    state_bits: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0, 0), dtype=torch.bool)
+    )
+    terminal_voltage: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0, 0), dtype=torch.float32)
+    )
+    component_branch_current: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0, 0), dtype=torch.float32)
+    )
+    # Per-batch dynamic state for control components
+    switch_state: SwitchState = field(default_factory=SwitchState)
 
     def clear_all_connections(self) -> "ElectronicsState":
         """Reset all terminal nets to -1 (no connectivity)."""
@@ -65,7 +119,7 @@ class ElectronicsState(TensorClass, tensor_only=True):
         return self
 
     def _build_component_edges_from_nets(
-        self, component_info: ElectronicsComponentInfo
+        self, component_info: ElectronicsInfo
     ) -> torch.Tensor:
         """Derive undirected component-level edges from terminal net assignments.
 
@@ -109,7 +163,7 @@ class ElectronicsState(TensorClass, tensor_only=True):
         )
         return edge_list.t().contiguous()
 
-    def export_graph(self, component_info: ElectronicsComponentInfo) -> Data:
+    def export_graph(self, component_info: ElectronicsInfo) -> Data:
         """Export a torch_geometric.Data graph for ML consumers.
 
         Node features: [max_voltage, max_current, component_type, component_id]
@@ -129,7 +183,7 @@ class ElectronicsState(TensorClass, tensor_only=True):
     def diff(
         self,
         other: "ElectronicsState",
-        component_info: ElectronicsComponentInfo,
+        component_info: ElectronicsInfo,
     ) -> tuple[Data, int]:
         """Compute a graph diff between two electronics states (component-level edges).
         Note: component info is expected to be the same for both states, since we only ever compare electronic states from one env setup.
@@ -215,9 +269,7 @@ class ElectronicsState(TensorClass, tensor_only=True):
         n_diffs = int(node_mask.sum().item() + edge_mask.sum().item())
         return diff_graph, n_diffs
 
-    def diff_to_dict(
-        self, diff_graph: Data, component_info: ElectronicsComponentInfo
-    ) -> dict:
+    def diff_to_dict(self, diff_graph: Data, component_info: ElectronicsInfo) -> dict:
         """Convert diff graph to human-readable dict."""
         nodes_changed = (
             torch.nonzero(diff_graph.node_mask, as_tuple=False).flatten().tolist()
@@ -260,9 +312,7 @@ class ElectronicsState(TensorClass, tensor_only=True):
             ),
         }
 
-    def diff_to_str(
-        self, diff_graph: Data, component_info: ElectronicsComponentInfo
-    ) -> str:
+    def diff_to_str(self, diff_graph: Data, component_info: ElectronicsInfo) -> str:
         d = self.diff_to_dict(diff_graph, component_info)
         parts: list[str] = []
         if d["nodes_changed"]:
@@ -294,16 +344,9 @@ def register_components_batch(
     batch_size: int,
     connector_terminal_connectivity_a: torch.Tensor | None = None,  # [len(connectors)]
     connector_terminal_connectivity_b: torch.Tensor | None = None,  # [len(connectors)]
-) -> tuple[ElectronicsComponentInfo, ElectronicsState]:
+) -> tuple[ElectronicsInfo, ElectronicsState]:
     """A function meant to register all components at once except connectors."""
-    component_info = ElectronicsComponentInfo()
-    # Initialize with an empty net_ids that already matches the batch size to avoid
-    # TensorClass batch-dimension mismatch on construction.
-    state = ElectronicsState(
-        net_ids=torch.empty((batch_size, 0), dtype=torch.long, device=device),
-        device=device,
-        batch_size=batch_size,
-    )
+    component_info = ElectronicsInfo()
     assert len(names) > 0, "At least one component must be registered."
     assert component_info.component_type.numel() == 0, (
         "Expected to have no components during registration (must register all components at once)."
@@ -334,6 +377,85 @@ def register_components_batch(
     component_info.terminal_to_component_batch = base_terminal_to_components_batch
     T = int(base_terminal_to_components_batch.shape[0])
 
+    # Derived helpers
+    start_terminal_idx = (
+        torch.cumsum(component_info.terminals_per_component, dim=0)
+        - component_info.terminals_per_component
+    )
+    component_info.component_first_terminal_index = start_terminal_idx
+
+    # Default terminal roles: set all to TERM_A; call sites may refine.
+    component_info.terminal_role = torch.full(
+        (T,), int(TerminalRoleEnum.TERM_A.value), dtype=torch.long, device=device
+    )
+
+    # Initialize type-specific ComponentInfo holders using masks
+    is_resistor = component_types == int(ElectricalComponentsEnum.RESISTOR.value)
+    is_vsource = component_types == int(ElectricalComponentsEnum.VOLTAGE_SOURCE.value)
+    is_switch = component_types == int(ElectricalComponentsEnum.BUTTON.value)
+    is_led = component_types == int(ElectricalComponentsEnum.LED.value)
+    is_motor = component_types == int(ElectricalComponentsEnum.MOTOR.value)
+
+    resistor_ids = component_ids[is_resistor]
+    vsource_ids = component_ids[is_vsource]
+    switch_ids = component_ids[is_switch]
+    led_ids = component_ids[is_led]
+    motor_ids = component_ids[is_motor]
+
+    # Prepare per-type infos WITHOUT env batch dimension; sized only by count per type
+    resistors_tc = ResistorInfo(
+        component_ids=resistor_ids,
+        resistance=torch.empty((resistor_ids.shape[0],), dtype=torch.float32, device=device),
+    )
+    vsources_tc = VoltageSourceInfo(
+        component_ids=vsource_ids,
+        voltage=torch.empty((vsource_ids.shape[0],), dtype=torch.float32, device=device),
+    )
+    switches_tc = SwitchInfo(
+        component_ids=switch_ids,
+        on_res_ohm=torch.empty((switch_ids.shape[0],), dtype=torch.float32, device=device),
+        off_res_ohm=torch.empty((switch_ids.shape[0],), dtype=torch.float32, device=device),
+        control_from_component=torch.full((switch_ids.shape[0],), -1, dtype=torch.long, device=device),
+        control_type=torch.full(
+            (batch_size, switch_ids.shape[0]),
+            int(ControlTypeEnum.NONE.value),
+            dtype=torch.long,
+            device=device,
+        ),
+        control_threshold=torch.zeros((switch_ids.shape[0],), dtype=torch.float32, device=device),
+        control_hysteresis=torch.zeros((switch_ids.shape[0],), dtype=torch.float32, device=device),
+    )
+    leds_tc = LedInfo(
+        component_ids=led_ids,
+        vf_drop=torch.empty((led_ids.shape[0],), dtype=torch.float32, device=device),
+    )
+    motors_tc = MotorInfo(
+        component_ids=motor_ids,
+        res_ohm=torch.empty((motor_ids.shape[0],), dtype=torch.float32, device=device),
+        k_tau=torch.empty((motor_ids.shape[0],), dtype=torch.float32, device=device),
+    )
+
+    # Attach per-type infos to component_info
+    component_info.resistors = resistors_tc
+    component_info.vsources = vsources_tc
+    component_info.switches = switches_tc
+    component_info.leds = leds_tc
+    component_info.motors = motors_tc
+
+    # Create dynamic state (batched over envs)
+    switch_state_tc = SwitchState(
+        state_bits=torch.zeros((batch_size, switch_ids.shape[0]), dtype=torch.bool, device=device)
+    )
+    state = ElectronicsState(
+        net_ids=torch.full((batch_size, T), -1, dtype=torch.long, device=device),
+        state_bits=torch.zeros((batch_size, N), dtype=torch.bool, device=device),
+        terminal_voltage=torch.zeros((batch_size, T), dtype=torch.float32, device=device),
+        component_branch_current=torch.zeros((batch_size, N), dtype=torch.float32, device=device),
+        switch_state=switch_state_tc,
+        device=device,
+        batch_size=batch_size,
+    )
+
     # Set name-index maps once (kept identical across batch)
     component_info.component_indices_from_name = {
         name: i for i, name in enumerate(names)
@@ -342,7 +464,7 @@ def register_components_batch(
         i: n for n, i in component_info.component_indices_from_name.items()
     }
 
-    state.net_ids = torch.full((batch_size, T), -1, dtype=torch.long, device=device)
+    # state already initialized with correct dynamic field shapes
     if (
         connector_terminal_connectivity_a is not None
         or connector_terminal_connectivity_b is not None
@@ -387,10 +509,7 @@ def register_components_batch(
             connector_terminal_connectivity_b < T
         ).all(), "connector_terminal_connectivity_b is out of bounds"
         # Map component indices -> starting terminal indices (since connectors have 1 terminal, start index is their only terminal)
-        start_terminal_idx = (
-            torch.cumsum(component_info.terminals_per_component, dim=0)
-            - component_info.terminals_per_component
-        )  # maybe put this into component_info.
+        start_terminal_idx = component_info.component_first_terminal_index
         male_connector_terminals = start_terminal_idx[male_connector_ids]
         female_connector_terminals = start_terminal_idx[female_connector_ids]
         # repeat batch ids for each connector terminal # but should be filtered since many are -1?
@@ -429,7 +548,7 @@ def register_components_batch(
 
 def connect_terminal_to_net_or_create_new(
     electronics_states: "ElectronicsState",
-    component_info: ElectronicsComponentInfo,
+    component_info: ElectronicsInfo,
     batch_ids: torch.Tensor,  # [K]
     terminal_ids: torch.Tensor,  # [K]
     *,

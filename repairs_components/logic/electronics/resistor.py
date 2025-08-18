@@ -1,13 +1,12 @@
-from .component import ElectricalComponent
-import numpy as np
+from dataclasses import field
+import torch
+from tensordict import TensorClass
 
 
-class Resistor(ElectricalComponent):
-    def __init__(self, resistance: float, name: str):
-        super().__init__(name=name)
-        self.resistance = resistance
-        self.connected_to = []
-
-    def propagate(self, voltage: float, current: float):
-        voltage_drop = current * self.resistance
-        return voltage - voltage_drop, current
+class ResistorInfo(TensorClass):
+    component_ids: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.long)
+    )
+    resistance: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.float32)
+    )
