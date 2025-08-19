@@ -28,7 +28,7 @@ class ElectronicsInfo:
     """Singleton information about all ElectricalComponentInfo components. Never has a batch dimension.
 
     Co-dependent with ElectronicsState, where ElectronicsInfo represents singleton info and ElectronicsState represents batch info.
-    
+
     Holds ElectricalComponentInfo which represents per-component-type info."""
 
     component_type: torch.Tensor = field(
@@ -73,7 +73,7 @@ class ElectronicsInfo:
     )
     """Role per terminal (enum TerminalRoleEnum). Shape: [T]."""
     # Component parameters moved into type-specific ComponentInfo tensorclasses
-    
+
     # Type-specific singleton component infos (unbatched over envs; sized by count per type)
     resistors: ResistorInfo = field(default_factory=ResistorInfo)
     vsources: VoltageSourceInfo = field(default_factory=VoltageSourceInfo)
@@ -408,25 +408,39 @@ def register_components_batch(
     # Prepare per-type infos WITHOUT env batch dimension; sized only by count per type
     resistors_tc = ResistorInfo(
         component_ids=resistor_ids,
-        resistance=torch.empty((resistor_ids.shape[0],), dtype=torch.float32, device=device),
+        resistance=torch.empty(
+            (resistor_ids.shape[0],), dtype=torch.float32, device=device
+        ),
     )
     vsources_tc = VoltageSourceInfo(
         component_ids=vsource_ids,
-        voltage=torch.empty((vsource_ids.shape[0],), dtype=torch.float32, device=device),
+        voltage=torch.empty(
+            (vsource_ids.shape[0],), dtype=torch.float32, device=device
+        ),
     )
     switches_tc = SwitchInfo(
         component_ids=switch_ids,
-        on_res_ohm=torch.empty((switch_ids.shape[0],), dtype=torch.float32, device=device),
-        off_res_ohm=torch.empty((switch_ids.shape[0],), dtype=torch.float32, device=device),
-        control_from_component=torch.full((switch_ids.shape[0],), -1, dtype=torch.long, device=device),
+        on_res_ohm=torch.empty(
+            (switch_ids.shape[0],), dtype=torch.float32, device=device
+        ),
+        off_res_ohm=torch.empty(
+            (switch_ids.shape[0],), dtype=torch.float32, device=device
+        ),
+        control_from_component=torch.full(
+            (switch_ids.shape[0],), -1, dtype=torch.long, device=device
+        ),
         control_type=torch.full(
             (batch_size, switch_ids.shape[0]),
             int(ControlTypeEnum.NONE.value),
             dtype=torch.long,
             device=device,
         ),
-        control_threshold=torch.zeros((switch_ids.shape[0],), dtype=torch.float32, device=device),
-        control_hysteresis=torch.zeros((switch_ids.shape[0],), dtype=torch.float32, device=device),
+        control_threshold=torch.zeros(
+            (switch_ids.shape[0],), dtype=torch.float32, device=device
+        ),
+        control_hysteresis=torch.zeros(
+            (switch_ids.shape[0],), dtype=torch.float32, device=device
+        ),
     )
     leds_tc = LedInfo(
         component_ids=led_ids,
@@ -447,19 +461,29 @@ def register_components_batch(
 
     # Create dynamic state (batched over envs)
     switch_state_tc = SwitchState(
-        state_bits=torch.zeros((batch_size, switch_ids.shape[0]), dtype=torch.bool, device=device)
+        state_bits=torch.zeros(
+            (batch_size, switch_ids.shape[0]), dtype=torch.bool, device=device
+        )
     )
     led_state_tc = LedState(
-        luminosity_pct=torch.zeros((batch_size, led_ids.shape[0]), dtype=torch.float32, device=device)
+        luminosity_pct=torch.zeros(
+            (batch_size, led_ids.shape[0]), dtype=torch.float32, device=device
+        )
     )
     motor_state_tc = MotorState(
-        speed_pct=torch.zeros((batch_size, motor_ids.shape[0]), dtype=torch.float32, device=device)
+        speed_pct=torch.zeros(
+            (batch_size, motor_ids.shape[0]), dtype=torch.float32, device=device
+        )
     )
     state = ElectronicsState(
         net_ids=torch.full((batch_size, T), -1, dtype=torch.long, device=device),
         state_bits=torch.zeros((batch_size, N), dtype=torch.bool, device=device),
-        terminal_voltage=torch.zeros((batch_size, T), dtype=torch.float32, device=device),
-        component_branch_current=torch.zeros((batch_size, N), dtype=torch.float32, device=device),
+        terminal_voltage=torch.zeros(
+            (batch_size, T), dtype=torch.float32, device=device
+        ),
+        component_branch_current=torch.zeros(
+            (batch_size, N), dtype=torch.float32, device=device
+        ),
         switch_state=switch_state_tc,
         led_state=led_state_tc,
         motor_state=motor_state_tc,

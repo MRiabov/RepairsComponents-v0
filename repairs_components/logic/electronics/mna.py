@@ -218,7 +218,9 @@ def solve_dc_once(
     net_ids = state.net_ids  # [B, T]
     assigned_mask = net_ids >= 0
     any_assigned = torch.any(assigned_mask, dim=1)
-    assert torch.all(any_assigned).item(), "Each batch must have at least one assigned net"
+    assert torch.all(any_assigned).item(), (
+        "Each batch must have at least one assigned net"
+    )
     large = T + 1
     masked = net_ids.masked_fill(~assigned_mask, large)
     ground_gid = masked.min(dim=1).values  # [B]
@@ -291,7 +293,7 @@ def solve_dc_once(
         Vf = leds.vf_drop.to(torch.float32)  # [Nl]
         assert torch.all(Imax_l > 0).item(), "LED max_current must be > 0"
         assert torch.all(Vf > 0).item(), "LED vf_drop must be > 0"
-        Rl = (Vf / Imax_l)  # [Nl]
+        Rl = Vf / Imax_l  # [Nl]
         gl = (1.0 / Rl).unsqueeze(0).expand(B, -1)  # [B, Nl]
         batch_idx_nl = torch.arange(B, device=device).unsqueeze(1).expand(B, Nl)
         # Diagonal
@@ -350,7 +352,10 @@ def solve_dc_once(
         A.index_put_((batch_idx_nv, gvb, ivar_b), -ones, accumulate=True)
         A.index_put_((batch_idx_nv, ivar_b, gvb), -ones, accumulate=True)
         # RHS
-        z.index_put_((batch_idx_nv, ivar_b), vsources.voltage.to(torch.float32).unsqueeze(0).expand(B, Nv))
+        z.index_put_(
+            (batch_idx_nv, ivar_b),
+            vsources.voltage.to(torch.float32).unsqueeze(0).expand(B, Nv),
+        )
 
     # ---------- Enforce ground per batch: V(ground) = 0 via row constraint ----------
     row_idx = torch.arange(B, device=device)
@@ -415,11 +420,15 @@ def solve_dc_once(
     state.component_branch_current = out_component_current
     # Per-type outputs: LED luminosity and motor speed percentage in [0,1]
     if Nl > 0:
-        Imax_l = component_info.max_current[cids_l].to(torch.float32).unsqueeze(0)  # [1, Nl]
+        Imax_l = (
+            component_info.max_current[cids_l].to(torch.float32).unsqueeze(0)
+        )  # [1, Nl]
         led_pct = (Il.abs() / Imax_l).clamp(0.0, 1.0)
         state.led_state.luminosity_pct = led_pct
     if Nm > 0:
-        Imax_m = component_info.max_current[cids_m].to(torch.float32).unsqueeze(0)  # [1, Nm]
+        Imax_m = (
+            component_info.max_current[cids_m].to(torch.float32).unsqueeze(0)
+        )  # [1, Nm]
         motor_pct = (Im.abs() / Imax_m).clamp(0.0, 1.0)
         state.motor_state.speed_pct = motor_pct
 

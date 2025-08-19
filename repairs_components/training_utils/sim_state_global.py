@@ -15,9 +15,7 @@ from torch_geometric.data import Data
 class RepairsSimInfo:
     "Singleton, meta information about the sim state."
 
-    component_info: ElectronicsInfo = field(
-        default_factory=ElectronicsInfo
-    )
+    component_info: ElectronicsInfo = field(default_factory=ElectronicsInfo)
     physical_info: PhysicalStateInfo = field(default_factory=PhysicalStateInfo)
     tool_info: ToolInfo = field(default_factory=ToolInfo)
 
@@ -29,6 +27,12 @@ class RepairsSimInfo:
         "env_setup"  # TODO: move to a separate persistence state info.
     )
     # to prevent computation of certain objects if they are not present.
+
+    # Mechanical linkage metadata (rigid groups). These are optional and populated
+    # by translation when linked groups are provided. Names must correspond to
+    # `physical_info.body_indices` keys; indices are resolved from those names.
+    mech_linked_groups_names: tuple[list[str], ...] = field(default_factory=tuple)
+    mech_linked_groups_indices: tuple[list[int], ...] = field(default_factory=tuple)
 
 
 class RepairsSimState(SimState):  # type: ignore

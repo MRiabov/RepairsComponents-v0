@@ -34,6 +34,7 @@ from repairs_components.logic.tools.tool import (
     attach_tool_to_arm,
     detach_tool_from_arm,
 )
+from repairs_components.logic.electronics.mna import solve_dc_once
 
 
 def step_repairs(
@@ -53,7 +54,9 @@ def step_repairs(
         scene, gs_entities, current_sim_state, device=actions.device, sim_info=sim_info
     )
 
-    current_sim_state = step_electronics(current_sim_state)
+    current_sim_state, terminated, burned_component_indices = step_electronics(
+        current_sim_state, sim_info
+    )
 
     # step pick up or release tool
     current_sim_state = step_pick_up_release_tool(
@@ -63,7 +66,7 @@ def step_repairs(
     # sim-to-real assumes a small buffer between implementation and action, so let us just make reward compute first and action second which is equal to getting the reward and stepping the action.
     diff, total_diff_left = current_sim_state.diff(desired_state, sim_info)
 
-    success = total_diff_left == 0  # Tensor[batch] bool
+    success = (total_diff_left == 0) & (~terminated)  # Tensor[batch] bool
 
     # print(
     #     f"Scene step stats per scene: screw_mask {screw_mask}, pick_up_tool_mask {pick_up_tool_mask}, gripper_mask {gripper_mask}, release_tool_mask {release_tool_mask}, distance_to_grip_link {dist}"
@@ -85,20 +88,25 @@ def step_repairs(
         f"Pick up fastener tip position: {current_sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[current_sim_state.tool_state.screwdriver_tc.has_picked_up_fastener]}",
     )
 
-    return success, total_diff_left, current_sim_state, diff
+    return success, total_diff_left, current_sim_state, diff, burned_component_indices
 
 
-def step_electronics(
-    current_sim_state: RepairsSimState,
-):
-    """Step electronics attachments: No-op since connectivity is handled during translation phase.
+def step_electronics(current_sim_state: RepairsSimState, sim_info: RepairsSimInfo):
+    """Step electronics by running the DC MNA solver once and writing outputs.
 
-    Electronics connections are already established in translate_compound_to_sim_state()
-    in translation.py, making this function redundant.
+    Connectivity is established during translation; here we solve the circuit and
+    update dynamic outputs (e.g., LED luminosity and motor speed percentages).
     """
-    # Electronics connectivity is already handled during the translation phase
-    # in translate_compound_to_sim_state(), so this function is a no-op
-    return current_sim_state
+    if sim_info.component_info.has_electronics:
+        # Batched DC solve; writes back to current_sim_state.electronics_state
+        solve_result = solve_dc_once(
+            sim_info.component_info, current_sim_state.electronics_state
+        )
+        current_sim_state.electronics_state = solve_result.state
+        terminated = solve_result.terminated
+        burned_component_indices = solve_result.burned_component_indices
+
+    return current_sim_state, terminated, burned_component_indices
 
 
 def step_pick_up_release_tool(
