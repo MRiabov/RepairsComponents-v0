@@ -157,25 +157,44 @@ def filtered_intersection_check(
     any_intersect, intersecting_components, intersect_volume = (
         compound.do_children_intersect()
     )
-    # Check if there's any intersection that's not just between terminal_defs
+    # If no intersection, return early with neutral values
+    if not any_intersect:
+        return False, (None, None), 0.0
 
-    # Logic: any_intersect is true if *any* children intersect. Then check if
-    # *all* intersecting components are ignored labels with the same volume as the
-    # intersecting volume. If so, then there's no invalid intersection.
-    has_invalid_intersection = any_intersect and not all(
-        any(
-            child.label.endswith(ignored_labels)
-            and np.isclose(intersect_volume, child.volume)
-            for child in component.children
-        )
-        if component.children
-        else False
-        for component in intersecting_components
+    # Helper: does this component (or any of its direct children if it's a Compound)
+    # contain an ignored-labeled leaf with volume equal to the intersect volume?
+    def component_has_ignored_match(component):
+        if getattr(component, "children", None):
+            return any(
+                (child.label is not None)
+                and child.label.endswith(ignored_labels)
+                and np.isclose(intersect_volume, child.volume)
+                for child in component.children
+            )
+        else:
+            return (
+                (component.label is not None)
+                and component.label.endswith(ignored_labels)
+                and np.isclose(intersect_volume, component.volume)
+            )
+
+    # If any side of the intersecting pair is an ignored element (possibly nested),
+    # we treat this intersection as ignorable.
+    ignore_this_intersection = any(
+        component_has_ignored_match(component) for component in intersecting_components
     )
+
+    has_invalid_intersection = any_intersect and not ignore_this_intersection
 
     if assertion:
         assert not has_invalid_intersection, (
-            f"Non-terminal_def parts intersect. Intersecting parts: {[(part.label, part.volume) for part in intersecting_components]}. "
+            f"Non-ignored parts intersect. Intersecting parts: {[(part.label, part.volume) for part in intersecting_components]}. "
             f"Intersecting volume: {intersect_volume}."
         )
-    return has_invalid_intersection, intersecting_components, intersect_volume
+
+    # For ignorable or non-intersect cases, normalize return to (None, None, 0.0)
+    if not has_invalid_intersection:
+        return False, (None, None), 0.0
+
+    # Otherwise, return the original components and volume
+    return True, intersecting_components, intersect_volume
