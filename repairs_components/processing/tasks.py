@@ -14,10 +14,23 @@ class Task(ABC):
         compound: Compound,
         env_size=(640, 640, 640),  # mm
     ) -> Compound:
-        """Perturb the desired state of the task. Only move in x and y directions, the minimum of Z axis should be kept at 0."""
+        """Perturb the desired state of the task.
+
+        Move in X/Y and apply a random yaw around global Z in [0°, 360°).
+        Keep Z-min at 0.
+        """
         # Get the bounding box of the original compound
         bbox = compound.bounding_box()
         recentered = compound.moved(Location(-bbox.center()))
+
+        # Apply a random yaw around the global Z axis at the part's center
+        yaw_deg = float(np.random.uniform(0.0, 360.0))
+        yaw_axis = Axis(
+            origin=recentered.center(CenterOf.BOUNDING_BOX),
+            direction=(0, 0, 1),
+        )
+        recentered = recentered.rotate(yaw_axis, yaw_deg)
+
         aabb_min = np.array(tuple(recentered.bounding_box().min))
         aabb_max = np.array(tuple(recentered.bounding_box().max))
         size = aabb_max - aabb_min
@@ -84,7 +97,10 @@ class Task(ABC):
 
     @abstractmethod
     def perturb_initial_state(
-        self, compound: Compound, env_size: tuple[float, float, float]
+        self,
+        compound: Compound,
+        env_size: tuple[float, float, float],
+        linked_groups: dict[str, tuple[list[str]]] | None = None,
     ) -> Compound:
         "Perturb initial state; return the compound and the new positions of bodies in the compound."
         raise NotImplementedError
@@ -224,7 +240,10 @@ class AssembleTask(Task):
         return placed
 
     def perturb_initial_state(
-        self, compound: Compound, env_size=(640, 640, 640)
+        self,
+        compound: Compound,
+        env_size=(640, 640, 640),
+        linked_groups: dict[str, tuple[list[str]]] | None = None,
     ) -> Compound:
         """Randomly disassemble the compound into individual parts with non-overlapping positions.
 
@@ -256,89 +275,165 @@ class AssembleTask(Task):
         safe_env_max = np.array(
             [safe_env_size[0] / 2, safe_env_size[1] / 2, env_size[2]]
         )
-        components = compound.children
-        # note: components because both compounds and children.
-        part_info = []
+        # Use direct Part children; if empty, fallback to Part leaves (depends on b123d behavior)
+        components = [c for c in compound.children if isinstance(c, Part)]
+        if not components:
+            components = [c for c in compound.leaves if isinstance(c, Part)]
+            # ^FIXME: it shouldn't use leaves, should it? it could use the connector defs which is wrong.
+        label_to_part: dict[str, Part] = {
+            p.label: p for p in components if isinstance(p, Part)
+        }
 
-        preprocessed_components = []
+        # Build rigid clusters based on linked_groups (mechanically linked)
+        clusters: list[list[Part]] = []
+        used_labels: set[str] = set()
+        if (
+            linked_groups
+            and "mech_linked" in linked_groups
+            and linked_groups["mech_linked"]
+        ):
+            for group in linked_groups["mech_linked"]:
+                cluster_parts: list[Part] = []
+                for name in group:
+                    assert name in label_to_part, (
+                        f"Linked part {name} not found in geometry."
+                    )
+                    cluster_parts.append(label_to_part[name])
+                    used_labels.add(name)
+                clusters.append(cluster_parts)
 
-        # remove all joints between all parts and recenter (preprocess)
-        for component in components:
-            # remove all joints
-            # component.joints = {}
-            # FIXME: unfinished. in fact, it is wrong - it would remove the joints completely.
-            for joint in component.joints.values():
-                joint.connected_to = None
+        # Add remaining parts as singleton clusters
+        for p in components:
+            if p.label not in used_labels:
+                clusters.append([p])
 
-            # recenter all objects at their AABB center:
-            # get current center
-            center = np.array(tuple(component.center(CenterOf.BOUNDING_BOX)))
-            component.moved(Pos(-center))  # move by negative center
-            preprocessed_components.append(component)
-
-        # Calculate AABBs and determine stable orientations for each part
-        for component in preprocessed_components:
-            # Get stable orientation (longest dimension up if significantly elongated)
-            (rotation_axis, angle, up_axis) = self._get_stable_orientation(
-                np.array(tuple(component.bounding_box().size))
-            )
-
-            # Apply transformation to part
-            if abs(angle) > 1e-6:  # Only rotate if angle is not zero
-                # Create an axis of rotation at the part's center
-                rotation_axis_obj = Axis(
-                    origin=component.center(CenterOf.BOUNDING_BOX),
-                    direction=rotation_axis,
+        if (
+            linked_groups
+            and "mech_linked" in linked_groups
+            and linked_groups["mech_linked"]
+        ):
+            # Clustered path: operate on groups as rigid bodies
+            cluster_infos: list[dict] = []
+            for cluster in clusters:
+                # Recenter the cluster about its AABB center
+                cluster_comp = Compound(children=cluster)
+                group_center = np.array(
+                    tuple(cluster_comp.center(CenterOf.BOUNDING_BOX))
                 )
-                component = component.rotate(
-                    rotation_axis_obj, angle * 180 / np.pi
-                )  # Convert to degrees
+                recentered_parts = [part.moved(Pos(-group_center)) for part in cluster]
 
-            # FIXME: it aligns all parts in X axis at the moment.
+                # Apply stable orientation only for singleton parts to improve stability
+                if len(recentered_parts) == 1:
+                    comp0 = recentered_parts[0]
+                    (rotation_axis, angle, _up_axis) = self._get_stable_orientation(
+                        np.array(tuple(comp0.bounding_box().size))
+                    )
+                    if abs(angle) > 1e-6:
+                        rotation_axis_obj = Axis(
+                            origin=comp0.center(CenterOf.BOUNDING_BOX),
+                            direction=rotation_axis,
+                        )
+                        comp0 = comp0.rotate(rotation_axis_obj, angle * 180 / np.pi)
+                    recentered_parts = [comp0]
 
-            # put updated projection dimensions into part_info
-            aabb = component.bounding_box()
-            proj_width = aabb.size.X
-            proj_height = aabb.size.Y
-            aabb_min = np.array(tuple(aabb.min))
-            aabb_size = np.array(tuple(aabb.max))
+                # Apply a uniform random yaw to the entire cluster around global Z at the cluster origin
+                yaw_deg = float(np.random.uniform(0.0, 360.0))
+                yaw_axis = Axis(origin=(0, 0, 0), direction=(0, 0, 1))
+                yawed_parts = [p.rotate(yaw_axis, yaw_deg) for p in recentered_parts]
 
-            part_info.append(
-                {
-                    "part": component,
-                    "aabb_min": aabb_min,
-                    "aabb_size": aabb_size,
-                    "rotation_axis": rotation_axis,
-                    "up_axis": up_axis,
-                    "proj_width": proj_width,
-                    "proj_height": proj_height,
-                }
-            )
+                # Cluster AABB after yaw
+                yawed_cluster = Compound(children=yawed_parts)
+                aabb = yawed_cluster.bounding_box()
+                proj_width = aabb.size.X
+                proj_height = aabb.size.Y
 
-        # Pack parts with random positions
-        packed = self._pack_2d(part_info, safe_env_size[0], safe_env_size[1])
+                cluster_infos.append(
+                    {
+                        "parts": yawed_parts,  # parts are now around origin
+                        "proj_width": proj_width,
+                        "proj_height": proj_height,
+                    }
+                )
 
-        # FIXME: pack2d makes overlapping shapes (note: this is written in plan for 2 days.md. See a list of bugs there.)
+            # Pack clusters with random positions
+            packed = self._pack_2d(cluster_infos, safe_env_size[0], safe_env_size[1])
+            assert packed, ValueError("Failed to find valid positions for all parts")
 
-        assert packed, ValueError("Failed to find valid positions for all parts")
+            new_parts = []
+            for x, y, info in packed:
+                cluster_parts = info["parts"]
+                cluster_comp = Compound(children=cluster_parts)
+                pos = Pos(x, y, cluster_comp.bounding_box().size.Z / 2)
 
-        new_parts = []
-        # Position parts in the environment
-        for x, y, info in packed:
-            component = info["part"]
+                placed_parts = [p.located(pos) for p in cluster_parts]
+                placed_cluster = Compound(children=placed_parts)
+                z_offset = -placed_cluster.bounding_box().min.Z
+                final_parts = [p.moved(Pos(0, 0, z_offset)) for p in placed_parts]
+                new_parts.extend(final_parts)
+                placed_check = Compound(children=final_parts)
+                assert np.isclose(placed_check.bounding_box().min.Z, 0), (
+                    f"New cluster has non-zero minimum Z: {placed_check.bounding_box().min.Z}"
+                )
+        else:
+            # Non-clustered path: original per-part pipeline
+            preprocessed_components = []
+            for component in components:
+                for joint in component.joints.values():
+                    joint.connected_to = None
+                center = np.array(tuple(component.center(CenterOf.BOUNDING_BOX)))
+                component = component.moved(Pos(-center))
+                preprocessed_components.append(component)
 
-            # this is assuming the part is centered at the origin, which it should be. although not necessarily...
-            pos = Pos(x, y, component.bounding_box().size.Z / 2)
+            part_info = []
+            for component in preprocessed_components:
+                (rotation_axis, angle, up_axis) = self._get_stable_orientation(
+                    np.array(tuple(component.bounding_box().size))
+                )
+                if abs(angle) > 1e-6:
+                    rotation_axis_obj = Axis(
+                        origin=component.center(CenterOf.BOUNDING_BOX),
+                        direction=rotation_axis,
+                    )
+                    component = component.rotate(rotation_axis_obj, angle * 180 / np.pi)
 
-            # split the op to definitely move correctly.
-            moved_xy = component.located(pos)
-            moved_z = moved_xy.moved(Pos(0, 0, -moved_xy.bounding_box().min.Z))
-            new_parts.append(moved_z)
-            #### debug
-            assert np.isclose(moved_z.bounding_box().min.Z, 0), (
-                f"New component has non-zero minimum Z: {moved_z.bounding_box().min.Z}"
-            )
-            # /debug
+                yaw_deg = float(np.random.uniform(0.0, 360.0))
+                yaw_axis = Axis(
+                    origin=component.center(CenterOf.BOUNDING_BOX),
+                    direction=(0, 0, 1),
+                )
+                component = component.rotate(yaw_axis, yaw_deg)
+
+                aabb = component.bounding_box()
+                proj_width = aabb.size.X
+                proj_height = aabb.size.Y
+                aabb_min = np.array(tuple(aabb.min))
+                aabb_size = np.array(tuple(aabb.max))
+
+                part_info.append(
+                    {
+                        "part": component,
+                        "aabb_min": aabb_min,
+                        "aabb_size": aabb_size,
+                        "rotation_axis": rotation_axis,
+                        "up_axis": up_axis,
+                        "proj_width": proj_width,
+                        "proj_height": proj_height,
+                    }
+                )
+
+            packed = self._pack_2d(part_info, safe_env_size[0], safe_env_size[1])
+            assert packed, ValueError("Failed to find valid positions for all parts")
+
+            new_parts = []
+            for x, y, info in packed:
+                component = info["part"]
+                pos = Pos(x, y, component.bounding_box().size.Z / 2)
+                moved_xy = component.located(pos)
+                moved_z = moved_xy.moved(Pos(0, 0, -moved_xy.bounding_box().min.Z))
+                new_parts.append(moved_z)
+                assert np.isclose(moved_z.bounding_box().min.Z, 0), (
+                    f"New component has non-zero minimum Z: {moved_z.bounding_box().min.Z}"
+                )
 
         # Rebuild compound with new part positions
         new_compound = Compound(children=new_parts)
@@ -369,7 +464,10 @@ class DisassembleTask(Task):
     """Inverse of AssembleTask: initial state is the assembled desired state, and the desired state is disassembled desired state."""
 
     def perturb_initial_state(
-        self, compound: Compound, env_size=(640, 640, 640)
+        self,
+        compound: Compound,
+        env_size=(640, 640, 640),
+        linked_groups: dict[str, tuple[list[str]]] | None = None,
     ) -> Compound:
         # Use AssembleTask's perturb_desired_state to create the assembled initial state
         return AssembleTask().perturb_desired_state(compound, env_size)
@@ -386,7 +484,10 @@ class ReplaceTask(Task):
 
     # NOTE: this code was left unfinished.
     def perturb_initial_state(
-        self, compound: Compound, env_size=(640, 640, 640)
+        self,
+        compound: Compound,
+        env_size=(640, 640, 640),
+        linked_groups: dict[str, tuple[list[str]]] | None = None,
     ) -> Compound:
         compound = super().perturb_desired_state(compound, env_size)
         parts = [part for part in compound.children if isinstance(part, Part)]
@@ -411,7 +512,10 @@ class InsertTask(Task):
     """A task type that marks a single part as "to be inserted", and detaches it from the compound."""
 
     def perturb_initial_state(
-        self, compound: Compound, env_size=(640, 640, 640)
+        self,
+        compound: Compound,
+        env_size=(640, 640, 640),
+        linked_groups: dict[str, tuple[list[str]]] | None = None,
     ) -> Compound:
         compound = super().perturb_desired_state(compound, env_size)
         parts = [part for part in compound.children if isinstance(part, Part)]
