@@ -108,6 +108,7 @@ def get_default_configs(debug: bool = True):
         "env_setup_ids": [0],  # single concurrent scene
         "show_fps": True,
         "show_viewer": True,
+        "run_in_thread": False,  # temporary fix for genesis visualizer to work.
     }
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

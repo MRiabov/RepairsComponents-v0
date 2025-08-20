@@ -136,9 +136,7 @@ def test_physical_state_diff_fastener_attr_flags():
         fastener_compound_names=[get_fastener_singleton_name(4.0, 12.0)],
     )
 
-    # PhysicalStateInfo fastener params should be 1D for diff
-    physical_info.fasteners_diam = physical_info.fasteners_diam[0]
-    physical_info.fasteners_length = physical_info.fasteners_length[0]
+    # PhysicalStateInfo fastener params are singleton 1D tensors for diff
 
     diff_graph, total = A_batched.diff(B_batched, physical_info)
 
@@ -219,9 +217,7 @@ def test_fastener_hole_diameter_incompatibility_detected():
         fastener_compound_names=[get_fastener_singleton_name(6.0, 12.0)],
     )
 
-    # PhysicalStateInfo singleton fastener params should be 1D
-    physical_info.fasteners_diam = physical_info.fasteners_diam[0]
-    physical_info.fasteners_length = physical_info.fasteners_length[0]
+    # PhysicalStateInfo fastener params are singleton 1D tensors for diff
 
     # Since hole 0 is 5mm and fastener is 6mm, compatibility check should assert
     with pytest.raises(AssertionError):
@@ -284,9 +280,7 @@ def test_physical_state_diff_fastener_added_removed_and_count_diffs():
         fastener_compound_names=[get_fastener_singleton_name(3.0, 10.0)],
     )
 
-    # Ensure singleton fastener params are 1D for diff
-    physical_info.fasteners_diam = physical_info.fasteners_diam[0]
-    physical_info.fasteners_length = physical_info.fasteners_length[0]
+    # PhysicalStateInfo fastener params are singleton 1D tensors for diff
 
     diff_graph, total = A_batched.diff(B_batched, physical_info)
 
@@ -388,9 +382,7 @@ def test_physical_state_diff_fastener_attr_flags_batch_two():
     assert (A_batched.fasteners_attached_to_hole[1, 0] == torch.tensor([-1, -1])).all()
     assert (B_batched.fasteners_attached_to_hole[1, 0] == torch.tensor([-1, -1])).all()
 
-    # PhysicalStateInfo is singleton; fastener params are 1D for diff
-    physical_info.fasteners_diam = physical_info.fasteners_diam[0]
-    physical_info.fasteners_length = physical_info.fasteners_length[0]
+    # PhysicalStateInfo fastener params are singleton 1D tensors for diff
 
     diff_graph, total = A_batched.diff(B_batched, physical_info)
 

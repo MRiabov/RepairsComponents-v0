@@ -169,7 +169,9 @@ def test_step_electronics_switch_led_series_batched(test_device):
     cinfo.vsources.voltage = torch.tensor([V], dtype=torch.float32, device=device)
     Ron, Roff = 1.0, 1000.0
     cinfo.switches.on_res_ohm = torch.tensor([Ron], dtype=torch.float32, device=device)
-    cinfo.switches.off_res_ohm = torch.tensor([Roff], dtype=torch.float32, device=device)
+    cinfo.switches.off_res_ohm = torch.tensor(
+        [Roff], dtype=torch.float32, device=device
+    )
     Vf = 2.0
     cinfo.leds.vf_drop = torch.tensor([Vf], dtype=torch.float32, device=device)
     cinfo.has_electronics = True
@@ -323,6 +325,7 @@ def test_step_electronics_motor_series(test_device):
         assert math.isclose(
             float(st.motor_state.speed_pct[b, 0].item()), expected_pct, rel_tol=1e-4
         )
+
 
 # --------------------------
 # === step_electronics ===

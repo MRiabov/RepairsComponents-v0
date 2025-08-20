@@ -95,15 +95,97 @@ def test_perturb_desired_state():
     # The box should be moved in XY and have Z-min at 0
     assert np.allclose(result_min[2], 0), f"Z-min should be 0, got {result_min[2]}"
 
-    # The dimensions should be preserved
-    assert np.allclose(result_max - result_min, [5, 5, 5]), (
-        f"Box dimensions should be preserved as (5,5,5), got {result_max - result_min}"
-    )
+    # Dimensions under Z-yaw:
+    # Z size is preserved; XY AABB grows within [orig, orig*sqrt(2)].
+    size = result_max - result_min
+    assert np.allclose(size[2], 5), f"Z size should be 5, got {size[2]}"
+    max_xy = 5 * np.sqrt(2) + 1e-6
+    min_xy = 5 - 1e-6
+    assert min_xy <= size[0] <= max_xy, f"X size out of expected range: {size[0]}"
+    assert min_xy <= size[1] <= max_xy, f"Y size out of expected range: {size[1]}"
 
     # The XY position should be different from original
     assert not np.allclose(result_min[:2], original_min[:2]), (
         "XY position should be different after perturbation"
     )
+
+
+@pytest.fixture
+def bd_test_compound_labeled():
+    """Two labeled parts for clustered path tests."""
+    a = Box(10, 10, 5)
+    a.label = "a@solid"
+    b = Box(10, 10, 5).move(Pos(50, 0, 0))
+    b.label = "b@solid"
+    return Compound(children=[a, b])
+
+
+def _center_np(part: Compound) -> np.ndarray:
+    """Compute center from min/max to avoid API differences for bbox.center."""
+    bbox = part.bounding_box()
+    vmin = np.array(tuple(bbox.min), dtype=float)
+    vmax = np.array(tuple(bbox.max), dtype=float)
+    return 0.5 * (vmin + vmax)
+
+
+def test_cluster_cohesion_and_grounding(
+    bd_test_compound_labeled,
+):
+    np.random.seed(0)
+    task = AssembleTask()
+    comp = bd_test_compound_labeled
+    # Precompute original relative vector between labeled parts
+    a0, b0 = comp.children[0], comp.children[1]
+    d0 = _center_np(a0) - _center_np(b0)
+    assert np.linalg.norm(d0[:2]) > 1e-6, "Initial XY separation must be non-zero"
+
+    linked = {"mech_linked": (["a@solid", "b@solid"],)}
+    env_size = (640, 640, 640)
+    res = task.perturb_initial_state(comp, env_size, linked_groups=linked)
+
+    # Collect by label from result
+    parts = {p.label: p for p in res.children}
+    assert set(parts.keys()) == {"a@solid", "b@solid"}
+    d1 = _center_np(parts["a@solid"]) - _center_np(parts["b@solid"])
+
+    # Z-delta preserved (cluster yaw about Z and translations only)
+    assert np.isclose(d0[2], d1[2], atol=1e-6)
+    # Cohesion: parts remain relatively close as a cluster (well within env span)
+    assert np.linalg.norm(d1[:2]) < 0.4 * min(640, 640)
+    # Each child must be grounded
+    for child in res.children:
+        assert np.isclose(child.bounding_box().min.Z, 0), "Child must be Z-grounded"
+
+
+def test_cluster_invalid_name_raises(bd_test_compound_labeled):
+    task = AssembleTask()
+    comp = bd_test_compound_labeled
+    env_size = (640, 640, 640)
+    # Reference a non-existent label
+    bad = {"mech_linked": (["a@solid", "c@solid"],)}
+    with pytest.raises(AssertionError):
+        task.perturb_initial_state(comp, env_size, linked_groups=bad)
+
+
+@pytest.mark.parametrize(
+    "linked",
+    [None, {"mech_linked": (["a@solid", "b@solid"],)}],
+)
+def test_each_child_grounded_and_within_bounds(bd_test_compound_labeled, linked):
+    np.random.seed(1)
+    task = AssembleTask()
+    env_size = (640, 640, 640)
+    res = task.perturb_initial_state(
+        bd_test_compound_labeled, env_size, linked_groups=linked
+    )
+    # Bounds and non-intersection
+    assert (np.array(tuple(res.bounding_box().size)) < np.array(env_size)).all(), (
+        "Compound AABB must be within env bounds"
+    )
+    filtered_intersection_check(res, assertion=True)
+    # Each child grounded
+    for child in res.children:
+        assert np.isclose(child.bounding_box().min.Z, 0), "Child must be Z-grounded"
 
 
 if __name__ == "__main__":

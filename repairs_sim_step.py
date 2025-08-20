@@ -105,7 +105,13 @@ def step_electronics(current_sim_state: RepairsSimState, sim_info: RepairsSimInf
         current_sim_state.electronics_state = solve_result.state
         terminated = solve_result.terminated
         burned_component_indices = solve_result.burned_component_indices
+        return current_sim_state, terminated, burned_component_indices
 
+    # No electronics registered: return sane defaults matching batch size
+    bs = current_sim_state.tool_state.tool_ids.shape[0]
+    device = current_sim_state.tool_state.tool_ids.device
+    terminated = torch.zeros((bs,), dtype=torch.bool, device=device)
+    burned_component_indices = torch.empty((0,), dtype=torch.long, device=device)
     return current_sim_state, terminated, burned_component_indices
 
 

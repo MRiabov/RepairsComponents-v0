@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+import os
 import pytest
 import torch
 
@@ -12,8 +13,9 @@ from examples.ten_holes_14 import TenHoles  # type: ignore
 from repairs_components.training_utils.gym_env import RepairsEnv
 from repairs_components.processing.tasks import AssembleTask
 
-pytestmark = pytest.mark.skip(
-    reason="This test is skipped unless run explicitly for performance reasons."
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_ENV_INTEGRATION") != "1",
+    reason="Set RUN_ENV_INTEGRATION=1 to enable this slow integration test.",
 )
 
 

@@ -35,10 +35,9 @@ class Connector(ElectricalComponentInfo):
 
     _terminal_def_size: float = 0.3  # vis only
 
-    def __init__(self, in_sim_id: int):
-        assert in_sim_id > 0
-        super().__init__(self.get_name(in_sim_id, None))
-        self.in_sim_id = in_sim_id  # useful for female and male connector namesF
+    def __post_init__(self):
+        # Ensure ID validity when constructed via dataclass/TensorClass paths
+        assert self.in_sim_id >= 0, "Set in_sim_id to be non-negative."
 
     def propagate(self, voltage: float, current: float) -> tuple[float, float]:
         return voltage, current  # pass through.
@@ -120,7 +119,7 @@ class Connector(ElectricalComponentInfo):
         
         <worldbody>
             <body name="{name}">
-                <geom name="{name}_geom" type="mesh" mesh="{name}" density="{mesh_mass}"/>
+                <geom name="{name}_geom" type="mesh" mesh="{name}" density="{density}"/>
                 
                 <body name="connector_point" pos="{terminal_position[0]} {terminal_position[1]} {terminal_position[2]}">
                     <!-- No inertial, geom, or visual tags = fixed frame -->
@@ -251,7 +250,7 @@ class Connector(ElectricalComponentInfo):
         # from repairs_components.geometry.connectors.models.xt60 import XT60
         # from repairs_components.geometry.connectors.models.round_laptop import RoundLaptop
         if model_id == "europlug":
-            return Europlug(int(in_sim_id))
+            return Europlug(in_sim_id=int(in_sim_id))
         # elif model_id == "xt60": #TODO
         #     return XT60(int(in_sim_id), male_or_female == "male")
         # elif model_id == "round_laptop":
@@ -367,13 +366,13 @@ class ConnectorsEnum(IntEnum):
 
         enum_ = ConnectorsEnum(id)
         if enum_ == ConnectorsEnum.EUROPLUG:
-            return Europlug(in_sim_id)
+            return Europlug(in_sim_id=in_sim_id)
         if enum_ == ConnectorsEnum.XT60:
             raise NotImplementedError
         elif enum_ == ConnectorsEnum.ROUND_LAPTOP:
             raise NotImplementedError
         elif enum_ == ConnectorsEnum.POWERPOLE:
-            return Powerpole(in_sim_id)
+            return Powerpole(in_sim_id=in_sim_id)
         elif enum_ == ConnectorsEnum.USB_TYPE_C:
             raise NotImplementedError
         elif enum_ == ConnectorsEnum.USB_TYPE_A:

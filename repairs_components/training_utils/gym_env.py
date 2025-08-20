@@ -237,6 +237,9 @@ class RepairsEnv(gym.Env):
                     env_separate_rigid=True,
                     shadow=True,
                 ),  # type: ignore
+                viewer_options=gs.options.ViewerOptions(
+                    run_in_thread=io_cfg.get("run_in_thread", False),
+                ),
                 rigid_options=gs.options.RigidOptions(max_dynamic_constraints=256),
                 profiling_options=gs.options.ProfilingOptions(
                     show_FPS=io_cfg["show_fps"]
@@ -375,7 +378,7 @@ class RepairsEnv(gym.Env):
             )
 
             # Update the current simulation state based on the scene
-            success, total_diff_left, current_sim_state, diff = step_repairs(
+            success, total_diff_left, current_sim_state, diff, _burned_component_indices = step_repairs(
                 scene=scene_data.scene,
                 actions=action_by_scenes[scene_id],
                 gs_entities=scene_data.gs_entities,
