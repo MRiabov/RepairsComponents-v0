@@ -8,7 +8,6 @@ from repairs_components.training_utils.sim_state_global import (
     RepairsSimState,
     RepairsSimInfo,
 )
-from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum
 from repairs_components.geometry.fasteners import (
     Fastener,
@@ -63,9 +62,7 @@ def translate_state_to_genesis_scene(
 
     gs_entities: dict[str, RigidEntity] = {}
 
-    physical_state = sim_state.physical_state
     physical_info = sim_info.physical_info
-    electronics_state = sim_state.electronics_state[0]  # def should not be [0].
 
     # Preallocate base link index lists aligned by integer ids
     physical_info.body_base_link_idx = torch.zeros(
@@ -117,7 +114,7 @@ def translate_state_to_genesis_scene(
     singleton_fastener_morphs = {}  # cache to reduce load times.
     # Preallocate fastener base link indices aligned by fastener id [0..F)
     physical_info.fastener_base_link_idx = torch.zeros(
-        (len(sim_state.physical_state.fasteners_attached_to_body.shape[1]),),
+        (sim_state.physical_state.fasteners_attached_to_body.shape[1],),
         dtype=torch.int32,
         device=sim_state.device,
     )
@@ -301,6 +298,7 @@ def translate_compound_to_sim_state(
     batch_b123d_compounds: list[Compound],
     device: torch.device | None = None,  # device to create RepairsSimState on.
     connected_bodies: list[list[str]] = [],
+    linked_groups: dict[str, tuple[list[str]]] | None = None,
 ) -> tuple[RepairsSimState, RepairsSimInfo]:
     "Get RepairsSimState from the b123d_compound, i.e. translate from build123d to RepairsSimState."
     assert len(batch_b123d_compounds) > 0, "Batch must not be empty."
@@ -442,6 +440,40 @@ def translate_compound_to_sim_state(
     # Build sim info and set singleton PhysicalStateInfo
     sim_info = RepairsSimInfo()
     sim_info.physical_info = physical_state_info
+    # Populate mechanical linkage metadata, if provided
+    if linked_groups is not None:
+        assert isinstance(linked_groups, dict), "linked_groups must be a dict"
+        if "mech_linked" in linked_groups and linked_groups["mech_linked"]:
+            mech_groups = linked_groups["mech_linked"]
+            # Accept either a single list[str] or a tuple of list[str]
+            if isinstance(mech_groups, list) and all(
+                isinstance(n, str) for n in mech_groups
+            ):
+                groups_iterable = [mech_groups]  # single group provided
+                names_to_store = mech_groups  # preserve original type (list)
+            elif isinstance(mech_groups, tuple):
+                assert all(
+                    isinstance(g, list) and all(isinstance(n, str) for n in g)
+                    for g in mech_groups
+                ), "mech_linked must be tuple[list[str], ...] when a tuple is provided"
+                groups_iterable = mech_groups
+                names_to_store = mech_groups  # preserve original type (tuple)
+            else:
+                raise AssertionError(
+                    "mech_linked must be list[str] or tuple[list[str], ...]"
+                )
+
+            # Validate names and resolve indices
+            body_indices = sim_info.physical_info.body_indices
+            resolved: list[list[int]] = []
+            for group in groups_iterable:
+                for name in group:
+                    assert name in body_indices, (
+                        f"Linked part name not found in body indices: {name}"
+                    )
+                resolved.append([body_indices[name] for name in group])
+            sim_info.mech_linked_groups_names = names_to_store
+            sim_info.mech_linked_groups_indices = tuple(resolved)
     # Persist hole metadata: compute now and store on sim_info, then update batched holes
     (
         sim_info.physical_info.starting_hole_positions,
@@ -532,7 +564,7 @@ def translate_compound_to_sim_state(
                 fastener_names.append(part_name)
                 fastener_idx += 1
 
-    # Register this body across all environments
+    # Register fasteners across all environments
     sim_state.physical_state, sim_info.physical_info = register_fasteners_batch(
         sim_state.physical_state,
         sim_info.physical_info,
@@ -542,27 +574,10 @@ def translate_compound_to_sim_state(
         fastener_init_hole_b,
         fastener_names,
     )
+    # PhysicalStateInfo must be singleton: diam/length are 1D [N]
+    assert sim_info.physical_info.fasteners_diam.ndim == 1
+    assert sim_info.physical_info.fasteners_length.ndim == 1
 
-    # Broadcast fastener scalars to include batch dimension as tests expect [B, N]
-    # PhysicalStateInfo is a singleton; we explicitly store batched views for translation outputs
-    B = sim_state.physical_state.batch_size[0]
-    if sim_info.physical_info.fasteners_diam.ndim == 1:
-        sim_info.physical_info.fasteners_diam = (
-            sim_info.physical_info.fasteners_diam.unsqueeze(0)
-            .expand(B, -1)
-            .contiguous()
-        )
-    if sim_info.physical_info.fasteners_length.ndim == 1:
-        sim_info.physical_info.fasteners_length = (
-            sim_info.physical_info.fasteners_length.unsqueeze(0)
-            .expand(B, -1)
-            .contiguous()
-        )
-
-    # NOTE: connectors and terminal_defs other solid bodies are not encoded in electronics, only functional components and their connections are encoded.
-    # so check_connections will remain, however it will simply be an intermediate before the actual export graph.
-    # alternatively (!) connectors can be encoded as edges in the non-export graph,
-    # however, during export they will be removed and component nodes will be connected
     # directly. # or should I? why not encode connectors? the model will need the type of connectors, I presume.
 
     # # Check for connections using tensor-based connector positions

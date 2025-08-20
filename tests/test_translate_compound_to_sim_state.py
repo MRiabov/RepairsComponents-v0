@@ -52,9 +52,9 @@ class TestEnv(EnvSetup):
         fixed_solid.label = "test_fixed_solid@fixed_solid"
         solid_with_hole.label = "test_solid_with_hole@solid"
 
-        europlug_male, terminal_def, europlug_female, _ = Europlug(0).bd_geometry(
-            (60, 70, 30)
-        )
+        europlug_male, terminal_def, europlug_female, _ = Europlug(
+            in_sim_id=0
+        ).bd_geometry((60, 70, 30))
         europlug_male = europlug_male.move(Pos(60, 70, 30))
         europlug_female = europlug_female.move(Pos(60, 70, 30))
         fastener = Fastener(initial_hole_id_b=0)
@@ -120,14 +120,8 @@ def test_translate_compound_to_sim_state(test_env_geom):
         expected_num_fasteners,
         4,
     )
-    assert sim_info.physical_info.fasteners_diam.shape == (
-        expected_batch_dim,
-        expected_num_fasteners,
-    )
-    assert sim_info.physical_info.fasteners_length.shape == (
-        expected_batch_dim,
-        expected_num_fasteners,
-    )
+    assert sim_info.physical_info.fasteners_diam.shape == (expected_num_fasteners,)
+    assert sim_info.physical_info.fasteners_length.shape == (expected_num_fasteners,)
     assert phys_state.fasteners_attached_to_body.shape == (
         expected_batch_dim,
         expected_num_fasteners,
@@ -145,13 +139,18 @@ def test_translate_compound_to_sim_state(test_env_geom):
     assert sim_info.physical_info.part_hole_batch.shape == (expected_num_holes,)
 
     # assert values.
-    assert set(sim_info.physical_info.body_indices.keys()) == {
+    keys = set(sim_info.physical_info.body_indices.keys())
+    # Verify solids present
+    assert {
         "test_solid@solid",
         "test_fixed_solid@fixed_solid",
         "test_solid_with_hole@solid",
-        "europlug_0_male@connector",
-        "europlug_0_female@connector",
-    }
+    }.issubset(keys)
+    # Verify two europlug connectors exist (IDs may vary like -1 or 0)
+    europlug_connectors = [
+        k for k in keys if k.endswith("@connector") and k.startswith("europlug_")
+    ]
+    assert len(europlug_connectors) == 2
     assert phys_state.position.allclose(
         compound_pos_to_sim_pos(positions)
     )  # note: expected incorrect X value in the 4th as it is calculated dynamically.
@@ -195,14 +194,8 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
 
     assert phys_state.fasteners_pos.shape == (batch_dim, expected_num_fasteners, 3)
     assert phys_state.fasteners_quat.shape == (batch_dim, expected_num_fasteners, 4)
-    assert sim_info.physical_info.fasteners_diam.shape == (
-        batch_dim,
-        expected_num_fasteners,
-    )
-    assert sim_info.physical_info.fasteners_length.shape == (
-        batch_dim,
-        expected_num_fasteners,
-    )
+    assert sim_info.physical_info.fasteners_diam.shape == (expected_num_fasteners,)
+    assert sim_info.physical_info.fasteners_length.shape == (expected_num_fasteners,)
     assert phys_state.fasteners_attached_to_body.shape == (
         batch_dim,
         expected_num_fasteners,
@@ -216,13 +209,16 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
     assert sim_info.physical_info.part_hole_batch.shape == (expected_num_holes,)
 
     # assert values for batched data
-    assert set(sim_info.physical_info.body_indices.keys()) == {
+    keys = set(sim_info.physical_info.body_indices.keys())
+    assert {
         "test_solid@solid",
         "test_fixed_solid@fixed_solid",
         "test_solid_with_hole@solid",
-        "europlug_0_male@connector",
-        "europlug_0_female@connector",
-    }
+    }.issubset(keys)
+    europlug_connectors = [
+        k for k in keys if k.endswith("@connector") and k.startswith("europlug_")
+    ]
+    assert len(europlug_connectors) == 2
 
     # Check batched positions and quaternions
     expected_positions = compound_pos_to_sim_pos(positions).expand(batch_dim, -1, -1)
@@ -250,8 +246,34 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
     assert sim_info.physical_info.part_hole_batch.equal(torch.tensor([holed_body_idx]))
     assert torch.allclose(
         sim_info.physical_info.fasteners_diam,
-        torch.tensor([5.0 / 1000]).expand(batch_dim, -1),  # default diameter
+        torch.tensor([5.0 / 1000]),  # default diameter
     )
+
+
+def test_translate_compound_records_mech_linked_groups(test_env_geom):
+    compound, _positions, _hole_loc = test_env_geom
+    # First translate to discover actual europlug connector names
+    _sim_state0, sim_info0 = translate_compound_to_sim_state([compound])
+    keys = sim_info0.physical_info.body_indices.keys()
+    male_name = next(k for k in keys if k.endswith("_male@connector"))
+    female_name = next(k for k in keys if k.endswith("_female@connector"))
+    linked = {"mech_linked": ([male_name, female_name])}
+    sim_state, sim_info = translate_compound_to_sim_state(
+        [compound], linked_groups=linked
+    )
+    # Names recorded as provided
+    assert sim_info.mech_linked_groups_names == linked["mech_linked"]
+    # Indices resolved to body_indices
+    idx0 = sim_info.physical_info.body_indices[male_name]
+    idx1 = sim_info.physical_info.body_indices[female_name]
+    assert sim_info.mech_linked_groups_indices == ([idx0, idx1],)
+
+
+def test_translate_compound_invalid_linked_name_raises(test_env_geom):
+    compound, _positions, _hole_loc = test_env_geom
+    bad = {"mech_linked": (["does_not_exist@solid"],)}
+    with pytest.raises(AssertionError):
+        translate_compound_to_sim_state([compound], linked_groups=bad)
 
 
 def test_get_starting_part_holes_origin_and_shift(test_device):

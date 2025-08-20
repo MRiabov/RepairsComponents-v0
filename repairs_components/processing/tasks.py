@@ -169,7 +169,7 @@ class AssembleTask(Task):
             tuple: (x, y) position if found, None if no valid position found
         """
         w, h = part_info["proj_width"], part_info["proj_height"]
-        max_attempts = 100
+        max_attempts = 500
 
         # max width by safety scale
         bin_max_width *= safety_scale
@@ -202,15 +202,12 @@ class AssembleTask(Task):
 
         return None  # No valid position found after max_attempts
 
-    # NOTE!!! build123d provides a method to pack parts in 2D space without overlaps.
-    # pack.pack
-    # although it's not random.
     def _pack_2d(self, part_infos, bin_width, bin_height):
         """Randomly pack parts in 2D space without overlaps.
 
         This method tries to place each part at a random position within the bin
         while ensuring no overlaps with already placed parts. Parts are processed
-        in random order to increase variation in the resulting layouts.
+        in descending order of projected area to prioritize placing larger parts first.
 
         Args:
             part_infos: List of part information dictionaries
@@ -223,9 +220,12 @@ class AssembleTask(Task):
         placed = []
         used_rectangles = []
 
-        # Shuffle parts to get different layouts each time
-        part_infos = part_infos.copy()
-        np.random.shuffle(part_infos)
+        # Place larger items first for robust packing
+        part_infos = sorted(
+            part_infos,
+            key=lambda info: float(info["proj_width"]) * float(info["proj_height"]),
+            reverse=True,
+        )
 
         for part_info in part_infos:
             pos = self._get_random_position(
@@ -236,6 +236,11 @@ class AssembleTask(Task):
                 w, h = part_info["proj_width"], part_info["proj_height"]
                 placed.append((x, y, part_info))
                 used_rectangles.append((x, y, x + w, y + h))
+
+        # Ensure all parts were placed; otherwise fail fast for debugging
+        assert len(placed) == len(part_infos), (
+            "Failed to find valid positions for all parts"
+        )
 
         return placed
 

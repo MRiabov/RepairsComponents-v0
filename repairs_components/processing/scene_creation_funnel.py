@@ -234,7 +234,11 @@ def starting_state_geom(
     Args:
         sim: The simulation object to be set up.
     """
-    return task.perturb_initial_state(env_setup.desired_state_geom(), env_size=env_size)
+    return task.perturb_initial_state(
+        env_setup.desired_state_geom(),
+        env_size=env_size,
+        linked_groups=env_setup.linked_groups,
+    )
 
 
 def desired_state_geom(
