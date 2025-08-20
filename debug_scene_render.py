@@ -1,5 +1,4 @@
 import genesis as gs
-from genesis.engine.entities import RigidEntity
 
 gs.init(backend=gs.gpu, logging_level="error")
 

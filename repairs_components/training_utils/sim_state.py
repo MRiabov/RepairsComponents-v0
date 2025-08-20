@@ -1,10 +1,10 @@
 "Sim state definition (separate class due to circular import issues)"
 
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from abc import abstractmethod
+from typing import Any
+
 import numpy as np
 from tensordict import TensorClass
-from typing import Any
 
 
 class SimState(TensorClass):

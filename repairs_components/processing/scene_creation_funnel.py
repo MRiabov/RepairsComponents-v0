@@ -7,13 +7,17 @@ Order:
 
 import copy
 import pathlib
-from pathlib import Path
 import time
+from pathlib import Path
+
+import genesis as gs
+import numpy as np
+import torch
+from build123d import CenterOf, Compound, Part, Pos, Unit, export_gltf, export_stl
 from genesis.engine.entities import RigidEntity
-from genesis.engine.entities.rigid_entity import RigidJoint, RigidLink
+
 from repairs_components.geometry.b123d_utils import (
     export_obj,
-    fastener_hole_info_from_joint_name,
 )
 from repairs_components.geometry.base_env import tooling_stand_plate
 from repairs_components.geometry.connectors.connectors import Connector
@@ -24,29 +28,22 @@ from repairs_components.geometry.fasteners import (
 )
 from repairs_components.logic.physical_state import PhysicalStateInfo
 from repairs_components.logic.tools import screwdriver
-from repairs_components.processing.geom_utils import euler_deg_to_quat_wxyz
-from repairs_components.processing.voxel_export import export_voxel_grid
 from repairs_components.processing.tasks import Task
-from repairs_components.training_utils.env_setup import EnvSetup
-from build123d import Compound, Part, Pos, export_gltf, export_stl, Unit, CenterOf
 from repairs_components.processing.translation import (
     translate_compound_to_sim_state,
     translate_state_to_genesis_scene,
 )
-
-import torch
-import genesis as gs
+from repairs_components.processing.voxel_export import export_voxel_grid
+from repairs_components.training_utils.concurrent_scene_dataclass import (
+    ConcurrentSceneData,
+)
+from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.progressive_reward_calc import RewardHistory
 from repairs_components.training_utils.sim_state_global import (
     RepairsSimInfo,
     RepairsSimState,
     get_state_and_info_save_paths,
 )
-
-from repairs_components.training_utils.concurrent_scene_dataclass import (
-    ConcurrentSceneData,
-)
-import numpy as np
 
 
 def create_env_configs(  # TODO voxelization and other cache carry mid-loops

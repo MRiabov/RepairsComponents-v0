@@ -9,12 +9,12 @@ Additionally, certain parts are more priority to be displayed over others. For e
 """
 # TODO:  What will happen in this code if two entities overlap? In my case, a connector willl overlap with a part. I want the connector part to always take precedence over all parts, and also it would be cool to have this order in general. How is it currently determined?
 
+from typing import Any, Dict, List
+
 import build123d as bd
-import trimesh
-import numpy as np
 import matplotlib.pyplot as plt
-from typing import Dict, Tuple, Any, List, Union
-from mpl_toolkits.mplot3d import Axes3D  # Needed for 3D projection
+import numpy as np
+import trimesh
 
 # Define part type to color mapping (RGBA format)
 PART_TYPE_COLORS = {
@@ -206,7 +206,6 @@ for name, label in sorted(labels.items(), key=lambda x: x[1]):
         f"  Label {label}: {name} (type: {part_type}, priority: {get_part_priority(part_type)})"
     )
 
-import matplotlib.pyplot as plt
 
 # 3D scatter visualization of integer labels
 fig = plt.figure(figsize=(12, 10))

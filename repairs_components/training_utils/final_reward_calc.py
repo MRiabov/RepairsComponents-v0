@@ -6,7 +6,7 @@ lamps must be ignited when the power is supplied, which does not happen at the m
 """
 
 import torch
-from repairs_components.training_utils.sim_state_global import RepairsSimState
+
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
 )

@@ -1,31 +1,26 @@
+from abc import abstractmethod
 from enum import IntEnum
 from pathlib import Path
-import sys
-import os
-from typing_extensions import deprecated
 
+import numpy as np
+import torch
+import trimesh
 from build123d import (
     Axis,
     CenterOf,
+    Color,
     Compound,
     Part,
     Rotation,
-    Vector,
     VectorLike,
-    Color,
 )
 from build123d.geometry import Location
-from genesis import gs
-from websockets.typing import Origin
+from typing_extensions import deprecated
+
 from repairs_components.logic.electronics.component import (
     ElectricalComponentInfo,
     ElectricalComponentsEnum,
 )
-import numpy as np
-import torch
-from abc import ABC, abstractmethod
-from typing import Literal, Mapping
-import trimesh
 
 
 class Connector(ElectricalComponentInfo):

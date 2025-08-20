@@ -1,14 +1,14 @@
 import pytest
 import torch
 
+from repairs_components.geometry.fasteners import get_fastener_singleton_name
 from repairs_components.logic.physical_state import (
     PhysicalState,
     PhysicalStateInfo,
-    register_fasteners_batch,
     register_bodies_batch,
+    register_fasteners_batch,
     update_bodies_batch,
 )
-from repairs_components.geometry.fasteners import get_fastener_singleton_name
 
 
 class TestRegisterFastenersBatch:

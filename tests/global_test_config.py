@@ -1,6 +1,7 @@
 from pathlib import Path
-import pytest
+
 import genesis as gs
+import pytest
 import torch
 
 

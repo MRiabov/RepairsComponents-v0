@@ -1,12 +1,9 @@
-import os
 import sys
 import time
-import cProfile
-import pstats
 from pathlib import Path
 
-import torch
 import pytest
+import torch
 
 # Ensure Repairs-v0 is on the import path for examples/*, matching SAC defaults
 REPAIRS_V0_ROOT = "/home/maksym/Work/Repairs-v0"
@@ -21,8 +18,8 @@ except Exception as e:  # pragma: no cover
 
 # Imports from both repos
 from examples.ten_holes_14 import TenHoles  # type: ignore
-from repairs_components.training_utils.gym_env import RepairsEnv
 from repairs_components.processing.tasks import AssembleTask, DisassembleTask
+from repairs_components.training_utils.gym_env import RepairsEnv
 
 
 def get_default_configs(debug: bool = True):

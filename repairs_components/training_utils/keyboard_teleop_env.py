@@ -1,20 +1,19 @@
-import time
 import argparse
+import time
 from pathlib import Path
 from typing import Tuple
 
-import torch
-import numpy as np
-
 # Genesis imports (match style used in gym_env)
 import genesis as gs
+import numpy as np
+import torch
+
+from repairs_components.processing.geom_utils import euler_deg_to_quat_wxyz
+from repairs_components.processing.tasks import AssembleTask, DisassembleTask
+from repairs_components.training_utils.gym_env import RepairsEnv
 
 # Use the existing keyboard listener
 from repairs_components.training_utils.keyboard_teleop import KeyboardDevice
-from repairs_components.training_utils.gym_env import RepairsEnv
-from repairs_components.processing.tasks import AssembleTask, DisassembleTask
-from repairs_components.processing.geom_utils import euler_deg_to_quat_wxyz
-
 
 # Utilities
 

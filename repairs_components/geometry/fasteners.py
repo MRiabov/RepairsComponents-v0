@@ -6,24 +6,23 @@ from MuJoCo-based simulations.
 """
 
 from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 from repairs_components.logic.tools.tool import ToolsEnum
 
 if TYPE_CHECKING:  # circular dep.
     from repairs_components.logic.tools.tools_state import ToolState
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from ocp_vscode import show
-from repairs_components.geometry.base import Component
-from build123d import *
-from dataclasses import dataclass, field
 import genesis as gs
-from genesis.engine.entities import RigidEntity
-import numpy as np
 import torch
+from build123d import *
+from genesis.engine.entities import RigidEntity
+from ocp_vscode import show
 
-
+from repairs_components.geometry.base import Component
 from repairs_components.processing.geom_utils import get_connector_pos
 
 
@@ -125,7 +124,7 @@ class Fastener(Component):
         Returns:
             A build123d Solid representing the screw with shaft and head.
         """
-        from build123d import BuildPart, Cylinder, Align, Vector
+        from build123d import BuildPart, Cylinder, Vector
 
         with BuildPart() as fastener:
             # Use Vector and cast to float to handle potential TensorClass tensors

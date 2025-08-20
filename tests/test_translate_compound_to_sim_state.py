@@ -1,21 +1,20 @@
-from build123d import *  # noqa: F403
+import pytest
 import torch
+from build123d import *  # noqa: F403
+from ocp_vscode import show
+
 from repairs_components.geometry.b123d_utils import (
     connect_fastener_to_joint,
     fastener_hole,
 )
 from repairs_components.geometry.connectors.models.europlug import Europlug
-import pytest
-
 from repairs_components.geometry.fasteners import Fastener
 from repairs_components.logic.physical_state import compound_pos_to_sim_pos
 from repairs_components.processing.translation import (
-    translate_compound_to_sim_state,
     get_starting_part_holes,
+    translate_compound_to_sim_state,
 )
 from repairs_components.training_utils.env_setup import EnvSetup
-from ocp_vscode import show
-from tests.global_test_config import test_device
 
 
 class TestEnv(EnvSetup):

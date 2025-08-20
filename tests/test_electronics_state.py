@@ -2,14 +2,14 @@ import pytest
 import torch
 from torch_geometric.data import Data
 
-from repairs_components.logic.electronics.electronics_state import (
-    register_components_batch,
-    connect_terminal_to_net_or_create_new,
-)
 from repairs_components.logic.electronics.component import (
     ElectricalComponentsEnum as ECE,
 )
-from repairs_components.logic.electronics.electronics_state import ElectronicsState
+from repairs_components.logic.electronics.electronics_state import (
+    ElectronicsState,
+    connect_terminal_to_net_or_create_new,
+    register_components_batch,
+)
 
 
 class TestRegisterComponentsBatch:

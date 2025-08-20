@@ -1,18 +1,13 @@
 """Basic example demonstrating the use of repair components."""
 
+import genesis as gs
+
 from repairs_components.geometry.electrical.consumers.led import Led
-from repairs_components.logic.electronics.wire import Wire
-from repairs_components.logic.electronics.voltage_source import VoltageSource
-from repairs_components.logic.electronics.resistor import Resistor
-from repairs_components.logic.electronics.led import LED
 
 # from repairs_components.logic.electronics.connector import Connector
 from repairs_components.logic.electronics.simulator import simulate_circuit
-from repairs_components.geometry.connectors.connectors import get_socket_mesh_by_type
-import genesis as gs
-
-import sys
-from pathlib import Path
+from repairs_components.logic.electronics.voltage_source import VoltageSource
+from repairs_components.logic.electronics.wire import Wire
 
 # Add the parent directory (project root) to sys.path so src.geometry can be imported
 # sys.path.append(str(Path(__file__).parent.parent))

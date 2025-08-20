@@ -1,25 +1,27 @@
 import genesis as gs
-from genesis.engine.entities.rigid_entity import RigidLink
 import torch
 from genesis.engine.entities import RigidEntity
-from torch_geometric.data import Data
-
+from genesis.engine.entities.rigid_entity import RigidLink
 
 from repairs_components.geometry.fasteners import (
     Fastener,
-    attach_fastener_to_screwdriver,
     attach_fastener_to_part,
-    detach_fastener_from_screwdriver,
+    attach_fastener_to_screwdriver,
     check_fastener_possible_insertion,
     detach_fastener_from_part,
+    detach_fastener_from_screwdriver,
 )
+from repairs_components.logic.electronics.mna import solve_dc_once
 from repairs_components.logic.physical_state import connect_fastener_to_one_body
-from repairs_components.logic.tools import tool
 from repairs_components.logic.tools.gripper import Gripper
 from repairs_components.logic.tools.screwdriver import (
     Screwdriver,
     receive_fastener_pickup_action,
     receive_screw_in_action,
+)
+from repairs_components.logic.tools.tool import (
+    ToolsEnum,
+    detach_tool_from_arm,
 )
 from repairs_components.processing.translation import (
     get_connector_pos,
@@ -29,12 +31,6 @@ from repairs_components.training_utils.sim_state_global import (
     RepairsSimInfo,
     RepairsSimState,
 )
-from repairs_components.logic.tools.tool import (
-    ToolsEnum,
-    attach_tool_to_arm,
-    detach_tool_from_arm,
-)
-from repairs_components.logic.electronics.mna import solve_dc_once
 
 
 def step_repairs(
@@ -140,8 +136,8 @@ def step_pick_up_release_tool(
     # hand, not arm.
     franka_hand: RigidLink = gs_entities["franka@control"].get_link("hand")
 
-    from repairs_components.logic.tools.tools_state import ToolInfo
     from repairs_components.logic.tools.tool import ToolsEnum
+    from repairs_components.logic.tools.tools_state import ToolInfo
 
     grip_pos = get_connector_pos(
         screwdriver.get_pos(),
@@ -157,8 +153,8 @@ def step_pick_up_release_tool(
         dist = torch.norm(hand_pos.squeeze(1) - grip_pos.squeeze(1), dim=-1)
         # TODO: not looking for closest tool, but should look for closest only.
         # Use ToolInfo property-based API for grip distance
-        from repairs_components.logic.tools.tools_state import ToolInfo
         from repairs_components.logic.tools.tool import ToolsEnum
+        from repairs_components.logic.tools.tools_state import ToolInfo
 
         required_dist = (
             ToolInfo()

@@ -4,7 +4,6 @@ from abc import ABC, abstractmethod
 import numpy as np
 from build123d import Compound, Part
 
-from repairs_components.geometry.b123d_utils import filtered_intersection_check
 from repairs_components.geometry.base_env.tooling_stand_plate import render_and_save
 
 

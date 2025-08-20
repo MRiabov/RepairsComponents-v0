@@ -1,6 +1,6 @@
+import numpy as np
 from build123d import *
 from ocp_vscode import show
-import numpy as np
 
 with BuildPart() as build_part:
     Box(10, 10, 10)

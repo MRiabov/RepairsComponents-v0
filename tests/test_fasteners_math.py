@@ -1,5 +1,6 @@
-import torch
 import pytest
+import torch
+
 from repairs_components.geometry.fasteners import (
     Fastener,
     check_fastener_possible_insertion,

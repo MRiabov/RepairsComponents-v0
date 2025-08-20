@@ -1,13 +1,12 @@
-from build123d import CenterOf, Compound, Color, Location
-import pytest
-from repairs_components.geometry.connectors.connectors import ConnectorsEnum
-from repairs_components.geometry.connectors.models.europlug import Europlug
 import numpy as np
+import pytest
+from build123d import CenterOf, Color, Compound
 
+from repairs_components.geometry.connectors.connectors import Connector
+from repairs_components.geometry.connectors.models.europlug import Europlug
 from repairs_components.geometry.connectors.models.powerpole import Powerpole
 from repairs_components.geometry.connectors.models.usb_c import USB_C
 from repairs_components.geometry.connectors.models.usb_type_a import USB_A
-from repairs_components.geometry.connectors.connectors import Connector
 
 
 @pytest.fixture

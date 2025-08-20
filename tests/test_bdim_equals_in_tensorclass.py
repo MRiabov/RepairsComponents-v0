@@ -1,7 +1,6 @@
 """A test to verify stacking behavior in tensorclasses."""
 
 import torch
-import pytest
 from tensordict import TensorClass
 
 

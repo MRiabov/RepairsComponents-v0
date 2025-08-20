@@ -3,7 +3,6 @@ from dataclasses import dataclass
 import genesis as gs
 import torch
 from genesis.engine.entities import RigidEntity
-from genesis.vis.camera import Camera
 from torch_geometric.data import Data
 
 from repairs_components.processing.voxel_export import sparse_arr_put

@@ -1,10 +1,12 @@
-import torch
-from repairs_components.training_utils.sim_state import SimState
+from dataclasses import dataclass, field
+
 import numpy as np
+import torch
+
 from repairs_components.logic.tools.gripper import Gripper
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum
-from dataclasses import dataclass, field
+from repairs_components.training_utils.sim_state import SimState
 
 
 @dataclass

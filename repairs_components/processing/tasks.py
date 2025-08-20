@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
-from build123d import CenterOf, Compound, Location, Part, Pos, Axis
-import numpy as np
-from dataclasses import dataclass
 from enum import IntEnum
+
+import numpy as np
+from build123d import Axis, CenterOf, Compound, Location, Part, Pos
 
 
 class Task(ABC):

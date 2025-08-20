@@ -1,16 +1,13 @@
-from build123d import *  # noqa: F403
-from genesis.vis.camera import Camera
-import numpy as np
-import torch
-import torchvision
-from PIL import Image
-from pathlib import Path
-
 # noqa: F405
 import os
+from pathlib import Path
 
-from genesis.engine.entities import RigidEntity
 import genesis as gs
+import numpy as np
+from build123d import *  # noqa: F403
+from genesis.engine.entities import RigidEntity
+from genesis.vis.camera import Camera
+from PIL import Image
 
 WORKING_SPACE_SIZE = (640, 640, 640)  # mm
 

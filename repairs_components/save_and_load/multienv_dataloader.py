@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-import genesis as gs
 import torch
 
 from repairs_components.processing.scene_creation_funnel import create_env_configs

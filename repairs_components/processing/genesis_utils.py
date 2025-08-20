@@ -1,6 +1,5 @@
-from genesis import gs
-from genesis.engine.entities import RigidEntity
 import torch
+from genesis.engine.entities import RigidEntity
 
 from repairs_components.geometry.fasteners import Fastener
 

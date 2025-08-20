@@ -1,8 +1,8 @@
+import numpy as np
 from build123d import *
 from ocp_vscode import *
-import ocp_vscode
+
 from repairs_components.geometry.connectors.connectors import Connector, ConnectorsEnum
-import numpy as np
 
 
 class RoundConnector(Connector):

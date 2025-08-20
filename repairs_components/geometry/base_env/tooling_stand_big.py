@@ -1,8 +1,6 @@
-from build123d import *  # noqa: F403
-
 # noqa: F405
 import ocp_vscode
-import build123d
+from build123d import *  # noqa: F403
 
 # Note: here Y is depth, X is length and Z is height.
 # Constants from tooling_geometry.md

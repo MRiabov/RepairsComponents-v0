@@ -1,8 +1,8 @@
-from repairs_components.geometry.connectors.connectors import Connector
+import numpy as np
 from build123d import *
 from ocp_vscode import show
-from repairs_components.geometry.connectors.connectors import ConnectorsEnum
-import numpy as np
+
+from repairs_components.geometry.connectors.connectors import Connector, ConnectorsEnum
 
 
 class USB_A(Connector):

@@ -3,9 +3,13 @@ from pathlib import Path
 from typing import List
 
 import numpy as np
-
 import torch
 
+from repairs_components.geometry.connectors.connectors import Connector
+from repairs_components.geometry.fasteners import (
+    get_fastener_save_path_from_name,
+    get_fastener_singleton_name,
+)
 from repairs_components.training_utils.concurrent_scene_dataclass import (
     ConcurrentSceneData,
     split_scene_config,
@@ -13,14 +17,9 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
 from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.progressive_reward_calc import RewardHistory
 from repairs_components.training_utils.sim_state_global import (
-    get_state_and_info_save_paths,
-    RepairsSimState,
     RepairsSimInfo,
-)
-from repairs_components.geometry.connectors.connectors import Connector
-from repairs_components.geometry.fasteners import (
-    get_fastener_save_path_from_name,
-    get_fastener_singleton_name,
+    RepairsSimState,
+    get_state_and_info_save_paths,
 )
 
 # During the loading of the data we load:

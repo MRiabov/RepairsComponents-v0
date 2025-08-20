@@ -1,11 +1,11 @@
 import genesis as gs
 import numpy as np
+import pytest
+import torch
 
 # import argparse
 from genesis.engine.entities import RigidEntity
-import torch
 from PIL import Image
-import pytest
 
 from repairs_components.geometry.fasteners import (
     Fastener,
@@ -17,10 +17,9 @@ from repairs_components.logic.tools.tool import (
     attach_tool_to_arm,
     detach_tool_from_arm,
 )
-from repairs_components.logic.tools.tools_state import ToolState, ToolInfo
-from repairs_components.processing.geom_utils import get_connector_pos
-from tests.global_test_config import init_gs, base_data_dir
+from repairs_components.logic.tools.tools_state import ToolInfo, ToolState
 from repairs_components.processing.genesis_utils import is_weld_constraint_present
+from repairs_components.processing.geom_utils import get_connector_pos
 
 
 @pytest.fixture(scope="module")

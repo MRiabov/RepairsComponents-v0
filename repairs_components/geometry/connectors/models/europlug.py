@@ -1,10 +1,8 @@
-from pathlib import Path
-from build123d import *
-from repairs_components.geometry.connectors.connectors import Connector, ConnectorsEnum
-import ocp_vscode
 import build123d as bd
 import numpy as np
+from build123d import *
 
+from repairs_components.geometry.connectors.connectors import Connector, ConnectorsEnum
 
 # Define the dimensions of the IEC plug
 plug_length = 50.0

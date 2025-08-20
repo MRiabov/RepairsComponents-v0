@@ -1,13 +1,12 @@
-import pytest
 import numpy as np
+import pytest
 from build123d import *
-import build123d as bd
 
 from repairs_components.geometry.b123d_utils import (
-    fastener_hole,
-    fastener_hole_joint_name,
-    fastener_hole_info_from_joint_name,
     connect_fastener_to_joint,
+    fastener_hole,
+    fastener_hole_info_from_joint_name,
+    fastener_hole_joint_name,
     filtered_intersection_check,
 )
 from repairs_components.geometry.fasteners import Fastener

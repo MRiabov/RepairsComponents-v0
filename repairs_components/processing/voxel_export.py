@@ -1,16 +1,14 @@
 import logging
-import numpy as np
-import trimesh
-
 import tempfile
-import build123d as bd
-from build123d import Compound, Part
-from typing import Any
-import torch
 from pathlib import Path
-import torch_scatter
-from torch_scatter import scatter_min
+from typing import Any
 
+import build123d as bd
+import numpy as np
+import torch
+import trimesh
+from build123d import Compound, Part
+from torch_scatter import scatter_min
 
 # Define part type to color mapping (for priority extraction)
 PART_TYPE_COLORS = {

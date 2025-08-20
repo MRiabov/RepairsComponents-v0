@@ -1,32 +1,30 @@
+import genesis as gs
+import numpy as np
 import pytest
 import torch
+from genesis.engine.entities import RigidEntity
+from genesis.engine.entities.rigid_entity import RigidLink
+
 from repairs_components.geometry.fasteners import Fastener
+from repairs_components.logic.physical_state import (
+    register_bodies_batch,
+    register_fasteners_batch,
+)
+from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum
+from repairs_components.processing.genesis_utils import is_weld_constraint_present
 from repairs_components.processing.translation import update_hole_locs
 from repairs_components.training_utils.sim_state_global import (
     RepairsSimInfo,
     RepairsSimState,
 )
-from repairs_components.logic.physical_state import (
-    register_bodies_batch,
-    register_fasteners_batch,
-)
-
 from repairs_sim_step import (
+    step_fastener_pick_up_release,
+    step_pick_up_release_tool,
     step_repairs,
     step_screw_in_or_out,
-    step_pick_up_release_tool,
-    step_fastener_pick_up_release,
 )
-import genesis as gs
-from repairs_components.logic.tools.screwdriver import Screwdriver
-from repairs_components.logic.tools.gripper import Gripper
-from genesis.engine.entities import RigidEntity
-from genesis.engine.entities.rigid_entity import RigidLink
-import numpy as np
 from tests.global_test_config import init_gs, test_device  # noqa: F401
-
-from repairs_components.processing.genesis_utils import is_weld_constraint_present
 
 
 @pytest.fixture
@@ -479,8 +477,8 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
 ):
     """When one part is already connected, and the angle is too large, it should not screw in."""
     from repairs_components.processing.geom_utils import (
-        quat_multiply,
         euler_deg_to_quat_wxyz,
+        quat_multiply,
     )
 
     scene, gs_entities, repairs_sim_state, desired_sim_state, sim_info = (
@@ -591,8 +589,8 @@ def test_step_pick_up_release_tool_picks_up_or_releases_tool_when_in_proximity(
     1. When in proximity (set to 0.75), set pick up tool action to 1.0 and test that tool is picked up.
     2. When in proximity, set release tool action to 0.0 and test that tool is released.
     """
-    from repairs_components.processing.translation import get_connector_pos
     from repairs_components.logic.tools.tools_state import ToolInfo
+    from repairs_components.processing.translation import get_connector_pos
 
     scene, gs_entities, repairs_sim_state, desired_sim_state, sim_info = (
         fresh_scene_with_fastener_screwdriver_and_two_parts

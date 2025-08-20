@@ -1,11 +1,16 @@
+import genesis as gs
 import pytest
 import torch
-import genesis as gs
 from genesis.engine.entities import RigidEntity
-import numpy as np
 
 from repairs_components.geometry.connectors.connectors import Connector
+from repairs_components.geometry.connectors.models.europlug import Europlug
 from repairs_components.geometry.fasteners import Fastener
+from repairs_components.logic.physical_state import (
+    register_bodies_batch,
+    register_fasteners_batch,
+)
+from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum
 from repairs_components.processing.geom_utils import get_connector_pos, quat_multiply
 from repairs_components.processing.translation import translate_genesis_to_python
@@ -13,13 +18,6 @@ from repairs_components.training_utils.sim_state_global import (
     RepairsSimInfo,
     RepairsSimState,
 )
-from repairs_components.logic.tools.screwdriver import Screwdriver
-from repairs_components.geometry.connectors.models.europlug import Europlug
-from repairs_components.logic.physical_state import (
-    register_bodies_batch,
-    register_fasteners_batch,
-)
-from tests.global_test_config import init_gs, test_device
 
 
 @pytest.fixture

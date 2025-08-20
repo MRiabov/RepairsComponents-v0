@@ -1,8 +1,8 @@
 from genesis import gs
+
 from repairs_components.geometry.electrical.electrical_component import (
     PhysicalElectricalComponent,
 )
-from typing_extensions import Any
 
 
 class Led(PhysicalElectricalComponent):

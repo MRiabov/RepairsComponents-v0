@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import torch
+
 from repairs_components.logic.physical_state import PhysicalState
 
 # Create two simple PhysicalState objects

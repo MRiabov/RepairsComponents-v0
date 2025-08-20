@@ -1,24 +1,22 @@
-from dataclasses import field, dataclass
+from dataclasses import dataclass, field
 
 import torch
 from tensordict import TensorClass
 from torch_geometric.data import Data
 
-
 from repairs_components.logic.electronics.component import (
+    ControlTypeEnum,
     ElectricalComponentsEnum,
     TerminalRoleEnum,
-    ControlTypeEnum,
 )
-from repairs_components.logic.electronics.resistor import ResistorInfo
-from repairs_components.logic.electronics.voltage_source import VoltageSourceInfo
 from repairs_components.logic.electronics.electronics_control import (
     SwitchInfo,
     SwitchState,
 )
 from repairs_components.logic.electronics.led import LedInfo, LedState
 from repairs_components.logic.electronics.motor import MotorInfo, MotorState
-
+from repairs_components.logic.electronics.resistor import ResistorInfo
+from repairs_components.logic.electronics.voltage_source import VoltageSourceInfo
 
 # Per-type Info/State classes are defined in their component modules and imported above.
 

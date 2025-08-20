@@ -1,8 +1,10 @@
 """Control components like buttons and switches."""
 
 from dataclasses import dataclass
-from repairs_components.geometry.base import Component
+
 from build123d import *
+
+from repairs_components.geometry.base import Component
 
 
 # import mujoco #TODO replace mujoco with Genesis!

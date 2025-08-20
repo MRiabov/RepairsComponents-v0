@@ -1,7 +1,8 @@
 from abc import abstractmethod
+from dataclasses import field
 from enum import IntEnum
 from pathlib import Path
-from dataclasses import field
+
 import torch
 from tensordict import TensorClass
 

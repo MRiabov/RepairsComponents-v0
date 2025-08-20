@@ -1,18 +1,21 @@
-import pytest
-import genesis as gs
-from repairs_components.geometry.connectors.models.europlug import Europlug
-from repairs_components.training_utils.sim_state_global import (
-    RepairsSimState,
-    RepairsSimInfo,
-)
-import torch
 import math
-from repairs_components.logic.electronics.electronics_state import (
-    register_components_batch,
-    connect_terminal_to_net_or_create_new,
-)
+
+import genesis as gs
+import pytest
+import torch
+
+from repairs_components.geometry.connectors.models.europlug import Europlug
 from repairs_components.logic.electronics.component import ElectricalComponentsEnum
+from repairs_components.logic.electronics.electronics_state import (
+    connect_terminal_to_net_or_create_new,
+    register_components_batch,
+)
+from repairs_components.training_utils.sim_state_global import (
+    RepairsSimInfo,
+    RepairsSimState,
+)
 from repairs_sim_step import step_electronics
+
 # Rely on pytest discovery for fixtures from `tests/global_test_config.py`
 
 

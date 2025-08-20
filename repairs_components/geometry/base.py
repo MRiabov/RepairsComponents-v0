@@ -5,9 +5,10 @@ physics simulator. Genesis supports both MJCF (MuJoCo) and UDRF (Unified Robot D
 for model definition.
 """
 
-from build123d import Part, Compound
-from tensordict import TensorClass
 from abc import abstractmethod
+
+from build123d import Compound, Part
+from tensordict import TensorClass
 
 
 class Component(TensorClass):

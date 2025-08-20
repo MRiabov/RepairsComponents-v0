@@ -1,14 +1,16 @@
 from dataclasses import dataclass, field
 from pathlib import Path
+
 import torch
+from torch_geometric.data import Data
+
 from repairs_components.logic.electronics.electronics_state import (
-    ElectronicsState,
     ElectronicsInfo,
+    ElectronicsState,
 )
 from repairs_components.logic.physical_state import PhysicalState, PhysicalStateInfo
-from repairs_components.logic.tools.tools_state import ToolState, ToolInfo
+from repairs_components.logic.tools.tools_state import ToolInfo, ToolState
 from repairs_components.training_utils.sim_state import SimState
-from torch_geometric.data import Data
 
 
 @dataclass
@@ -227,8 +229,8 @@ def reconstruct_sim_state(
     Note: ElectronicsState reconstruction from graphs is not yet implemented; this function
     restores the PhysicalState and ToolState and updates hole locations.
     """
-    from repairs_components.training_utils.sim_state_global import RepairsSimState
     from repairs_components.processing.translation import update_hole_locs
+    from repairs_components.training_utils.sim_state_global import RepairsSimState
 
     assert fluid_data_placeholder is None, NotImplementedError(
         "Fluid data reconstruction is not implemented."

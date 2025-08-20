@@ -1,12 +1,11 @@
-import torch
 import math
+
+import torch
 
 from repairs_components.logic.electronics.component import ElectricalComponentsEnum
 from repairs_components.logic.electronics.electronics_state import (
-    register_components_batch,
-    ElectronicsInfo,
-    ElectronicsState,
     connect_terminal_to_net_or_create_new,
+    register_components_batch,
 )
 from repairs_components.logic.electronics.mna import solve_dc_once
 

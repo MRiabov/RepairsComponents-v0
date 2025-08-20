@@ -1,17 +1,14 @@
-import sys
+import os
 from pathlib import Path
 
-import os
 import pytest
 import torch
-
 from genesis import gs  # type: ignore
-
 
 # Local examples and env
 from examples.ten_holes_14 import TenHoles  # type: ignore
-from repairs_components.training_utils.gym_env import RepairsEnv
 from repairs_components.processing.tasks import AssembleTask
+from repairs_components.training_utils.gym_env import RepairsEnv
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_ENV_INTEGRATION") != "1",

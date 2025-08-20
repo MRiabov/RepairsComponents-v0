@@ -1,9 +1,9 @@
-import copy
+from build123d import *
 from ocp_vscode import *
+
+from repairs_components.geometry.b123d_utils import fastener_hole
 from repairs_components.geometry.fasteners import Fastener
 from repairs_components.training_utils.env_setup import EnvSetup
-from build123d import *
-from repairs_components.geometry.b123d_utils import fastener_hole
 
 
 class ClampPlates(EnvSetup):

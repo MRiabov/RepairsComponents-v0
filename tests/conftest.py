@@ -2,4 +2,3 @@
 # This allows tests to use fixtures like `init_gs` and `test_device`
 # without importing them explicitly.
 
-from .global_test_config import init_gs, test_device, base_data_dir

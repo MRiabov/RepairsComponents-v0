@@ -1,10 +1,8 @@
-from build123d import *
-import build123d as bd
-import ocp_vscode
 from pathlib import Path
-import trimesh
-import os
+
 import numpy as np
+import trimesh
+from build123d import *
 
 
 def fastener_hole(

@@ -10,22 +10,21 @@ Provides diff methods:
 diff(): combines both into {'fasteners', 'bodies'} with total change count
 """
 
+from dataclasses import dataclass, field
+
 import torch
+from tensordict import TensorClass
+from torch_geometric.data import Data
+
 from repairs_components.geometry.fasteners import (
-    Fastener,
     get_fastener_params_from_name,
 )
-from torch_geometric.data import Data
-from dataclasses import dataclass, field
-from tensordict import TensorClass
 from repairs_components.processing.geom_utils import (
     are_quats_within_angle,
-    euler_deg_to_quat_wxyz,
     get_connector_pos,
     quaternion_delta,
     sanitize_quaternion,
 )
-from typing_extensions import deprecated
 
 
 @dataclass

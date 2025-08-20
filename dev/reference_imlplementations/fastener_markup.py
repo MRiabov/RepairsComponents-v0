@@ -1,7 +1,5 @@
-from build123d import *
 import ocp_vscode
-from repairs_components.geometry.b123d_utils import add_fastener_markup
-from build123d import Vector
+from build123d import *
 
 # with BuildPart() as test:
 #     with Locations((0, 0, 30)):

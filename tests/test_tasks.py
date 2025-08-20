@@ -1,10 +1,11 @@
 """Tests for the assembly task functionality."""
 
 import numpy as np
-from build123d import Box, Sphere, Cylinder, Compound, Pos
+import pytest
+from build123d import Box, Compound, Cylinder, Pos, Sphere
+
 from repairs_components.geometry.b123d_utils import filtered_intersection_check
 from repairs_components.processing.tasks import AssembleTask
-import pytest
 
 
 @pytest.fixture
@@ -56,8 +57,8 @@ def test_stable_orientation():
 
 
 def debug_perturb_and_vis():
-    from ocp_vscode import show
     import build123d as bd
+    from ocp_vscode import show
 
     task = AssembleTask()
     bd_test_compound = bd_test_compound()

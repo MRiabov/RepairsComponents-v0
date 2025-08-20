@@ -1,17 +1,19 @@
 from __future__ import annotations
+
 from abc import abstractmethod
+from dataclasses import dataclass
+from enum import Enum
+from typing import TYPE_CHECKING
+
+import torch
 from genesis import gs
 from genesis.engine.entities import RigidEntity
 from genesis.engine.entities.rigid_entity import RigidLink
-import torch
-from repairs_components.geometry.base import Component
-from dataclasses import dataclass
-from enum import Enum
 
-from typing import TYPE_CHECKING
+from repairs_components.geometry.base import Component
 
 if TYPE_CHECKING:
-    from repairs_components.logic.tools.tools_state import ToolState, ToolInfo
+    from repairs_components.logic.tools.tools_state import ToolInfo, ToolState
 
 attachment_link_name = "attachment_link"
 
@@ -78,7 +80,6 @@ def attach_tool_to_arm(
 
     # darn, I'll need to get tool_grip_position based on tool_state_to_update.tool_ids somehow.
     # Lazy import to avoid circular dependency
-    from repairs_components.logic.tools.screwdriver import Screwdriver
 
     # Ensure tool ids used for indexing are 1D [k]
     ids_index = tool_state_to_update.tool_ids[env_idx]

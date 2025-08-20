@@ -1,7 +1,6 @@
-from repairs_components.training_utils.env_setup import EnvSetup
 from build123d import *
-import genesis as gs
-from genesis.vis.camera import Camera
+
+from repairs_components.training_utils.env_setup import EnvSetup
 
 
 class MoveBoxSetup(EnvSetup):

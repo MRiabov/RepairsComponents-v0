@@ -1,9 +1,8 @@
-from typing_extensions import deprecated
-from genesis.engine.entities.rigid_entity import RigidEntity
-import torch
 import genesis as gs
-from genesis.vis.camera import Camera
+import torch
+from genesis.engine.entities.rigid_entity import RigidEntity
 from torch.nn import functional as F
+from typing_extensions import deprecated
 
 
 @deprecated("Batch motion planning was merged in genesis!")

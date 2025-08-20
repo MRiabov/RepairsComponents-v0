@@ -1,6 +1,8 @@
 import pytest
 import torch
 
+from repairs_components.geometry.fasteners import get_fastener_singleton_name
+
 # Import the implementations
 from repairs_components.logic.physical_state import (
     PhysicalState,
@@ -8,7 +10,7 @@ from repairs_components.logic.physical_state import (
     register_bodies_batch,
     register_fasteners_batch,
 )
-from repairs_components.geometry.fasteners import get_fastener_singleton_name
+
 # Tests updated to use batched PhysicalState API and WXYZ quaternion convention.
 
 

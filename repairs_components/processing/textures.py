@@ -1,5 +1,7 @@
-from genesis import surfaces
 import random
+
+from genesis import surfaces
+
 from repairs_components.processing.voxel_export import PART_TYPE_COLORS
 
 

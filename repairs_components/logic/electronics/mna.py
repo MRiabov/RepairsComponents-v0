@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import torch
+from tensordict import TensorClass
 
 from .electronics_state import (
     ElectronicsInfo,
     ElectronicsState,
 )
-from tensordict import TensorClass
 
 
 class SolveResult(TensorClass):

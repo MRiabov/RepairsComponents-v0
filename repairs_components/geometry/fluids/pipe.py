@@ -1,4 +1,4 @@
-from bd_warehouse.pipe import Pipe, Nps, Material, Identifier
+from bd_warehouse.pipe import Identifier, Material, Nps, Pipe
 from build123d import Edge, Wire, export_gltf
 
 

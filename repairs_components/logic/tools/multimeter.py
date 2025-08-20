@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+
+from pathlib import Path
 
 import torch
-from repairs_components.logic.tools.tool import Tool, ToolsEnum, attachment_link_name
-from pathlib import Path
 from build123d import *  # noqa: F403
+
+from repairs_components.logic.tools.tool import Tool, ToolsEnum
 
 
 class Multimeter(Tool):

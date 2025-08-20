@@ -1,10 +1,10 @@
 import concurrent.futures
+
 import pytest
 import torch
 
 from repairs_components.save_and_load.multienv_dataloader import (
     MultiEnvDataLoader,
-    merge_concurrent_scene_configs as real_merge,
 )
 
 

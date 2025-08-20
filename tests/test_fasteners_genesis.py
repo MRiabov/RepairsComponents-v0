@@ -1,32 +1,26 @@
 import genesis as gs
 import numpy as np
+import pytest
+import torch
 
 # import argparse
 from genesis.engine.entities import RigidEntity
-import torch
-from PIL import Image
-import pytest
 
 from repairs_components.geometry.fasteners import (
-    Fastener,
     attach_fastener_to_part,
     attach_fastener_to_screwdriver,
     detach_fastener_from_part,
     detach_fastener_from_screwdriver,
 )
 from repairs_components.logic.tools.screwdriver import Screwdriver
-from repairs_components.logic.tools.tools_state import ToolState
 from repairs_components.logic.tools.tool import ToolsEnum
-from tests.test_tool_genesis import move_franka_to_pos
-from genesis.engine.entities import RigidEntity
-from tests.global_test_config import init_gs, base_data_dir, test_device  # noqa: F401
+from repairs_components.logic.tools.tools_state import ToolState
 from repairs_components.processing.genesis_utils import is_weld_constraint_present
+from tests.global_test_config import base_data_dir, init_gs, test_device  # noqa: F401
 
 
 @pytest.fixture(scope="session")
 def scene_with_fastener_screwdriver_and_two_parts(init_gs, test_device):
-    from repairs_components.logic.tools.screwdriver import Screwdriver
-    from repairs_components.logic.tools.tool import attach_tool_to_arm
 
     ########################## create a scene ##########################
     scene = gs.Scene(

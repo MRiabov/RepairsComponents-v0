@@ -13,12 +13,9 @@ Give the reward whenever:
 In the end, if the environment is timed out, give penalty for half of the completed tasks.
 """
 
-from dataclasses import dataclass, field
 import enum
-from typing import Callable
+from dataclasses import dataclass, field
 
-from repairs_components.training_utils.sim_state_global import RepairsSimState
-import numpy as np
 import torch
 
 
