@@ -14,7 +14,7 @@ def execute_straight_line_trajectory(
     gripper_force: torch.Tensor,
     render: bool,
     keypoint_distance=0.1,
-    num_steps_between_keypoints=10,
+    num_steps_between_keypoints=1,  # was 10
 ):
     """
     Execute a straight-line trajectory for a robot arm in Cartesian space.
@@ -87,21 +87,29 @@ def execute_straight_line_trajectory(
         scene.step(update_visualizer=render, refresh_visualizer=render)
 
         if render:
-            cameras = scene.visualizer.cameras
-            for camera in cameras:
-                camera.render()
+            if device.type == "cpu":
+                cameras = scene.visualizer.cameras
+                for camera in cameras:
+                    camera.render()
+            else:
+                scene.render_all_cameras()
 
-    # let dry-run for 10 steps.
-    for _ in range(10):  # note was 100, but reduced to 10 for debug.
+    # let dry-run for 10 steps. # note: now 1.
+    for _ in range(
+        num_steps_between_keypoints
+    ):  # note was 100, but reduced to 10 for debug.
         scene.step(
             update_visualizer=render, refresh_visualizer=render
         )  # let it actually run.
         franka.control_dofs_position(keypoint_ik)  # set at the last point.
         franka.control_dofs_force(gripper_force, dofs_idx_local=[7, 8])
         if render:
-            cameras = scene.visualizer.cameras
-            for camera in cameras:
-                camera.render()
+            if device.type == "cpu":
+                cameras = scene.visualizer.cameras
+                for camera in cameras:
+                    camera.render()
+            else:
+                scene.render_all_cameras()
 
     # print(franka.get_links_pos()[:, 7])  # hand.
 
@@ -114,7 +122,7 @@ def execute_planned_path(
     gripper_force: torch.Tensor,
     render: bool,
     keypoint_distance=0.1,
-    num_steps_between_keypoints=10,
+    num_steps_between_keypoints=1,
 ):
     hand = franka.get_link("hand")
     # move to pre-grasp pose
@@ -125,16 +133,19 @@ def execute_planned_path(
     )
     # gripper open pos
     qpos[-2:] = gripper_force
-    path = franka.plan_path(qpos_goal=qpos, num_waypoints=100)
-    # 1s duration
+    path = franka.plan_path(qpos_goal=qpos, num_waypoints=num_steps_between_keypoints)
+    # duration = num_waypoints * substep_dt (0.02 default.)
     # execute the planned path
     for waypoint in path:
         franka.control_dofs_position(waypoint)
         scene.step(update_visualizer=render, refresh_visualizer=render)
         if render:
-            cameras = scene.visualizer.cameras
-            for camera in cameras:
-                camera.render()
+            if device.type == "cpu":
+                cameras = scene.visualizer.cameras
+                for camera in cameras:
+                    camera.render()
+            else:
+                scene.render_all_cameras()
 
     # dry run not added (?)
 

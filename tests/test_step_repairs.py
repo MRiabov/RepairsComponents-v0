@@ -24,7 +24,6 @@ from repairs_sim_step import (
     step_repairs,
     step_screw_in_or_out,
 )
-from tests.global_test_config import init_gs, test_device  # noqa: F401
 
 
 @pytest.fixture

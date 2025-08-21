@@ -5,7 +5,6 @@ Order:
 2. starting_state_geom
 """
 
-import copy
 import pathlib
 import time
 from pathlib import Path
@@ -139,6 +138,10 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
                 [desired_state_geom_], device=device
             )
 
+            # Record the environment setup name for persistence/validation
+            # This is later checked in offline_dataloading against the requested EnvSetup
+            sim_info.env_setup_name = env_setups[scene_idx].__class__.__name__
+
             # store states
             starting_sim_states.append(starting_sim_state)
             desired_sim_states.append(desired_sim_state)
@@ -184,7 +187,7 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
             scene=None,
             gs_entities=None,
             init_state=starting_sim_state,
-            current_state=copy.deepcopy(starting_sim_state),
+            current_state=starting_sim_state.clone(recurse=True),
             desired_state=desired_sim_state,
             vox_init=voxel_grids_initial,
             vox_des=voxel_grids_desired,

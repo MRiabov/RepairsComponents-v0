@@ -19,7 +19,6 @@ from repairs_components.processing.translation import (
 )
 from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.gym_env import RepairsEnv
-from tests.global_test_config import base_data_dir, init_gs  # noqa: F401
 
 pytestmark = pytest.mark.skip(
     reason="All tests in this file are outdated. Use test_env_integration_bdim2.py instead or specialized "

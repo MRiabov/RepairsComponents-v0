@@ -72,7 +72,7 @@ class Switch(Component):
         base_y = self.base_thickness
         base_z = self.base_thickness
         # MJCF does not support boolean subtraction, so use a single box for the base
-        return f'''
+        return f"""
   <body name="{self.name}_base" pos="0 0 0">
     <geom type="box" size="{base_x / 2} {base_y / 2} {base_z / 2}" rgba="0.4 0.4 0.4 1" contype="0" conaffinity="0"/>
     <!-- Lever part -->
@@ -85,7 +85,7 @@ class Switch(Component):
       <!-- Sensor to read hinge angle -->
       <sensor name="{self.name}_hinge_pos" type="jointpos" joint="{self.name}_hinge"/>
     </body>
-  </body>'''
+  </body>"""
 
     def bd_geometry(self):
         # Create the moving part of the switch as a lever
