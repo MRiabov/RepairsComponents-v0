@@ -19,6 +19,9 @@ omit = ["**/__init__.py"]
 show_missing = true
 skip_covered = true
 
+[tool.ruff]
+lint.extend-ignore = ["F403", "F405"]
+
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true

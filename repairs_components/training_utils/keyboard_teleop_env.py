@@ -317,6 +317,9 @@ def main():
         while not stop:
             t0 = time.perf_counter()
             pressed = kb.get_cmd().copy()
+            # Debug: print currently pressed keys (helps verify if viewer steals focus)
+            if pressed:
+                print("Pressed:", ", ".join(sorted(str(k) for k in pressed)))
 
             # Reset and quit
             from pynput import keyboard
@@ -342,6 +345,12 @@ def main():
             )
             # Keep pos in caller updated
             pos = action_single[:3]
+            # Debug: show desired target position
+            if pressed:
+                p = action_single[:3]
+                print(
+                    f"Desired pos: [{float(p[0]):.3f}, {float(p[1]):.3f}, {float(p[2]):.3f}]"
+                )
 
             # Batch it
             action_batch = (

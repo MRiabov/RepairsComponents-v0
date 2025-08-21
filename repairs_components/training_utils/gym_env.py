@@ -8,7 +8,6 @@ import genesis as gs
 import gymnasium as gym
 import numpy as np
 import torch
-from genesis.vis.visualizer import Camera
 from igl.helpers import os
 from torch_geometric.data import Batch, Data
 
@@ -19,7 +18,7 @@ from repairs_components.processing.scene_creation_funnel import (
 )
 from repairs_components.processing.tasks import Task
 from repairs_components.processing.translation import (
-    create_constraints_based_on_graph,
+    precreate_constraints,
 )
 from repairs_components.save_and_load.multienv_dataloader import (
     RepairsEnvDataLoader,
@@ -36,6 +35,7 @@ from repairs_components.training_utils.concurrent_scene_dataclass import (
 from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.failure_modes import out_of_bounds
 from repairs_components.training_utils.motion_planning import (
+    execute_planned_path,
     execute_straight_line_trajectory,
 )
 from repairs_components.training_utils.progressive_reward_calc import (
@@ -243,6 +243,11 @@ class RepairsEnv(gym.Env):
                 ),
                 # note^: max_dynamic constraints is 8 by default. 128 is too low too.
                 # show_FPS=False,
+                renderer=gs.renderers.BatchRenderer(
+                    use_rasterizer=True
+                )  # works only with CUDA.
+                if self.device.type == "cuda"
+                else gs.renderers.Rasterizer(),
             )
 
             scene, gs_entities = initialize_and_build_scene(
@@ -359,11 +364,11 @@ class RepairsEnv(gym.Env):
 
             # Execute the motion planning trajectory using our dedicated module
             motion_planning_time = time.perf_counter()
-            execute_straight_line_trajectory(
+            execute_planned_path(
                 franka=scene_data.gs_entities["franka@control"],
                 scene=scene_data.scene,
-                target_pos=pos,
-                target_quat=quat,
+                target_hand_pos=pos,
+                target_hand_quat=quat,
                 gripper_force=gripper_force,
                 render=True,
                 keypoint_distance=0.1,  # 10cm as suggested
@@ -372,10 +377,17 @@ class RepairsEnv(gym.Env):
             print(
                 "Motion planning and exec time:",
                 time.perf_counter() - motion_planning_time,
+                "s, which equals to 20 Genesis steps.",
             )
 
             # Update the current simulation state based on the scene
-            success, total_diff_left, current_sim_state, diff, _burned_component_indices = step_repairs(
+            (
+                success,
+                total_diff_left,
+                current_sim_state,
+                diff,
+                _burned_component_indices,
+            ) = step_repairs(
                 scene=scene_data.scene,
                 actions=action_by_scenes[scene_id],
                 gs_entities=scene_data.gs_entities,
@@ -525,13 +537,19 @@ class RepairsEnv(gym.Env):
                 updated_scene_data.sim_info.physical_info,
             )
 
-            create_constraints_based_on_graph(
-                updated_scene_data.current_state.physical_state,
-                updated_scene_data.sim_info.physical_info,
-                updated_scene_data.gs_entities,
-                updated_scene_data.scene,
-                env_idx=reset_env_ids_this_scene,
-            )
+            # Initialize weld constraints once per scene for all its envs
+            rs = updated_scene_data.scene.sim.rigid_solver
+            welds = rs.get_weld_constraints(as_tensor=True, to_torch=True)
+            has_welds = isinstance(welds, dict) and (len(welds.get("link_a", [])) > 0)
+            if not has_welds:
+                all_envs_in_scene = torch.arange(num_env_per_scene, device=self.device)
+                precreate_constraints(
+                    updated_scene_data.current_state,
+                    updated_scene_data.sim_info,
+                    updated_scene_data.gs_entities,
+                    updated_scene_data.scene,
+                    env_idx=all_envs_in_scene,
+                )
 
             # Update visual states to show the new positions
             self.concurrent_scenes_data[
@@ -575,8 +593,7 @@ class RepairsEnv(gym.Env):
     def _observe_scene(self, scene_data: ConcurrentSceneData):
         # Process a single environment
         # Extract cameras from scene data
-        cameras = scene_data.scene.visualizer.cameras
-        video_obs = _render_all_cameras(cameras, device=self.device)
+        video_obs = _render_all_cameras(scene_data.scene, device=self.device)
 
         # get voxel obs
         sparse_voxel_init = scene_data.vox_init
@@ -704,20 +721,24 @@ class RepairsEnv(gym.Env):
         )
 
 
-def _render_all_cameras(cameras: list[Camera], device: torch.device):
-    # Process each camera in the scene
-    env_obs = []
-    for camera in cameras:
-        rgb, depth, _segmentation, normal = camera.render(
-            rgb=True, depth=True, normal=True
-        )
+def _render_all_cameras(scene: gs.Scene, device: torch.device):
+    if device.type == "cpu":
+        # Process each camera in the scene
+        env_obs = []
+        for camera in scene.visualizer.cameras:
+            rgb, depth, _segmentation, normal = camera.render(
+                rgb=True, depth=True, normal=True
+            )
 
-        # Process camera observation
-        camera_obs = obs_to_int8(rgb, depth, normal, device=device)  # type: ignore
-        env_obs.append(camera_obs)
+            # Process camera observation
+            camera_obs = obs_to_int8(rgb, depth, normal, device=device)  # type: ignore
+            env_obs.append(camera_obs)
 
-    # Stack all cameras for this environment
-    video_obs = torch.stack(env_obs, dim=1)
+        # Stack all cameras for this environment
+        video_obs = torch.stack(env_obs, dim=1)
+
+    else:  # gpu # must have renderer=batch_renderer
+        video_obs = scene.render_all_cameras(rgb=True, depth=True, normal=True)
     return video_obs
 
 

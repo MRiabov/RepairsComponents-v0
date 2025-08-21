@@ -1,8 +1,8 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9   # Use the latest Ruff version
+  - repo: local
     hooks:
-      - id: ruff-format
-      - id: ruff
-        name: ruff (imports only)
-        args: [--select, I, --select, F401, --fix]
+      - id: ruff-autostage
+        name: ruff-format-and-stage
+        entry: dev/ruff-autostage.sh
+        language: script
+        stages: [pre-commit]

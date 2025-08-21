@@ -95,11 +95,6 @@ class ConcurrentSceneData:
             f"initial_diff_counts must have the same batch dimension as batch_dim, but got {self.initial_diff_counts.shape[0]} and {self.batch_dim}"
         )
 
-        # init state != current state
-        # assert self.init_state != self.current_state, (
-        #     "init_state must not be equal to current_state. If it is, use `copy.copy` to create a new object."
-        # ) # note: it fails because we copy the initial state, but use copy anyway. deepcopy maybe?
-
 
 def merge_concurrent_scene_configs(scene_configs: list[ConcurrentSceneData]):
     assert scene_configs is not None and len(scene_configs) > 0, (

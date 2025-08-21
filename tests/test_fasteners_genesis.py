@@ -16,12 +16,10 @@ from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum
 from repairs_components.logic.tools.tools_state import ToolState
 from repairs_components.processing.genesis_utils import is_weld_constraint_present
-from tests.global_test_config import base_data_dir, init_gs, test_device  # noqa: F401
 
 
 @pytest.fixture(scope="session")
 def scene_with_fastener_screwdriver_and_two_parts(init_gs, test_device):
-
     ########################## create a scene ##########################
     scene = gs.Scene(
         sim_options=gs.options.SimOptions(

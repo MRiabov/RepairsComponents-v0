@@ -1,7 +1,7 @@
 # git clone https://github.com/MRIabov/RepairsComponents-v0.git
 # git clone https://github.com/MRIabov/Repairs-v0.git
 export FORCE_CPU=1
-sudo apt install libgl1-mesa-dev libsparsehash-dev -y
+sudo apt install libgl1-mesa-dev libsparsehash-dev python3-tk -y
 
 pip install uv
 # cd RepairsComponents-v0/

@@ -11,8 +11,6 @@ from repairs_components.geometry.fasteners import (
     get_fastener_singleton_name,
 )
 from repairs_components.logic.physical_state import (
-    PhysicalState,
-    PhysicalStateInfo,
     compound_pos_to_sim_pos,
     register_bodies_batch,
     register_fasteners_batch,
@@ -147,6 +145,8 @@ def translate_state_to_genesis_scene(
 
         # NOTE: ^ there probably is sense to store fasteners as fasteners id in gs_entities, not as length+height.
         # there is no need for length+height, but there is value in unique id.
+
+    # Permanent constraints are now created in precreate_constraints()
 
     return scene, gs_entities
 
@@ -631,83 +631,105 @@ def translate_compound_to_sim_state(
     return sim_state, sim_info
 
 
-def create_constraints_based_on_graph(
-    physical_state: PhysicalState,
-    physical_info: PhysicalStateInfo,
+def precreate_constraints(
+    sim_state: RepairsSimState,
+    sim_info: RepairsSimInfo,
     gs_entities: dict[str, RigidEntity],
     scene: gs.Scene,
     env_idx: torch.Tensor | None = None,
 ):
-    """Create fastener (weld) constraints based on graph. Done once in the start."""  # note: in the future could be e.g. bearing constraints. But weld constraints as fasteners for now.
+    """Create all static weld constraints once (permanent groups + fastener attachments).
+
+    Idempotent: skips pairs that already exist in Genesis.
+    """
+    device = sim_state.device
     rigid_solver = scene.sim.rigid_solver
-    all_base_links = {}
+
+    # Determine env indices to apply to
     if env_idx is None:
-        bs = (
-            int(physical_state.batch_size)
-            if isinstance(physical_state.batch_size, int)
-            else int(physical_state.batch_size[0])
-        )
-        env_idx = torch.arange(bs)
-    # TODO: assert that number of steps is 0 - it should be only in the start. No API for this in genesis atm.
+        env_idx = torch.arange(scene.n_envs, device=device)
 
-    # all_base_links= np.full(
-    #     len(env_state.physical_state[0].body_indices), -1
-    # )  # fill with -1
-    # < note: there is some unnecessary roundtrip that makes me use the `all_base_links` dict.
-    # however it doesn't matter, it's minor optimization.
-    # assert all_base_links.min() >= 0, "Some base link failed to register."
-    for entity_name in physical_info.body_indices:
-        # NOTE: body_indices does not include fasteners
-        entity = gs_entities[entity_name]
-        all_base_links[entity_name] = entity.base_link.idx
+    # Build an index of body base links (from sim_info) and fastener base links
+    physical_info = sim_info.physical_info
+    body_indices = physical_info.body_indices
+    body_base_links = physical_info.body_base_link_idx  # [N_bodies]
 
-    # gs seems to be able to hold only so many constraints, so collect all env_idx
-    # for each constraint pair and pass them to genesis in a single call.
-    # NOTE: untested below.
+    # Ensure fastener base link idx populated
+    fastener_base_links = physical_info.fastener_base_link_idx  # [N_fasteners]
 
-    #   key: (fastener_base_link_idx, body_base_link_idx)
-    # value: list[int] env_ids where this connection exists
+    # Shapes are singletons per link (no batch dim here)
+    assert body_base_links.ndim == 1, "body_base_link_idx must be 1D"
+    assert fastener_base_links.ndim == 1, "fastener_base_link_idx must be 1D"
+
+    # Build a set of existing unordered weld pairs for idempotence
+    existing_pairs: set[tuple[int, int]] = set()
+    weld_const_info = rigid_solver.get_weld_constraints(as_tensor=True, to_torch=True)
+    if weld_const_info is not None and len(weld_const_info) > 0:
+        link_a = weld_const_info["link_a"].tolist()
+        link_b = weld_const_info["link_b"].tolist()
+        for a, b in zip(link_a, link_b):
+            ia, ib = int(a), int(b)
+            existing_pairs.add((ia, ib) if ia <= ib else (ib, ia))
+
+    # 1) Permanent groups: weld specified body groups
+    if physical_info.permanently_constrained_parts:
+        for group in physical_info.permanently_constrained_parts:
+            assert isinstance(group, list) and len(group) >= 2, (
+                "Each permanently constrained group must be a list[str] of length >= 2"
+            )
+            assert all(name in body_indices for name in group), (
+                f"Unknown body in permanent constraint group: {group}"
+            )
+            anchor_idx = body_indices[group[0]]
+            anchor_link_t = body_base_links[anchor_idx].to(device)
+            for name in group[1:]:
+                other_idx = body_indices[name]
+                other_link_t = body_base_links[other_idx].to(device)
+                # normalize key for idempotence check (convert to python ints)
+                a_i = int(anchor_link_t.item())
+                b_i = int(other_link_t.item())
+                key_norm = (a_i, b_i) if a_i <= b_i else (b_i, a_i)
+                if key_norm in existing_pairs:
+                    continue
+                rigid_solver.add_weld_constraint(
+                    anchor_link_t,
+                    other_link_t,
+                    envs_idx=env_idx,
+                )
+                existing_pairs.add(key_norm)
+
+    # 2) Fastener attachments: weld fastener base link to each attached body base link
     connections: dict[tuple[int, int], list[int]] = {}
-
+    # Collect per-env connections
     for env_id in env_idx.tolist():
-        state = physical_state
-        # FIXME: this kind of works but does not account for fastener constraint
-        # should actually be linked to a fastener, and fastener is linked to another body.
-
-        # genesis supports constraints on per-scene basis.
-
         for fastener_id, connected_to in enumerate(
-            state.fasteners_attached_to_body[env_id]
+            sim_state.physical_state.fasteners_attached_to_body[env_id]
         ):
-            fastener_entity = gs_entities[
-                Fastener.fastener_name_in_simulation(fastener_id)
-            ]
-            fastener_base_link_idx = fastener_entity.base_link.idx
-
-            # connected_to is a tensor with two elements (body_a, body_b)
+            fastener_link_t = fastener_base_links[fastener_id].to(device)
             for body_id in connected_to:
                 if body_id.item() == -1:
-                    # Fastener not attached to anything in this position
                     continue
-
-                body_name = physical_info.inverse_body_indices[body_id.item()]
-                body_base_link_idx = all_base_links[body_name]
-
-                key = (fastener_base_link_idx, body_base_link_idx)
+                body_link_t = body_base_links[body_id.item()].to(device)
+                # For grouping/dedup we use ints for dict keys
+                key = (int(fastener_link_t.item()), int(body_link_t.item()))
                 env_list = connections.setdefault(key, [])
                 env_list.append(env_id)
 
-    # Now that we have aggregated env ids for each unique fastener-body pair, add
-    # the weld constraints just once per pair.
-    for (fastener_idx, body_idx), env_ids in connections.items():
-        # Deduplicate env_ids to be safe
-        unique_env_ids = sorted(set(env_ids))  # why sorted?
+    # Add unique pairs once for all collected envs
+    for (link_a, link_b), env_ids in connections.items():
+        key_norm = (link_a, link_b) if link_a <= link_b else (link_b, link_a)
+        if key_norm in existing_pairs:
+            continue
+        unique_env_ids = sorted(set(env_ids))
+        # Recreate 0-D tensors for the call
+        link_a_t = body_base_links.new_tensor(link_a).to(device)
+        link_b_t = body_base_links.new_tensor(link_b).to(device)
         rigid_solver.add_weld_constraint(
-            torch.tensor(fastener_idx, device=state.device).unsqueeze(0).contiguous(),
-            torch.tensor(body_idx, device=state.device).unsqueeze(0).contiguous(),
-            envs_idx=torch.tensor(unique_env_ids, device=state.device).contiguous(),
+            link_a_t,
+            link_b_t,
+            envs_idx=torch.tensor(unique_env_ids, device=device),
         )
-        # NOTE: unsqueeze(0) is a workaround for len of 0d tensor bug.
+        existing_pairs.add(key_norm)
 
 
 def reset_constraints(scene: gs.Scene):
