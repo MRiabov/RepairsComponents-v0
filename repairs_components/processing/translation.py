@@ -26,6 +26,11 @@ from repairs_components.training_utils.sim_state_global import (
     RepairsSimInfo,
     RepairsSimState,
 )
+from repairs_components.processing.part_types import (
+    parse_part_label,
+    PartType,
+    ConnectorSex,
+)
 
 
 def translate_state_to_genesis_scene(
@@ -42,8 +47,10 @@ def translate_state_to_genesis_scene(
     # Mesh file names are stored as a singleton under sim_info.physical_info
     mesh_file_names = sim_info.physical_info.mesh_file_names
     assert len(mesh_file_names) > 0, "No meshes provided."
-    val_mesh_file_names = {  # val - validation
-        k: v for k, v in mesh_file_names.items() if not k.endswith("@fastener")
+    val_mesh_file_names = {
+        k: v
+        for k, v in mesh_file_names.items()
+        if parse_part_label(k).type != PartType.FASTENER
     }
     assert (
         len(val_mesh_file_names) == len(sim_info.physical_info.body_indices)
@@ -70,9 +77,7 @@ def translate_state_to_genesis_scene(
     # translate each child into genesis entities
     for body_name, body_idx in physical_info.body_indices.items():
         assert body_name is not None and "@" in body_name, "Label must contain '@'"
-        # note: body name is equal to build123d label here.
-        part_name, part_type = body_name.split("@", 1)
-        part_type = part_type.lower()
+        p = parse_part_label(body_name)
 
         # DEBUG: (turn this back on)
         # if random_textures:
@@ -84,25 +89,25 @@ def translate_state_to_genesis_scene(
 
         mesh_or_mjcf_path = str(mesh_file_names[body_name])
 
-        if part_type == "solid" or part_type == "fixed_solid":
-            fixed = part_type == "fixed_solid"
+        if p.type in {PartType.SOLID, PartType.FIXED_SOLID}:
+            fixed = p.type == PartType.FIXED_SOLID
             mesh = gs.morphs.Mesh(file=mesh_or_mjcf_path, fixed=fixed)
             new_entity = scene.add_entity(mesh, surface=surface)
-        elif part_type == "connector":
+        elif p.type == PartType.CONNECTOR:
             # NOTE: links to keep was on UDRF, not on mjcf!!!
             mesh = gs.morphs.Mesh(file=mesh_or_mjcf_path)
             new_entity = scene.add_entity(mesh, surface=surface)
-        elif part_type in ("button", "led", "switch"):
+        elif p.type in {PartType.BUTTON, PartType.LED, PartType.SWITCH}:
             # NOTE: links to keep was on UDRF, not on mjcf!!!
             mesh = gs.morphs.MJCF(file=mesh_or_mjcf_path)
             new_entity = scene.add_entity(mesh, surface=surface)
-        elif part_type == "fastener":
+        elif p.type == PartType.FASTENER:
             raise ValueError(
                 "Fasteners should be defined only in edge attributes or free bodies, not in indices."
             )
         else:
             raise NotImplementedError(
-                f"Not implemented for translation part type: {part_type}"
+                f"Not implemented for translation part type: {p.type}"
             )
 
         # record base link idx at the correct id slot
@@ -179,82 +184,78 @@ def translate_genesis_to_python(  # translate to sim state, really.
             "picked_up_fastener_id must be int64 with -1 sentinel for screwdriver"
         )  # should be a single assertion (was already)
 
-    # loop entities, gather body transforms for batched update; update fasteners directly
-    body_names: list[str] = []
+    # Use batched solver queries for bodies and fasteners
     physical_device = sim_state.physical_state.device
-    # Preallocate using existing PhysicalState shapes to avoid stacking
-    positions = torch.zeros_like(sim_state.physical_state.position)  # [B, N, 3]
-    rotations = torch.zeros_like(sim_state.physical_state.quat)  # [B, N, 4]
+
+    # --- Bodies: build ordered names and link indices ---
+    N_bodies = sim_state.physical_state.position.shape[1]
+    assert N_bodies == len(sim_info.physical_info.body_indices)
+    body_names: list[str] = [
+        sim_info.physical_info.inverse_body_indices[i] for i in range(N_bodies)
+    ]
+    body_link_idx = sim_info.physical_info.body_base_link_idx  # [N]
+
+    # Fetch batched positions/quaternions for all bodies
+    rigid_solver = scene.sim.rigid_solver
+    pos_batch = rigid_solver.get_links_pos(
+        links_idx=body_link_idx, envs_idx=env_idx
+    )  # expected [B, N, 3]
+    assert hasattr(rigid_solver, "get_links_quat"), (
+        "Genesis API must provide get_links_quat for batched quaternions"
+    )
+    quat_batch = rigid_solver.get_links_quat(
+        links_idx=body_link_idx, envs_idx=env_idx
+    )  # expected [B, N, 4]
+
+    positions = torch.as_tensor(pos_batch, device=physical_device, dtype=torch.float32)
+    rotations = torch.as_tensor(quat_batch, device=physical_device, dtype=torch.float32)
+
+    # Compute connector terminal relative positions aligned to body_names
     terminal_rel = torch.full(
-        (positions.shape[1], 3),
-        float("nan"),
-        dtype=positions.dtype,
-        device=physical_device,
-    )  # [N, 3]
-    fill_idx = 0
-
-    for full_name, entity in gs_entities.items():
-        part_name, part_type = full_name.split("@")
-        if part_type in ("solid", "fixed_solid", "connector"):
-            # Collect batched positions/rotations across environments
-            pos_all = torch.as_tensor(
-                entity.get_pos(env_idx), device=physical_device, dtype=positions.dtype
-            )  # [B,3]
-            quat_all = torch.as_tensor(
-                entity.get_quat(env_idx), device=physical_device, dtype=rotations.dtype
-            )  # [B,4]
-
-            # Fill into preallocated tensors
-            body_names.append(full_name)
-            positions[:, fill_idx, :] = pos_all
-            rotations[:, fill_idx, :] = quat_all
-
-            # Terminal relative position or NaNs for non-connectors
-            if part_type == "connector":
-                male = part_name.endswith(
-                    "_male"
-                )  # dev note: "_male", not "male". is passes for female otherwise.
-                connector = Connector.from_name(part_name)
-                if male:
-                    rel = torch.as_tensor(
-                        connector.terminal_pos_relative_to_center_male / 1000,
-                        dtype=positions.dtype,
-                        device=physical_device,
-                    )
-                else:
-                    rel = torch.as_tensor(
-                        connector.terminal_pos_relative_to_center_female / 1000,
-                        dtype=positions.dtype,
-                        device=physical_device,
-                    )
-                terminal_rel[fill_idx] = rel
-            fill_idx += 1
-
-        elif part_type == "control":
-            continue  # skip.
-        elif part_type == "fastener":
-            # get fastener pos/quat
-            fastener_pos = torch.tensor(entity.get_pos(env_idx), device=device)
-            fastener_quat = torch.tensor(entity.get_quat(env_idx), device=device)
-            fastener_id = int(full_name.split("@")[0])  # fastener name is "1@fastener"
-            sim_state.physical_state.fasteners_pos[:, fastener_id] = fastener_pos
-            sim_state.physical_state.fasteners_quat[:, fastener_id] = fastener_quat
+        (N_bodies, 3), float("nan"), dtype=positions.dtype, device=physical_device
+    )
+    for i, name in enumerate(body_names):
+        p = parse_part_label(name)
+        if p.type == PartType.CONNECTOR:
+            assert p.connector_sex in {ConnectorSex.MALE, ConnectorSex.FEMALE}, (
+                f"Connector must encode sex with _male/_female: {p.full}"
+            )
+            connector = Connector.from_name(p.name)
+            if p.connector_sex == ConnectorSex.MALE:
+                rel = connector.terminal_pos_relative_to_center_male / 1000
+            else:  # FEMALE
+                rel = connector.terminal_pos_relative_to_center_female / 1000
+            terminal_rel[i] = torch.as_tensor(
+                rel, dtype=positions.dtype, device=physical_device
+            )
 
     # Perform a single batched update for all bodies
-    if body_names:
-        assert fill_idx == positions.shape[1], (
-            "Number of filled bodies does not match allocated space"
+    sim_state.physical_state = update_bodies_batch(
+        sim_state.physical_state,
+        sim_info.physical_info,
+        body_names,
+        positions,
+        rotations,
+        terminal_rel,
+    )
+
+    # --- Fasteners: batch update pos/quat from solver ---
+    if sim_state.physical_state.fasteners_pos.numel() > 0:
+        fastener_links = sim_info.physical_info.fastener_base_link_idx  # [F]
+        fast_pos = rigid_solver.get_links_pos(
+            links_idx=fastener_links, envs_idx=env_idx
+        )  # [B, F, 3]
+        assert hasattr(rigid_solver, "get_links_quat"), (
+            "Genesis API must provide get_links_quat for batched quaternions"
         )
-        positions = positions[:, :fill_idx]
-        rotations = rotations[:, :fill_idx]
-        terminal_rel = terminal_rel[:fill_idx]
-        sim_state.physical_state = update_bodies_batch(
-            sim_state.physical_state,
-            sim_info.physical_info,
-            body_names,
-            positions,
-            rotations,
-            terminal_rel,
+        fast_quat = rigid_solver.get_links_quat(
+            links_idx=fastener_links, envs_idx=env_idx
+        )  # [B, F, 4]
+        sim_state.physical_state.fasteners_pos = torch.as_tensor(
+            fast_pos, device=physical_device, dtype=sim_state.physical_state.fasteners_pos.dtype
+        )
+        sim_state.physical_state.fasteners_quat = torch.as_tensor(
+            fast_quat, device=physical_device, dtype=sim_state.physical_state.fasteners_quat.dtype
         )
 
     # handle picked up fastener (tip)
@@ -318,11 +319,11 @@ def translate_compound_to_sim_state(
     body_idx = 0
     fastener_count = 0
     for part in first_compound.leaves:
-        part_name, part_type = part.label.split("@", 1)
-        if part_type in ("solid", "fixed_solid", "connector"):
+        p = parse_part_label(part.label)
+        if p.type in {PartType.SOLID, PartType.FIXED_SOLID, PartType.CONNECTOR}:
             first_body_indices[part.label] = body_idx
             body_idx += 1
-        elif part_type == "fastener":
+        elif p.type == PartType.FASTENER:
             fastener_count += 1
 
     count_bodies = body_idx
@@ -366,13 +367,13 @@ def translate_compound_to_sim_state(
             assert "@" in part.label, "Part must annotate type."
             assert part.volume > 0, "Part must have a volume."
 
-            part_name, part_type = part.label.split("@", 1)
+            p = parse_part_label(part.label)
 
             # Collect body data
-            if part_type in ("solid", "fixed_solid", "connector"):
+            if p.type in {PartType.SOLID, PartType.FIXED_SOLID, PartType.CONNECTOR}:
                 if env_idx == 0:
                     all_body_names.append(part.label)
-                    fixed[body_idx] = part_type == "fixed_solid"
+                    fixed[body_idx] = p.type == PartType.FIXED_SOLID
 
                 # Convert position and rotation to tensors
                 position_raw = torch.tensor(
@@ -391,17 +392,17 @@ def translate_compound_to_sim_state(
                 all_rotations[env_idx, body_idx] = rotation_quat
                 body_idx += 1
 
-            elif part_type == "liquid":
+            elif p.type == PartType.LIQUID:
                 raise NotImplementedError("Liquid is not handled yet.")
-            elif part_type == "button":
+            elif p.type == PartType.BUTTON:
                 raise NotImplementedError("Buttons are not handled yet.")
-            elif part_type == "terminal_def":
+            elif p.type == PartType.TERMINAL_DEF:
                 continue  # terminal def is already registered in connectors.
-            elif part_type == "fastener":
+            elif p.type == PartType.FASTENER:
                 continue  # would be handled in the next loop.
             else:
                 raise NotImplementedError(
-                    f"Part type {part_type} not implemented. Raise from part.label: {part.label}"
+                    f"Part type {p.type} not implemented. Raise from part.label: {part.label}"
                 )
 
     # Convert lists to tensors for batch processing
@@ -413,15 +414,15 @@ def translate_compound_to_sim_state(
     )
 
     for i, name in enumerate(all_body_names):
-        if name.endswith("@connector"):
-            # get the terminal def position
-            connector = Connector.from_name(name)
-            if name.endswith("_male@connector"):
+        p = parse_part_label(name)
+        if p.type == PartType.CONNECTOR:
+            connector = Connector.from_name(p.name)
+            if p.connector_sex == ConnectorSex.MALE:
                 connector_positions_relative[i] = torch.tensor(
                     connector.terminal_pos_relative_to_center_male / 1000,
                     dtype=torch.float32,
                 )
-            elif name.endswith("_female@connector"):
+            elif p.connector_sex == ConnectorSex.FEMALE:
                 connector_positions_relative[i] = torch.tensor(
                     connector.terminal_pos_relative_to_center_female / 1000,
                     dtype=torch.float32,
@@ -508,9 +509,9 @@ def translate_compound_to_sim_state(
         fastener_idx = 0
         fastener_names = []
         for part in batch_b123d_compounds[env_id].leaves:
-            part_name, part_type = part.label.split("@", 1)
+            p = parse_part_label(part.label)
             # Collect fastener data for later processing
-            if part_type == "fastener":
+            if p.type == PartType.FASTENER:
                 fastener_positions[env_id, fastener_idx] = torch.tensor(
                     tuple(part.global_location.position), dtype=torch.float32
                 )
@@ -561,7 +562,7 @@ def translate_compound_to_sim_state(
 
                 fastener_init_hole_a[env_id, fastener_idx] = initial_hole_id_a
                 fastener_init_hole_b[env_id, fastener_idx] = initial_hole_id_b
-                fastener_names.append(part_name)
+                fastener_names.append(p.name)
                 fastener_idx += 1
 
     # Register fasteners across all environments
@@ -789,7 +790,8 @@ def get_starting_part_holes(
     filtered_parts = [
         part
         for part in all_parts
-        if part.label.endswith(("@solid", "@fixed_solid", "@connector"))
+        if parse_part_label(part.label).type
+        in {PartType.SOLID, PartType.FIXED_SOLID, PartType.CONNECTOR}
     ]
 
     # not other fasteners.

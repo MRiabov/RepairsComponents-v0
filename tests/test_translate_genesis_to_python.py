@@ -14,6 +14,7 @@ from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum
 from repairs_components.processing.geom_utils import get_connector_pos, quat_multiply
 from repairs_components.processing.translation import translate_genesis_to_python
+from repairs_components.processing.genesis_utils import populate_base_link_indices
 from repairs_components.training_utils.sim_state_global import (
     RepairsSimInfo,
     RepairsSimState,
@@ -32,7 +33,7 @@ def scene_with_entities(init_gs, test_device):
     )
 
     # Add basic entities
-    plane = scene.add_entity(gs.morphs.Plane())
+    scene.add_entity(gs.morphs.Plane())
 
     # Add solid parts
     part_1 = scene.add_entity(
@@ -66,7 +67,7 @@ def scene_with_entities(init_gs, test_device):
     scene.build(n_envs=1)
 
     # get europlug only for name:
-    europlug = Europlug(0)  # scrap it
+    europlug = Europlug(in_sim_id=0)  # scrap it
     male_name = europlug.get_name(0, male_female_both=True)
     female_name = europlug.get_name(0, male_female_both=False)
     assert male_name == "europlug_0_male" and female_name == "europlug_0_female", (
@@ -94,7 +95,7 @@ def scene_with_entities(init_gs, test_device):
         # it is expected to change.
     )
 
-    # sim_state.electronics_state[0].register(Europlug(0))
+    # sim_state.electronics_state[0].register(Europlug(in_sim_id=0))
     # Electronics registration is not required for this translation test
 
     # Batch register bodies (parts and connectors)
@@ -171,6 +172,13 @@ def scene_with_entities(init_gs, test_device):
         fastener_init_hole_b=init_hole_b,
         fastener_compound_names=[fastener_name],
     )
+    # Populate base link indices via helper for Genesis batched queries
+    populate_base_link_indices(
+        physical_state_info,
+        entities,
+        sim_state.physical_state.fasteners_pos.shape[1],
+    )
+
     sim_info = RepairsSimInfo(physical_info=physical_state_info)
 
     return scene, entities, sim_state, sim_info

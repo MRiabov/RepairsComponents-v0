@@ -25,6 +25,11 @@ from repairs_components.processing.geom_utils import (
     quaternion_delta,
     sanitize_quaternion,
 )
+from repairs_components.processing.part_types import (
+    parse_part_label,
+    PartType,
+    ConnectorSex,
+)
 
 
 @dataclass
@@ -34,13 +39,29 @@ class PhysicalStateInfo:
     """
 
     # --- bodies ---
-
     fixed: torch.Tensor = field(
         default_factory=lambda: torch.empty((0,), dtype=torch.bool)
     )
+    part_types: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.int8)
+    )
+    """Integer-encoded part type per body index. Shape: [N].
+    Encoding: 0=SOLID, 1=CONNECTOR, 2=FIXED_SOLID"""
+    connector_sex: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0,), dtype=torch.int8)
+    )
+    """Integer-encoded connector sex per body index. Shape: [N].
+    Encoding: -1=NONE (non-connector), 0=FEMALE, 1=MALE"""
+
     # body_indices and inverse_body_indices
     body_indices: dict[str, int] = field(default_factory=dict)
+    """Mapping of body names to integer indices.
+    
+    Note: both body_indices and inverse_body_indices should be reduced in favor of using other metadata due to performance."""
     inverse_body_indices: dict[int, str] = field(default_factory=dict)
+    """Mapping of integer indices to body names. Inverse of body_indices
+    
+    Note: both inverse_body_indices and body_indices should be reduced in favor of using other metadata due to performance."""
     permanently_constrained_parts: list[list[str]] = field(default_factory=list)
     """List of lists of permanently constrained parts (linked_groups from EnvSetup)"""
 
@@ -997,12 +1018,19 @@ def register_bodies_batch(
     )
 
     # Validate name formats and check for conflicts
-    for name in names:
-        assert name.endswith(("@solid", "@connector", "@fixed_solid")), (
-            f"Body name must end with @solid, @connector or @fixed_solid. Got {name}"
+    parsed_labels: list = []
+    for n in names:
+        try:
+            p = parse_part_label(n)
+        except AssertionError:
+            assert False, (
+                f"Body name must end with '@solid', '@connector', or '@fixed_solid'. Got {n}"
+            )
+        parsed_labels.append(p)
+    for p in parsed_labels:
+        assert p.type in {PartType.SOLID, PartType.CONNECTOR, PartType.FIXED_SOLID}, (
+            f"Body type must be solid, connector or fixed_solid. Got {p.type} in {p.full}"
         )
-        # assert name not in physical_info.body_indices, f"Body {name} already registered"
-    # assert isinstance(physical_info.body_indices, dict)
     assert len(names) == len(set(names)), "Duplicate body names."
 
     # Update body indices for all bodies
@@ -1020,15 +1048,38 @@ def register_bodies_batch(
     physical_states.count_fasteners_held = fastener_count
     physical_info.fixed = fixed
 
+    # Populate tensorized metadata once
+    pt = torch.empty((num_bodies,), dtype=torch.int8, device=device)
+    sex = torch.full((num_bodies,), fill_value=-1, dtype=torch.int8, device=device)
+    for i, p in enumerate(parsed_labels):
+        if p.type == PartType.SOLID:
+            pt[i] = 0
+        elif p.type == PartType.CONNECTOR:
+            pt[i] = 1
+            if p.connector_sex == ConnectorSex.MALE:
+                sex[i] = 1
+            elif p.connector_sex == ConnectorSex.FEMALE:
+                sex[i] = 0
+            else:
+                # Should not happen for connectors
+                assert False, f"Connector must encode sex with _male/_female: {p.full}"
+        elif p.type == PartType.FIXED_SOLID:
+            pt[i] = 2
+        else:
+            assert False, f"Unsupported part type {p.type}"
+    physical_info.part_types = pt
+    physical_info.connector_sex = sex
+
     # Handle connectors using the batched connector update function
     if terminal_position_relative_to_center is not None:
         # Filter out connector bodies and their data
         connector_indices = [
-            i for i, name in enumerate(names) if name.endswith("@connector")
+            i for i, p in enumerate(parsed_labels) if p.type == PartType.CONNECTOR
         ]
 
         if connector_indices:
             connector_names = [names[i] for i in connector_indices]
+            connector_parsed = [parsed_labels[i] for i in connector_indices]
             connector_positions = positions[
                 :, connector_indices
             ]  # [B, num_connectors, 3]
@@ -1038,22 +1089,25 @@ def register_bodies_batch(
             terminal_rel_positions = terminal_position_relative_to_center[
                 connector_indices
             ]  # [num_connectors, 3]
+            connector_sexes = sex[connector_indices]  # [num_connectors]
 
             # Validate that connector positions are not NaN
-            for i, name in enumerate(connector_names):
+            for i, p in enumerate(connector_parsed):
                 terminal_rel_pos = terminal_rel_positions[i]
-                if name.endswith(("_male@connector", "_female@connector")):
-                    assert not torch.isnan(terminal_rel_pos).any(), (
-                        f"Connector {name} must have valid terminal_position_relative_to_center, got NaN"
-                    )
+                assert p.connector_sex in {ConnectorSex.MALE, ConnectorSex.FEMALE}, (
+                    f"Connector name must encode sex with _male/_female: {p.full}"
+                )
+                assert not torch.isnan(terminal_rel_pos).any(), (
+                    f"Connector {p.full} must have valid terminal_position_relative_to_center, got NaN"
+                )
 
-            # Use the batched connector update function
+            # Use the batched connector update function (no reparsing)
             male_terminal_positions, female_terminal_positions = (
                 update_terminal_def_pos_batch(
                     connector_positions,
                     connector_rotations,
                     terminal_rel_positions,
-                    connector_names,
+                    connector_sexes,
                 )
             )
 
@@ -1064,13 +1118,13 @@ def register_bodies_batch(
             # Set up connector indices and batches
             male_indices = [
                 i
-                for i, name in enumerate(connector_names)
-                if name.endswith("_male@connector")
+                for i, p in enumerate(connector_parsed)
+                if p.connector_sex == ConnectorSex.MALE
             ]
             female_indices = [
                 i
-                for i, name in enumerate(connector_names)
-                if name.endswith("_female@connector")
+                for i, p in enumerate(connector_parsed)
+                if p.connector_sex == ConnectorSex.FEMALE
             ]
 
             # Set up male connector batch and indices
@@ -1083,18 +1137,18 @@ def register_bodies_batch(
                 male_batch_tensor = torch.tensor(
                     male_body_indices, dtype=torch.long, device=device
                 )
-                # Expand to batch dimension if needed
-                if male_batch_tensor.ndim == 1:
-                    # FIXME: this is wrong. male_batch_tensor is meant to be ndim=1!
-                    male_batch_tensor = male_batch_tensor.unsqueeze(0).expand(B, -1)
+                # Keep as singleton metadata (1D) in PhysicalStateInfo
                 physical_info.male_terminal_batch = male_batch_tensor
+                # Enforce shape/dtype contracts (no defensive logic)
+                assert physical_info.male_terminal_batch.ndim == 1
+                assert physical_info.male_terminal_batch.dtype == torch.long
                 # Update connector indices for all batch elements
                 for i, name in enumerate(male_names):
                     physical_info.terminal_indices_from_name[name] = i
             else:
                 # Set empty batched tensor
                 physical_info.male_terminal_batch = torch.empty(
-                    (B, 0), dtype=torch.long, device=device
+                    (0,), dtype=torch.long, device=device
                 )
 
             # Set up female connector batch and indices
@@ -1107,18 +1161,18 @@ def register_bodies_batch(
                 female_batch_tensor = torch.tensor(
                     female_body_indices, dtype=torch.long, device=device
                 )
-                # Expand to batch dimension if needed
-                if len(female_batch_tensor.shape) == 1:
-                    # FIXME: this is wrong. female_batch_tensor is meant to be ndim=1!
-                    female_batch_tensor = female_batch_tensor.unsqueeze(0).expand(B, -1)
+                # Keep as singleton metadata (1D) in PhysicalStateInfo
                 physical_info.female_terminal_batch = female_batch_tensor
+                # Enforce shape/dtype contracts (no defensive logic)
+                assert physical_info.female_terminal_batch.ndim == 1
+                assert physical_info.female_terminal_batch.dtype == torch.long
                 # Update connector indices for all batch elements
                 for i, name in enumerate(female_names):
                     physical_info.terminal_indices_from_name[name] = i
             else:
                 # Set empty batched tensor
                 physical_info.female_terminal_batch = torch.empty(
-                    (B, 0), dtype=torch.long, device=device
+                    (0,), dtype=torch.long, device=device
                 )
 
     return physical_states, physical_info
@@ -1203,9 +1257,11 @@ def update_bodies_batch(
     physical_states.quat[:, idxs, :] = upd_quat
 
     # Handle connectors: recompute positions for connectors among the updated names
-    connector_indices_local = [
-        i for i, n in enumerate(names) if n.endswith("@connector")
-    ]
+    # Use tensorized metadata instead of reparsing names
+    part_types_local = physical_info.part_types[idxs]
+    connector_indices_local = (
+        torch.nonzero(part_types_local == 1, as_tuple=False).squeeze(1).tolist()
+    )
     if connector_indices_local:
         assert terminal_position_relative_to_center is not None, (
             "Updated connectors must provide terminal_position_relative_to_center"
@@ -1215,16 +1271,16 @@ def update_bodies_batch(
         )
 
         connector_names = [names[i] for i in connector_indices_local]
+        connector_sexes_local = physical_info.connector_sex[idxs][
+            connector_indices_local
+        ]
         terminal_rel = terminal_position_relative_to_center[connector_indices_local].to(
             device
         )
 
-        # Validate connector rel positions for the connectors
-        for i, cname in enumerate(connector_names):
-            if cname.endswith(("_male@connector", "_female@connector")):
-                assert not torch.isnan(terminal_rel[i]).any(), (
-                    f"Connector {cname} must have valid terminal_position_relative_to_center, got NaN"
-                )
+        # Validate rel positions and sexes
+        assert not torch.isnan(terminal_rel).any()
+        assert ((connector_sexes_local == 0) | (connector_sexes_local == 1)).all()
         assert (terminal_rel.abs() < 5).all(), (
             "Likely dimension error: it is unlikely that a connector is further than 5m from the center of the part."
         )
@@ -1239,17 +1295,21 @@ def update_bodies_batch(
         ]  # [B, Nc, 4]
 
         male_pos_new, female_pos_new = update_terminal_def_pos_batch(
-            conn_positions, conn_rotations, terminal_rel, connector_names
+            conn_positions, conn_rotations, terminal_rel, connector_sexes_local
         )
 
         # Write back into preallocated connector position tensors using stored indices
         # terminal_indices_from_name now lives in physical_info
-        male_indices_local = [
-            i for i, n in enumerate(connector_names) if n.endswith("_male@connector")
-        ]
-        female_indices_local = [
-            i for i, n in enumerate(connector_names) if n.endswith("_female@connector")
-        ]
+        male_indices_local = (
+            torch.nonzero(connector_sexes_local == 1, as_tuple=False)
+            .squeeze(1)
+            .tolist()
+        )
+        female_indices_local = (
+            torch.nonzero(connector_sexes_local == 0, as_tuple=False)
+            .squeeze(1)
+            .tolist()
+        )
 
         # Update male connector positions
         if male_indices_local:
@@ -1449,7 +1509,7 @@ def update_terminal_def_pos_batch(
     positions: torch.Tensor,  # [B, num_connectors, 3] positions for connector parts across environments
     rotations: torch.Tensor,  # [B, num_connectors, 4] quaternions for connector parts across environments
     terminal_positions_relative_to_center: torch.Tensor,  # [num_connectors, 3] relative positions
-    names: list[str],  # List of connector names
+    sexes: torch.Tensor,  # [num_connectors] int8, 0=FEMALE, 1=MALE
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Update connector positions in batch for multiple environments.
 
@@ -1457,32 +1517,29 @@ def update_terminal_def_pos_batch(
         positions: Tensor of positions [B, num_connectors, 3] for connectors across environments
         rotations: Tensor of quaternions [B, num_connectors, 4] for connectors across environments
         terminal_positions_relative_to_center: Relative positions [num_connectors, 3]
-        names: List of connector names
+        sexes: Integer-encoded sexes per connector (0=FEMALE, 1=MALE)
 
     Returns:
-        Tuple of (male_terminal_positions, female_terminal_positions)
-        - male_terminal_positions: [B, num_male_connectors, 3]
-        - female_terminal_positions: [B, num_female_connectors, 3]
+        male_terminal_positions: [B, num_male, 3]
+        female_terminal_positions: [B, num_female, 3]
     """
     B, num_connectors, _ = positions.shape
     device = positions.device
 
     # Validate inputs
-    assert rotations.shape == (B, num_connectors, 4), (
-        f"Expected rotations shape [{B}, {num_connectors}, 4], got {rotations.shape}"
+    assert positions.ndim == 3 and positions.shape[-1] == 3
+    assert rotations.ndim == 3 and rotations.shape[-1] == 4
+    assert (
+        terminal_positions_relative_to_center.ndim == 2
+        and terminal_positions_relative_to_center.shape[-1] == 3
     )
-    assert terminal_positions_relative_to_center.shape == (num_connectors, 3), (
-        f"Expected terminal_positions_relative_to_center shape [{num_connectors}, 3], got {terminal_positions_relative_to_center.shape}"
-    )
-    assert len(names) == num_connectors, (
-        f"Expected {num_connectors} names, got {len(names)}"
-    )
+    assert sexes.ndim == 1 and sexes.shape[0] == positions.shape[1]
 
-    # Validate all names are connectors
-    for name in names:
-        assert name.endswith(("_male@connector", "_female@connector")), (
-            f"Connector {name} must end with _male@connector or _female@connector."
-        )
+    # Split by sex using tensorized encoding
+    male_mask = sexes == 1  # 1=MALE
+    female_mask = sexes == 0  # 0=FEMALE
+    male_indices = torch.nonzero(male_mask, as_tuple=False).squeeze(1).tolist()
+    female_indices = torch.nonzero(female_mask, as_tuple=False).squeeze(1).tolist()
 
     # Validate relative positions are reasonable
     assert (terminal_positions_relative_to_center.abs() < 5).all(), (
@@ -1511,16 +1568,7 @@ def update_terminal_def_pos_batch(
         )
         all_terminal_positions[:, i] = terminal_pos
 
-    # Separate male and female connectors
-    male_indices = [
-        i for i, name in enumerate(names) if name.endswith("_male@connector")
-    ]
-    female_indices = [
-        i for i, name in enumerate(names) if name.endswith("_female@connector")
-    ]
-
-    # male_names = [names[i] for i in male_indices]  # Not used in this function
-    # female_names = [names[i] for i in female_indices]  # Not used in this function
+    # male_indices and female_indices are already computed from the sexes tensor above
 
     if male_indices:
         male_terminal_positions = all_terminal_positions[

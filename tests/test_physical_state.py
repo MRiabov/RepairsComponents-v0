@@ -605,6 +605,22 @@ class TestRegisterBodiesBatch:
         assert torch.allclose(result_state.position, positions)
         assert torch.allclose(result_state.quat, rotations)
 
+        # Verify parsed metadata tensors
+        assert physical_info.part_types.shape == (num_bodies,)
+        assert physical_info.part_types.dtype == torch.int8
+        # 0=SOLID, 1=CONNECTOR, 2=FIXED_SOLID
+        assert torch.equal(
+            physical_info.part_types,
+            torch.tensor([0, 2, 0], dtype=torch.int8, device=physical_info.part_types.device),
+        )
+        assert physical_info.connector_sex.shape == (num_bodies,)
+        assert physical_info.connector_sex.dtype == torch.int8
+        # -1 for non-connectors
+        assert torch.equal(
+            physical_info.connector_sex,
+            torch.tensor([-1, -1, -1], dtype=torch.int8, device=physical_info.connector_sex.device),
+        )
+
     def test_register_bodies_batch_with_connectors(self):
         """Test register_bodies_batch with connector bodies."""
         batch_size = 2
@@ -641,6 +657,19 @@ class TestRegisterBodiesBatch:
         # We should have one male and one female connector
         assert result_state.male_terminal_positions.shape == (batch_size, 1, 3)
         assert result_state.female_terminal_positions.shape == (batch_size, 1, 3)
+
+        # Verify parsed metadata tensors for connectors
+        assert physical_info.part_types.shape == (num_bodies,)
+        assert torch.equal(
+            physical_info.part_types,
+            torch.tensor([1, 1], dtype=torch.int8, device=physical_info.part_types.device),
+        )
+        # 1=MALE, 0=FEMALE
+        assert physical_info.connector_sex.shape == (num_bodies,)
+        assert torch.equal(
+            physical_info.connector_sex,
+            torch.tensor([1, 0], dtype=torch.int8, device=physical_info.connector_sex.device),
+        )
 
     def test_register_bodies_batch_mixed_connectors(self):
         """Test register_bodies_batch with mixed connector and non-connector bodies."""
@@ -688,6 +717,18 @@ class TestRegisterBodiesBatch:
             0,
             3,
         )  # No female connectors
+
+        # Verify parsed metadata tensors for mixed types
+        assert physical_info.part_types.shape == (num_bodies,)
+        assert torch.equal(
+            physical_info.part_types,
+            torch.tensor([0, 1, 2], dtype=torch.int8, device=physical_info.part_types.device),
+        )
+        assert physical_info.connector_sex.shape == (num_bodies,)
+        assert torch.equal(
+            physical_info.connector_sex,
+            torch.tensor([-1, 1, -1], dtype=torch.int8, device=physical_info.connector_sex.device),
+        )
 
     def test_register_bodies_batch_input_validation(self):
         """Test input validation for register_bodies_batch."""
