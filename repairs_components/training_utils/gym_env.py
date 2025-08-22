@@ -372,12 +372,12 @@ class RepairsEnv(gym.Env):
                 gripper_force=gripper_force,
                 render=True,
                 keypoint_distance=0.1,  # 10cm as suggested
-                num_steps_between_keypoints=10,
+                num_steps_between_keypoints=self.env_cfg["num_steps_per_action"],
             )
             print(
                 "Motion planning and exec time:",
                 time.perf_counter() - motion_planning_time,
-                "s, which equals to 20 Genesis steps.",
+                f"s, which equals to {self.env_cfg['num_steps_per_action']} Genesis steps.",
             )
 
             # Update the current simulation state based on the scene

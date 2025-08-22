@@ -73,6 +73,7 @@ def get_default_configs(debug: bool = True):
         },
         "min_bounds": (-0.6, -0.7, -0.1),
         "max_bounds": (0.5, 0.5, 2),
+        "num_steps_per_action": 3,
     }
 
     obs_cfg = {
