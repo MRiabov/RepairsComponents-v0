@@ -103,4 +103,4 @@ class Europlug(Connector):
 if __name__ == "__main__":
     from ocp_vscode import show
 
-    show(Europlug(0).bd_geometry((0, 0, 0), connected=True))
+    show(Europlug(in_sim_id=0).bd_geometry((0, 0, 0), connected=True))

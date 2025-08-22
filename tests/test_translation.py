@@ -117,7 +117,7 @@ def cleanup_after_test(request, base_data_dir):
 def env_setups_two_connectors():
     class TwoConnectors(EnvSetup):
         def desired_state_geom(self) -> Compound:
-            geom_male, _, geom_female, _ = Europlug(0).bd_geometry(
+            geom_male, _, geom_female, _ = Europlug(in_sim_id=0).bd_geometry(
                 (0, 0, 0), connected=True
             )
             return Compound(children=[geom_male, geom_female])
@@ -236,7 +236,7 @@ def test_two_connectors_match_after_step(
         [desired], device=torch.device("cpu")
     )
 
-    europlug = Europlug(0)
+    europlug = Europlug(in_sim_id=0)
     male_name = europlug.get_name(0, male_female_both=True)
     female_name = europlug.get_name(0, male_female_both=False)
     # Persist connector meshes for this scene so files exist (as .glb)

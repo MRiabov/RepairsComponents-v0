@@ -11,7 +11,12 @@ from repairs_components.geometry.connectors.models.usb_type_a import USB_A
 
 @pytest.fixture
 def all_connectors() -> list[Connector]:
-    return [Europlug(0), USB_C(1), USB_A(2), Powerpole(3)]
+    return [
+        Europlug(in_sim_id=0),
+        USB_C(in_sim_id=1),
+        USB_A(in_sim_id=2),
+        Powerpole(in_sim_id=3),
+    ]
 
 
 # TODO: couldn't validate...

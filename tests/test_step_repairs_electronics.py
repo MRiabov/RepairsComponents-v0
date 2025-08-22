@@ -69,7 +69,7 @@ def scene_with_two_connectors(init_gs, test_device):
         "europlug_0_female@connector": connector_europlug_female,
     }
     repairs_sim_state = RepairsSimState(device=test_device).unsqueeze(0)
-    europlug_male = Europlug(0)
+    europlug_male = Europlug(in_sim_id=0)
     # hmm, and how do I register electronics? #TODO check translation.
     repairs_sim_state.electronics_state[0].register(europlug_male)
 
