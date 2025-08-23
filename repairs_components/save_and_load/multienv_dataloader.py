@@ -116,7 +116,8 @@ class MultiEnvDataLoader:
             if isinstance(starved_configs[0], tuple):
                 starved_configs = tuple(zip(*starved_configs))
         else:
-            starved_configs = [], {}
+            # no starvation: nothing new generated per scene
+            starved_configs = [[] for _ in range(self.num_environments)]
 
         # log issues is starvation is over 30%.
         total_insufficient_count = torch.sum(count_insufficient_configs_per_scene)
@@ -255,7 +256,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             num_configs_to_generate_per_scene: torch.Tensor,
             save_to_disk: bool = False,
         ) -> List[List[ConcurrentSceneData]]:
-            assert save_to_disk == False, (
+            assert not save_to_disk, (
                 "save_to_disk must be False for offline data loading."
             )  # FIXME: bad abstraction again here. I should not split it by online/offline, rather use different functions for both.
 
@@ -296,10 +297,10 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
 
     def get_processed_data(
         self, num_configs_to_generate_per_scene: torch.Tensor, timeout: float = 1.0
-    ) -> tuple[list[ConcurrentSceneData | None], dict[str, str]]:
+    ) -> list[ConcurrentSceneData | None]:
         """
-        Repairs-specific: merges configs, handles mesh file names, etc.
-        Returns (merged_batches, mesh_file_names) for online mode, else just batches.
+        Repairs-specific: merges configs for downstream usage.
+        Returns merged per-environment batches.
         """
         # Call the base implementation to get lists of lists
         batches_per_env = super().get_processed_data(
@@ -315,7 +316,7 @@ class RepairsEnvDataLoader(MultiEnvDataLoader):
             )
             for batch in batches_per_env
         ]
-        return merged_batches  # , aux_mesh_file_names
+        return merged_batches  # merged per-environment batches
 
     def generate_sequential(
         self, num_configs_to_generate_per_scene: torch.Tensor

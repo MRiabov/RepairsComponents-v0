@@ -36,7 +36,6 @@ from repairs_components.training_utils.env_setup import EnvSetup
 from repairs_components.training_utils.failure_modes import out_of_bounds
 from repairs_components.training_utils.motion_planning import (
     execute_planned_path,
-    execute_straight_line_trajectory,
 )
 from repairs_components.training_utils.progressive_reward_calc import (
     RewardHistory,
@@ -101,6 +100,12 @@ class RepairsEnv(gym.Env):
         self.env_setup_ids = torch.tensor(io_cfg["env_setup_ids"])
         self.per_scene_batch_dim = ml_batch_dim // self.concurrent_scenes
 
+        # profiling / verbosity toggles
+        self.profile = bool(self.env_cfg.get("profile", False))
+        self.verbose = bool(self.env_cfg.get("verbose", False))
+        # simple per-step timers (last step breakdown)
+        self._last_profile: dict[str, float] | None = None
+
         # genesis batch dim = batch_dim // concurrent_scenes
 
         base_dir = Path(io_cfg["data_dir"])
@@ -148,8 +153,6 @@ class RepairsEnv(gym.Env):
 
         # Using dataclass to store concurrent scene data for better organization and clarity
         self.concurrent_scenes_data: list[ConcurrentSceneData] = []
-
-        task = tasks[0]  # any task will suffice for init.
 
         # -- data pregeneration --
 
@@ -202,19 +205,12 @@ class RepairsEnv(gym.Env):
         print(
             f"Offline dataloader loaded in {time.time() - start_dataloader_load:.2f} seconds."
         )
-        in_memory = torch.full(
-            (self.concurrent_scenes,),
-            io_cfg["dataloader_settings"]["prefetch_memory_size"],
-            dtype=torch.int16,
-        )
         # self.env_dataloader.populate_async(in_memory)  # is it still necessary?
-        partial_env_configs: list[ConcurrentSceneData | None] = (  # type: ignore
-            self.env_dataloader.get_processed_data(
-                torch.full(
-                    (self.concurrent_scenes,),
-                    self.per_scene_batch_dim,
-                    dtype=torch.int16,
-                )
+        partial_env_configs = self.env_dataloader.get_processed_data(
+            torch.full(
+                (self.concurrent_scenes,),
+                self.per_scene_batch_dim,
+                dtype=torch.int16,
             )
         )  # get a batch of configs size prefetch_memory_size
 
@@ -351,6 +347,13 @@ class RepairsEnv(gym.Env):
             dtype=torch.float,
         )
         # step through different, concurrent scenes.
+        # timers
+        t_step_start = time.perf_counter()
+        t_motion_total = 0.0
+        t_repairs_total = 0.0
+        t_reward_total = 0.0
+        t_oob_total = 0.0
+
         for scene_id in range(self.concurrent_scenes):
             # Get data for this concurrent scene
             scene_data = self.concurrent_scenes_data[scene_id]
@@ -363,7 +366,7 @@ class RepairsEnv(gym.Env):
             ]  # two gripper forces (grip push in/out)
 
             # Execute the motion planning trajectory using our dedicated module
-            motion_planning_time = time.perf_counter()
+            _t0 = time.perf_counter()
             execute_planned_path(
                 franka=scene_data.gs_entities["franka@control"],
                 scene=scene_data.scene,
@@ -374,13 +377,17 @@ class RepairsEnv(gym.Env):
                 keypoint_distance=0.1,  # 10cm as suggested
                 num_steps_between_keypoints=self.env_cfg["num_steps_per_action"],
             )
-            print(
-                "Motion planning and exec time:",
-                time.perf_counter() - motion_planning_time,
-                f"s, which equals to {self.env_cfg['num_steps_per_action']} Genesis steps.",
-            )
+            _dt = time.perf_counter() - _t0
+            t_motion_total += _dt
+            if self.verbose:
+                print(
+                    "Motion planning and exec time:",
+                    _dt,
+                    f"s, which equals to {self.env_cfg['num_steps_per_action']} Genesis steps.",
+                )
 
             # Update the current simulation state based on the scene
+            _t1 = time.perf_counter()
             (
                 success,
                 total_diff_left,
@@ -395,23 +402,26 @@ class RepairsEnv(gym.Env):
                 desired_state=scene_data.desired_state,
                 sim_info=scene_data.sim_info,
             )
+            t_repairs_total += time.perf_counter() - _t1
 
             # Update the scene data with the new state
             scene_data.current_state = current_sim_state
             self.concurrent_scenes_data[scene_id] = scene_data
 
             # Compute reward based on progress toward the goal
+            _t2 = time.perf_counter()
             dones = total_diff_left == 0  # note: pretty expensive.
-            rewards = scene_data.reward_history.calculate_reward_this_timestep(
-                scene_data
-            )
+            rewards = scene_data.reward_history.calculate_reward_this_timestep(scene_data)
+            t_reward_total += time.perf_counter() - _t2
 
             # check if any entity is out of bounds
+            _t3 = time.perf_counter()
             out_of_bounds_fail = out_of_bounds(
                 min=self.min_bounds,
                 max=self.max_bounds,
                 gs_entities=self.concurrent_scenes_data[scene_id].gs_entities,
             )
+            t_oob_total += time.perf_counter() - _t3
 
             reset_envs = dones | out_of_bounds_fail  # or any other failure mode.
             reset_by_scenes[scene_id] = reset_envs
@@ -430,6 +440,7 @@ class RepairsEnv(gym.Env):
             "out_of_bounds": out_of_bounds_fail,
         }  # FIXME: does not account for multiple scenes, only for the last one executed.
 
+        _t_obs0 = time.perf_counter()
         (
             voxel_init,
             voxel_des,
@@ -439,14 +450,28 @@ class RepairsEnv(gym.Env):
             elec_graph_init,
             elec_graph_des,
         ) = self._observe_all_scenes()
-        print(
-            f"step happened. Time elapsed: {str(time.perf_counter() - self.last_step_time)}s",
-            f"Rewards: {rewards.mean().item()}",
-            f"out_of_bounds_fail: {out_of_bounds_fail.float().mean().item()}",
-        )
+        t_obs = time.perf_counter() - _t_obs0
+        if self.verbose:
+            print(
+                f"step happened. Time elapsed: {str(time.perf_counter() - self.last_step_time)}s",
+                f"Rewards: {rewards.mean().item()}",
+                f"out_of_bounds_fail: {out_of_bounds_fail.float().mean().item()}",
+            )
         self.last_step_time = time.perf_counter()
 
-        return (
+        # store profiling breakdown
+        if self.profile:
+            t_total = time.perf_counter() - t_step_start
+            self._last_profile = {
+                "motion_planning_s": t_motion_total,
+                "repairs_step_s": t_repairs_total,
+                "reward_calc_s": t_reward_total,
+                "out_of_bounds_s": t_oob_total,
+                "observe_s": t_obs,
+                "total_step_s": t_total,
+            }
+
+        out = (
             voxel_init,
             voxel_des,
             video_obs,
@@ -458,6 +483,10 @@ class RepairsEnv(gym.Env):
             dones_by_scenes.flatten(),
             info,
         )
+        # Attach profile to info without changing return structure
+        if self.profile:
+            out[9]["profile"] = self._last_profile  # info dict is at index 9
+        return out
 
     def reset_idx(self, envs_idx: torch.IntTensor):
         """Reset specific environments to their initial state.
@@ -486,8 +515,8 @@ class RepairsEnv(gym.Env):
         counts_full[unique_scene_idx] = counts
 
         # get data for the entire batch.
-        reset_scene_data: list[ConcurrentSceneData | None] = (  # none if counts were 0.
-            self.env_dataloader.get_processed_data(counts_full.to(dtype=torch.int16))
+        reset_scene_data = self.env_dataloader.get_processed_data(
+            counts_full.to(dtype=torch.int16)
         )
 
         for scene_id in range(len(reset_scene_data)):  # iter over scene data
