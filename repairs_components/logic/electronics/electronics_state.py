@@ -135,34 +135,34 @@ class ElectronicsState(TensorClass, tensor_only=True):
         net = self.net_ids[0]
         T = component_info.terminal_to_component_batch.shape[0]
         assert net.shape[0] == T, "net_id length must equal number of terminals"
-
-        # Build nets -> terminals mapping
+        # Build nets -> components incidence without Python loops
         valid_mask = net >= 0
         if not valid_mask.any():
             return torch.empty((2, 0), dtype=torch.long, device=self.device)
 
-        unique_nets = torch.unique(net[valid_mask])
-        edges_set: set[tuple[int, int]] = set()
-        for gid in unique_nets.tolist():
-            term_idx = torch.nonzero(net == gid, as_tuple=False).flatten()
-            comp_idx = component_info.terminal_to_component_batch[term_idx]
-            # Unique components participating in this net
-            comps = torch.unique(comp_idx).tolist()
-            # Generate all i<j pairs among components in this net
-            for i in range(len(comps)):  # TODO refactor to batch comparison.
-                for j in range(i + 1, len(comps)):
-                    a, b = comps[i], comps[j]
-                    if a == b:
-                        continue
-                    u, v = (a, b) if a < b else (b, a)
-                    edges_set.add((u, v))
-
-        if not edges_set:
+        valid_nets = net[valid_mask]
+        comps_for_valid_terms = component_info.terminal_to_component_batch[valid_mask]
+        # Compact net ids to [0, G)
+        nets_unique, net_compact = torch.unique(valid_nets, return_inverse=True)
+        G = int(nets_unique.numel())
+        if G == 0:
             return torch.empty((2, 0), dtype=torch.long, device=self.device)
-        edge_list = torch.tensor(
-            sorted(list(edges_set)), dtype=torch.long, device=self.device
-        )
-        return edge_list.t().contiguous()
+
+        N = int(component_info.component_id.numel())
+        # M[g, n] = 1 if component n participates in net g
+        M = torch.zeros((G, N), dtype=torch.int32, device=self.device)
+        M[net_compact, comps_for_valid_terms] = 1
+        # Co-occurrence across nets: A[i, j] = number of nets where i and j co-occur
+        A = M.t().matmul(M)
+        A.fill_diagonal_(0)
+        if (A > 0).any():
+            iu, iv = torch.triu_indices(N, N, offset=1, device=self.device)
+            mask = A[iu, iv] > 0
+            if mask.any():
+                u = iu[mask]
+                v = iv[mask]
+                return torch.stack([u, v], dim=0).contiguous()
+        return torch.empty((2, 0), dtype=torch.long, device=self.device)
 
     def export_graph(self, component_info: ElectronicsInfo) -> Data:
         """Export a torch_geometric.Data graph for ML consumers.
@@ -656,66 +656,93 @@ def connect_terminal_to_net_or_create_new(
     if other_terminal_ids is not None:
         other_terminal_ids = other_terminal_ids.to(device)
 
-    # Process per batch to allow multiple connects per env
-    unique_b = torch.unique(batch_ids)
-    for b in unique_b.tolist():
-        mask = batch_ids == b
-        if not torch.any(mask):
-            continue
+    # Compute base next-net per batch
+    B = es.batch_size[0]
+    cur = es.net_ids
+    any_assigned = (cur >= 0).any(dim=1)
+    max_ids = torch.where(
+        any_assigned,
+        cur.masked_fill(cur < 0, -1).max(dim=1).values,
+        torch.full((B,), -1, dtype=cur.dtype, device=device),
+    )
+    base_next = max_ids + 1  # [B]
 
-        # Compute next available net id for this batch element
-        cur = es.net_ids[b]
-        has_any = (cur >= 0).any()
-        max_id = int(cur[cur >= 0].max().item()) if has_any else -1
-        next_net = max_id + 1
+    if other_terminal_ids is not None:
+        valid_mask = other_terminal_ids >= 0
+        if valid_mask.any():
+            b = batch_ids[valid_mask]
+            a = terminal_ids[valid_mask]
+            c = other_terminal_ids[valid_mask]
 
-        sel_terms = terminal_ids[mask]
-        if other_terminal_ids is not None:
-            sel_others = other_terminal_ids[mask]
-            for i in range(sel_terms.shape[0]):
-                a = int(sel_terms[i].item())
-                c = int(sel_others[i].item())
-                if c < 0:
-                    # No counterpart specified; ignore this entry
-                    continue
-                g1 = es.net_ids[b, a].item()
-                g2 = es.net_ids[b, c].item()
-                if g1 < 0 and g2 < 0:
-                    gid = next_net
-                    next_net += 1
-                    es.net_ids[b, a] = gid
-                    es.net_ids[b, c] = gid
-                elif g1 >= 0 and g2 < 0:
-                    es.net_ids[b, c] = g1
-                elif g1 < 0 and g2 >= 0:
-                    es.net_ids[b, a] = g2
-                elif g1 != g2:
-                    # Merge two nets into a single id (choose the smaller id)
-                    u = min(g1, g2)
-                    v = max(g1, g2)
-                    es.net_ids[b, es.net_ids[b] == v] = u
-                    # ensure both terminals have the merged id
-                    es.net_ids[b, a] = u
-                    es.net_ids[b, c] = u
-                else:
-                    # already in the same net, nothing to do
-                    pass
-        else:
-            # Attach terminals to explicit target net ids; merge if terminal already in a different net.
-            sel_targets = target_net_ids[mask]
-            for i in range(sel_terms.shape[0]):
-                a = int(sel_terms[i].item())
-                tnet = int(sel_targets[i].item())
-                if tnet < 0:
-                    # No explicit target; leave unchanged
-                    continue
-                g1 = es.net_ids[b, a].item()
-                if g1 < 0:
-                    es.net_ids[b, a] = tnet
-                elif g1 != tnet:
-                    u = min(g1, tnet)
-                    v = max(g1, tnet)
-                    es.net_ids[b, es.net_ids[b] == v] = u
-                    es.net_ids[b, a] = u
+            g1 = es.net_ids[b, a]
+            g2 = es.net_ids[b, c]
+
+            both_neg = (g1 < 0) & (g2 < 0)
+            only2neg = (g1 >= 0) & (g2 < 0)
+            only1neg = (g1 < 0) & (g2 >= 0)
+            merge_mask = (g1 >= 0) & (g2 >= 0) & (g1 != g2)
+
+            # Assign new nets for both-unassigned pairs per-batch using segment ranks
+            idx_bn = torch.nonzero(both_neg, as_tuple=False).flatten()
+            if idx_bn.numel() > 0:
+                b_bn = b[idx_bn]
+                order = torch.argsort(b_bn)
+                b_sorted = b_bn[order]
+                start_flags = torch.ones_like(b_sorted, dtype=torch.bool)
+                start_flags[1:] = b_sorted[1:] != b_sorted[:-1]
+                group_first_pos = torch.nonzero(start_flags, as_tuple=False).flatten()
+                group_id = torch.cumsum(start_flags.to(torch.long), dim=0) - 1
+                first_idx_per_elem = group_first_pos[group_id]
+                rank_sorted = torch.arange(b_sorted.numel(), device=device) - first_idx_per_elem
+                new_ids_sorted = base_next[b_sorted] + rank_sorted
+                inv = torch.empty_like(order)
+                inv[order] = torch.arange(order.numel(), device=device)
+                new_ids = new_ids_sorted[inv]
+                es.net_ids[b[idx_bn], a[idx_bn]] = new_ids
+                es.net_ids[b[idx_bn], c[idx_bn]] = new_ids
+
+            # Attach single-unassigned to existing nets
+            if only2neg.any():
+                es.net_ids[b[only2neg], c[only2neg]] = g1[only2neg]
+            if only1neg.any():
+                es.net_ids[b[only1neg], a[only1neg]] = g2[only1neg]
+
+            # Merge distinct existing nets; keep minimal id
+            if merge_mask.any():
+                u = torch.minimum(g1[merge_mask], g2[merge_mask])
+                v = torch.maximum(g1[merge_mask], g2[merge_mask])
+                bb = b[merge_mask]
+                merges = torch.unique(torch.stack([bb.to(torch.long), u, v], dim=1), dim=0)
+                # Apply merges (loop over unique pairs, not per-batch)
+                for i in range(int(merges.shape[0])):
+                    bb_i = int(merges[i, 0].item())
+                    uu = int(merges[i, 1].item())
+                    vv = int(merges[i, 2].item())
+                    es.net_ids[bb_i, es.net_ids[bb_i] == vv] = uu
+    else:
+        # target_net_ids path
+        assert target_net_ids is not None
+        valid_mask = target_net_ids >= 0
+        if valid_mask.any():
+            b = batch_ids[valid_mask]
+            a = terminal_ids[valid_mask]
+            tnet = target_net_ids[valid_mask]
+            g1 = es.net_ids[b, a]
+
+            neg = g1 < 0
+            if neg.any():
+                es.net_ids[b[neg], a[neg]] = tnet[neg]
+
+            merge_mask = (~neg) & (g1 != tnet)
+            if merge_mask.any():
+                u = torch.minimum(g1[merge_mask], tnet[merge_mask])
+                v = torch.maximum(g1[merge_mask], tnet[merge_mask])
+                bb = b[merge_mask]
+                merges = torch.unique(torch.stack([bb.to(torch.long), u, v], dim=1), dim=0)
+                for i in range(int(merges.shape[0])):
+                    bb_i = int(merges[i, 0].item())
+                    uu = int(merges[i, 1].item())
+                    vv = int(merges[i, 2].item())
+                    es.net_ids[bb_i, es.net_ids[bb_i] == vv] = uu
 
     return es
