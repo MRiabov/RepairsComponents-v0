@@ -611,14 +611,20 @@ class TestRegisterBodiesBatch:
         # 0=SOLID, 1=CONNECTOR, 2=FIXED_SOLID
         assert torch.equal(
             physical_info.part_types,
-            torch.tensor([0, 2, 0], dtype=torch.int8, device=physical_info.part_types.device),
+            torch.tensor(
+                [0, 2, 0], dtype=torch.int8, device=physical_info.part_types.device
+            ),
         )
         assert physical_info.connector_sex.shape == (num_bodies,)
         assert physical_info.connector_sex.dtype == torch.int8
         # -1 for non-connectors
         assert torch.equal(
             physical_info.connector_sex,
-            torch.tensor([-1, -1, -1], dtype=torch.int8, device=physical_info.connector_sex.device),
+            torch.tensor(
+                [-1, -1, -1],
+                dtype=torch.int8,
+                device=physical_info.connector_sex.device,
+            ),
         )
 
     def test_register_bodies_batch_with_connectors(self):
@@ -662,13 +668,17 @@ class TestRegisterBodiesBatch:
         assert physical_info.part_types.shape == (num_bodies,)
         assert torch.equal(
             physical_info.part_types,
-            torch.tensor([1, 1], dtype=torch.int8, device=physical_info.part_types.device),
+            torch.tensor(
+                [1, 1], dtype=torch.int8, device=physical_info.part_types.device
+            ),
         )
         # 1=MALE, 0=FEMALE
         assert physical_info.connector_sex.shape == (num_bodies,)
         assert torch.equal(
             physical_info.connector_sex,
-            torch.tensor([1, 0], dtype=torch.int8, device=physical_info.connector_sex.device),
+            torch.tensor(
+                [1, 0], dtype=torch.int8, device=physical_info.connector_sex.device
+            ),
         )
 
     def test_register_bodies_batch_mixed_connectors(self):
@@ -722,12 +732,16 @@ class TestRegisterBodiesBatch:
         assert physical_info.part_types.shape == (num_bodies,)
         assert torch.equal(
             physical_info.part_types,
-            torch.tensor([0, 1, 2], dtype=torch.int8, device=physical_info.part_types.device),
+            torch.tensor(
+                [0, 1, 2], dtype=torch.int8, device=physical_info.part_types.device
+            ),
         )
         assert physical_info.connector_sex.shape == (num_bodies,)
         assert torch.equal(
             physical_info.connector_sex,
-            torch.tensor([-1, 1, -1], dtype=torch.int8, device=physical_info.connector_sex.device),
+            torch.tensor(
+                [-1, 1, -1], dtype=torch.int8, device=physical_info.connector_sex.device
+            ),
         )
 
     def test_register_bodies_batch_input_validation(self):
@@ -979,7 +993,7 @@ class TestUpdateBodiesBatch:
         new_rots[..., 0] = 1.0
 
         updated_state = update_bodies_batch(
-            state, physical_info, names, new_positions, new_rots
+            state, physical_info, new_positions, new_rots
         )
 
         # body_0 and body_2 update; body_1 stays unchanged (zeros)
@@ -1004,7 +1018,7 @@ class TestUpdateBodiesBatch:
         rotations[..., 0] = 1.0
 
         with pytest.raises(AssertionError, match="out of bounds"):
-            update_bodies_batch(state, physical_info, names, positions, rotations)
+            update_bodies_batch(state, physical_info, positions, rotations)
 
     def test_update_bodies_batch_connectors_update(self):
         batch_size = 2
@@ -1029,9 +1043,7 @@ class TestUpdateBodiesBatch:
             ]
         )
 
-        updated_state = update_bodies_batch(
-            state, physical_info, names, positions, rotations, terminal_rel
-        )
+        updated_state = update_bodies_batch(state, physical_info, positions, rotations)
 
         # Expected connector positions with identity rotations: pos + rel
         # Names order: [body_0, male, female]; male array contains only male connectors in that order
@@ -1057,9 +1069,7 @@ class TestUpdateBodiesBatch:
             positions = positions.to("cuda")
             rotations = rotations.to("cuda")
 
-        updated_state = update_bodies_batch(
-            state, physical_info, names, positions, rotations
-        )
+        updated_state = update_bodies_batch(state, physical_info, positions, rotations)
 
         # Verify tensors are on CPU (state.device)
         assert updated_state.position.device.type == "cpu"

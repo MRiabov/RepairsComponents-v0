@@ -47,11 +47,18 @@ class PhysicalStateInfo:
     )
     """Integer-encoded part type per body index. Shape: [N].
     Encoding: 0=SOLID, 1=CONNECTOR, 2=FIXED_SOLID"""
+
+    # --- connectors ---
     connector_sex: torch.Tensor = field(
         default_factory=lambda: torch.empty((0,), dtype=torch.int8)
     )
     """Integer-encoded connector sex per body index. Shape: [N].
     Encoding: -1=NONE (non-connector), 0=FEMALE, 1=MALE"""
+    terminal_positions_relative_to_center: torch.Tensor = field(
+        default_factory=lambda: torch.empty((0, 3), dtype=torch.float32)
+    )  # FIXME: this does not support electronics with num_terminals>1!!! it should be batched instead.
+    """Terminal positions relative to connector center per body index. Shape: [N, 3].
+    Where part_type!=PartType.Connector, values are `nan`."""
 
     # body_indices and inverse_body_indices
     body_indices: dict[str, int] = field(default_factory=dict)
@@ -138,6 +145,9 @@ class PhysicalStateInfo:
     # """Hole indices per part name.""" # unused.
 
     env_size: torch.Tensor = torch.tensor([640, 640, 640], dtype=torch.float)
+    # Bounds for normalized coordinates
+    max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64], dtype=torch.float32)
+    min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0], dtype=torch.float32)
     device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def __post_init__(self):
@@ -1016,6 +1026,9 @@ def register_bodies_batch(
     assert (positions >= min_bounds).all() and (positions <= max_bounds).all(), (
         f"Some positions are out of bounds [{min_bounds.tolist()}, {max_bounds.tolist()}]"
     )
+    # Persist bounds into PhysicalStateInfo for later updates
+    physical_info.min_bounds = min_bounds
+    physical_info.max_bounds = max_bounds
 
     # Validate name formats and check for conflicts
     parsed_labels: list = []
@@ -1101,6 +1114,17 @@ def register_bodies_batch(
                     f"Connector {p.full} must have valid terminal_position_relative_to_center, got NaN"
                 )
 
+            # Store terminal relative positions aligned to global body indices [N, 3]
+            # Fill non-connectors with NaN to indicate absence (they are never indexed for connectors)
+            terminal_rel_positions_full = torch.empty(
+                (num_bodies, 3), dtype=terminal_rel_positions.dtype, device=device
+            )
+            terminal_rel_positions_full[:] = float("nan")
+            terminal_rel_positions_full[connector_indices] = terminal_rel_positions
+            physical_info.terminal_positions_relative_to_center = (
+                terminal_rel_positions_full
+            )
+
             # Use the batched connector update function (no reparsing)
             male_terminal_positions, female_terminal_positions = (
                 update_terminal_def_pos_batch(
@@ -1181,13 +1205,8 @@ def register_bodies_batch(
 def update_bodies_batch(
     physical_states: "PhysicalState",
     physical_info: "PhysicalStateInfo",
-    names: list[str],
-    positions: torch.Tensor,  # [B, num_update, 3]
-    rotations: torch.Tensor,  # [B, num_update, 4]
-    terminal_position_relative_to_center: torch.Tensor
-    | None = None,  # [num_update, 3] with NaNs for non-connectors
-    max_bounds: torch.Tensor = torch.tensor([0.32, 0.32, 0.64]),
-    min_bounds: torch.Tensor = torch.tensor([-0.32, -0.32, 0.0]),
+    positions: torch.Tensor,  # [B, N, 3]
+    rotations: torch.Tensor,  # [B, N, 4]
 ) -> "PhysicalState":
     """Update multiple bodies across multiple environments in batch.
 
@@ -1197,147 +1216,88 @@ def update_bodies_batch(
 
     Args:
         physical_states: Batched PhysicalState to update.
-        names: List of body names to update.
-        positions: [B, num_update, 3]
-        rotations: [B, num_update, 4]
-        terminal_position_relative_to_center: [num_update, 3] relative positions; NaN for non-connectors.
-        max_bounds, min_bounds: Bounds for normalized coordinates.
-
-    Returns:
-        Updated PhysicalState.
+        positions: [B, N, 3] for all bodies
+        rotations: [B, N, 4] for all bodies
     """
     assert positions.ndim == 3 and positions.shape[-1] == 3, (
-        f"Expected positions shape [B, num_update, 3], got {positions.shape}"
+        f"Expected positions shape [B, N, 3], got {positions.shape}"
     )
     assert rotations.ndim == 3 and rotations.shape[-1] == 4, (
-        f"Expected rotations shape [B, num_update, 4], got {rotations.shape}"
+        f"Expected rotations shape [B, N, 4], got {rotations.shape}"
     )
-    B, num_update, _ = positions.shape
+    B, N, _ = positions.shape
 
-    # Sanity checks for names
-    assert len(names) == num_update, (
-        f"Got {len(names)} names but positions/rotations have {num_update} bodies"
+    # Sanity checks
+    assert physical_states.position.shape[1] == N, (
+        f"Got {N} positions but physical_states has {physical_states.position.shape[1]} bodies"
     )
-    assert len(set(names)) == len(names), (
-        "Duplicate names in update list are not allowed"
-    )
-    for name in names:
-        assert name in physical_info.body_indices, (
-            f"Body {name} not registered. Registered: {list(physical_info.body_indices.keys())}"
-        )
 
     device = physical_states.device
     positions = positions.to(device)
     rotations = rotations.to(device)
-    max_bounds = max_bounds.to(device)
-    min_bounds = min_bounds.to(device)
 
     # Validate bounds and rotations
-    assert (positions >= min_bounds).all() and (positions <= max_bounds).all(), (
-        f"Some positions are out of bounds [{min_bounds.tolist()}, {max_bounds.tolist()}]"
+    assert (positions >= physical_info.min_bounds).all() and (
+        positions <= physical_info.max_bounds
+    ).all(), (
+        f"Some positions are out of bounds [{physical_info.min_bounds.tolist()}, {physical_info.max_bounds.tolist()}]"
     )
     sanitize_quaternion(rotations)
 
-    # Map names -> body indices
-    idxs = torch.tensor(
-        [physical_info.body_indices[n] for n in names],
-        dtype=torch.long,
-        device=device,
-    )
-
-    # Update positions/quaternions where not fixed
-    not_fixed = ~physical_info.fixed[idxs]  # [num_update]
+    # Update positions/quaternions for all bodies where not fixed
+    not_fixed = ~physical_info.fixed  # [N]
     # Positions
-    cur_pos = physical_states.position[:, idxs, :]
-    upd_pos = torch.where(not_fixed.unsqueeze(-1), positions, cur_pos)
-    physical_states.position[:, idxs, :] = upd_pos
+    cur_pos = physical_states.position
+    upd_pos = torch.where(not_fixed.unsqueeze(0).unsqueeze(-1), positions, cur_pos)
+    physical_states.position = upd_pos
     # Rotations
-    cur_quat = physical_states.quat[:, idxs, :]
-    upd_quat = torch.where(not_fixed.unsqueeze(-1), rotations, cur_quat)
-    physical_states.quat[:, idxs, :] = upd_quat
+    cur_quat = physical_states.quat
+    upd_quat = torch.where(not_fixed.unsqueeze(0).unsqueeze(-1), rotations, cur_quat)
+    physical_states.quat = upd_quat
 
-    # Handle connectors: recompute positions for connectors among the updated names
-    # Use tensorized metadata instead of reparsing names
-    part_types_local = physical_info.part_types[idxs]
-    connector_indices_local = (
-        torch.nonzero(part_types_local == 1, as_tuple=False).squeeze(1).tolist()
-    )
-    if connector_indices_local:
-        assert terminal_position_relative_to_center is not None, (
-            "Updated connectors must provide terminal_position_relative_to_center"
-        )
-        assert terminal_position_relative_to_center.shape == (num_update, 3), (
-            f"Expected terminal_position_relative_to_center shape [{num_update}, 3], got {terminal_position_relative_to_center.shape}"
-        )
-
-        connector_names = [names[i] for i in connector_indices_local]
-        connector_sexes_local = physical_info.connector_sex[idxs][
-            connector_indices_local
-        ]
-        terminal_rel = terminal_position_relative_to_center[connector_indices_local].to(
-            device
-        )
-
+    # Handle connectors: recompute positions for all connector bodies
+    connector_indices = torch.nonzero(
+        physical_info.part_types == 1, as_tuple=False
+    ).squeeze(1)
+    if connector_indices.numel() > 0:
+        connector_sexes_local = physical_info.connector_sex[connector_indices]
+        terminal_rel = physical_info.terminal_positions_relative_to_center[
+            connector_indices
+        ].to(device)
         # Validate rel positions and sexes
         assert not torch.isnan(terminal_rel).any()
         assert ((connector_sexes_local == 0) | (connector_sexes_local == 1)).all()
         assert (terminal_rel.abs() < 5).all(), (
-            "Likely dimension error: it is unlikely that a connector is further than 5m from the center of the part."
+            "Likely dimension error: connector too far from center."
         )
 
         # Use updated state tensors (with fixed masking applied) to recompute connector positions
-        body_idxs_for_connectors = idxs[connector_indices_local]
-        conn_positions = physical_states.position[
-            :, body_idxs_for_connectors, :
-        ]  # [B, Nc, 3]
-        conn_rotations = physical_states.quat[
-            :, body_idxs_for_connectors, :
-        ]  # [B, Nc, 4]
-
+        conn_positions = physical_states.position[:, connector_indices, :]
+        conn_rotations = physical_states.quat[:, connector_indices, :]
         male_pos_new, female_pos_new = update_terminal_def_pos_batch(
             conn_positions, conn_rotations, terminal_rel, connector_sexes_local
         )
 
-        # Write back into preallocated connector position tensors using stored indices
-        # terminal_indices_from_name now lives in physical_info
-        male_indices_local = (
-            torch.nonzero(connector_sexes_local == 1, as_tuple=False)
-            .squeeze(1)
-            .tolist()
-        )
-        female_indices_local = (
-            torch.nonzero(connector_sexes_local == 0, as_tuple=False)
-            .squeeze(1)
-            .tolist()
-        )
+        male_mask = connector_sexes_local == 1
+        female_mask = connector_sexes_local == 0
 
-        # Update male connector positions
-        if male_indices_local:
-            # male_pos_new corresponds to the male subset order
-            name_to_idx = physical_info.terminal_indices_from_name
-            for b in range(B):
-                for j, local_i in enumerate(male_indices_local):
-                    cname = connector_names[local_i]
-                    assert cname in name_to_idx, (
-                        f"Connector {cname} not found in state mapping"
-                    )
-                    dst_idx = name_to_idx[cname]
-                    physical_states.male_terminal_positions[b, dst_idx, :] = (
-                        male_pos_new[b, j, :]
-                    )
-        # Update female connector positions
-        if female_indices_local:
-            name_to_idx = physical_info.terminal_indices_from_name
-            for b in range(B):
-                for j, local_i in enumerate(female_indices_local):
-                    cname = connector_names[local_i]
-                    assert cname in name_to_idx, (
-                        f"Connector {cname} not found in state mapping"
-                    )
-                    dst_idx = name_to_idx[cname]
-                    physical_states.female_terminal_positions[b, dst_idx, :] = (
-                        female_pos_new[b, j, :]
-                    )
+        male_body_idxs_subset = connector_indices[male_mask]  # [Nm_upd]
+        all_male_body_idxs = physical_info.male_terminal_batch  # [Nm_total]
+        match_m = male_body_idxs_subset.unsqueeze(1) == all_male_body_idxs.unsqueeze(
+            0
+        )  # [Nm_upd, Nm_total]
+        assert match_m.sum(dim=1).eq(1).all()
+        dst_male = match_m.argmax(dim=1)  # [Nm_upd]
+        physical_states.male_terminal_positions[:, dst_male, :] = male_pos_new
+
+        female_body_idxs_subset = connector_indices[female_mask]  # [Nf_upd]
+        all_female_body_idxs = physical_info.female_terminal_batch  # [Nf_total]
+        match_f = female_body_idxs_subset.unsqueeze(
+            1
+        ) == all_female_body_idxs.unsqueeze(0)  # [Nf_upd, Nf_total]
+        assert match_f.sum(dim=1).eq(1).all()
+        dst_female = match_f.argmax(dim=1)  # [Nf_upd]
+        physical_states.female_terminal_positions[:, dst_female, :] = female_pos_new
 
     return physical_states
 

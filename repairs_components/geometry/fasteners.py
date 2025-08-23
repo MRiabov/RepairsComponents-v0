@@ -178,7 +178,14 @@ class Fastener(Component):
         return fastener
 
     @staticmethod
-    def get_tip_pos_relative_to_center(length: float = 15.0 / 1000):
+    def get_tip_pos_relative_to_center(length: float | torch.Tensor = 15.0 / 1000):
+        if isinstance(length, torch.Tensor):
+            assert length.ndim == 1
+            tip_pos = torch.zeros(
+                length.shape[0], 3, dtype=torch.float32, device=length.device
+            )
+            tip_pos[:, 2] = -length
+            return tip_pos
         return torch.tensor([0, 0, -length])
         # note: fastener head relative to center is a pointless function because 1mm offset or whatnot is insignificant.
 
@@ -449,10 +456,8 @@ def attach_fastener_to_part(
     fastener_entity.set_pos(fastener_pos, envs_idx)
     fastener_entity.set_quat(inserted_into_hole_quat, envs_idx)
 
-    # # Make idempotent: remove existing weld if present before adding
-    # rigid_solver.delete_weld_constraint(
-    #     fastener_joint, other_body_link, envs_idx
-    # )
+    # Make idempotent: remove existing weld if present before adding
+    rigid_solver.delete_weld_constraint(fastener_joint, other_body_link, envs_idx)
     rigid_solver.add_weld_constraint(
         fastener_joint, other_body_link, envs_idx
     )  # works in genesis's examples.

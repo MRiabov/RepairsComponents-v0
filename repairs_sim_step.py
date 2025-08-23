@@ -326,28 +326,43 @@ def step_screw_in_or_out(
             already_inserted_into_a_hole = already_inserted_hole_id_env != -1
             # note: fasteners that are already connected are ignored in check_fastener_possible_insertion
             # FIXME: body_idx should be gettable from fastener_hole_positions
+            # Ensure all tensors passed to attach_fastener_to_part have batch dimension B=1
             attach_fastener_to_part(
                 scene,  # TODO refactor to only pass sim info and hole/fastener ids.
                 fastener_entity=gs_entities[fastener_name],
-                inserted_into_hole_pos=hole_pos,
-                inserted_into_hole_quat=hole_quat,
-                inserted_to_hole_depth=sim_info.physical_info.hole_depth[hole_id],
+                inserted_into_hole_pos=hole_pos.unsqueeze(0),  # [1,3]
+                inserted_into_hole_quat=hole_quat.unsqueeze(0),  # [1,4]
+                inserted_to_hole_depth=sim_info.physical_info.hole_depth[hole_id]
+                .to(actions.device)
+                .unsqueeze(0),  # [1]
                 inserted_into_hole_is_through=sim_info.physical_info.hole_is_through[
                     hole_id
-                ],
+                ]
+                .to(actions.device)
+                .unsqueeze(0),  # [1]
                 inserted_into_part_entity=gs_entities[part_name],
-                fastener_length=sim_info.physical_info.fasteners_length[fastener_id],
+                fastener_length=sim_info.physical_info.fasteners_length[fastener_id]
+                .to(actions.device)
+                .unsqueeze(0),  # [1]
                 top_hole_is_through=(
                     sim_info.physical_info.hole_is_through[already_inserted_hole_id_env]
+                    .to(actions.device)
+                    .unsqueeze(0)
                     if already_inserted_into_a_hole
-                    else torch.tensor(False, device=actions.device)
+                    else torch.tensor([False], dtype=torch.bool, device=actions.device)
                 ),
                 envs_idx=torch.tensor([env_id], device=actions.device),
-                already_inserted_into_one_hole=already_inserted_into_a_hole,
+                already_inserted_into_one_hole=torch.tensor(
+                    [already_inserted_into_a_hole],
+                    dtype=torch.bool,
+                    device=actions.device,
+                ),  # [1]
                 top_hole_depth=(
                     sim_info.physical_info.hole_depth[already_inserted_hole_id_env]
+                    .to(actions.device)
+                    .unsqueeze(0)
                     if already_inserted_into_a_hole
-                    else torch.tensor(0.0, device=actions.device)
+                    else torch.tensor([0.0], device=actions.device)
                 ),
             )
             # future: assert (prevent) more than two connections.
