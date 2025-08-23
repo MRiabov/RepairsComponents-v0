@@ -30,6 +30,40 @@ def get_links_idx_from_fastener_ids(
     return unique_link_idxs[inverse_cpu].to(fastener_ids.device)
 
 
+def populate_base_link_indices(
+    physical_state_info,
+    gs_entities: dict[str, RigidEntity],
+    num_fasteners: int,
+):
+    """Populate base link index tensors on a PhysicalStateInfo-like object.
+
+    Sets:
+    - physical_state_info.body_base_link_idx: torch.int32 [num_bodies]
+    - physical_state_info.fastener_base_link_idx: torch.int32 [num_fasteners]
+
+    Args:
+        physical_state_info: Object with fields body_indices, body_base_link_idx,
+            and fastener_base_link_idx.
+        gs_entities: Dict mapping body/fastener names to Genesis RigidEntity.
+        num_fasteners: Number of registered fasteners (integer or scalar tensor).
+    """
+    # Bodies
+    num_bodies = len(physical_state_info.body_indices)
+    body_base = torch.empty((num_bodies,), dtype=torch.int32)
+    for name, idx in physical_state_info.body_indices.items():
+        body_base[idx] = gs_entities[name].base_link.idx
+    physical_state_info.body_base_link_idx = body_base
+
+    # Fasteners
+    assert isinstance(num_fasteners, int)
+    n_fast = num_fasteners
+    if n_fast > 0:
+        ids = torch.arange(n_fast, dtype=torch.long)
+        physical_state_info.fastener_base_link_idx = get_links_idx_from_fastener_ids(
+            ids, gs_entities
+        ).to(torch.int32)
+
+
 def is_weld_constraint_present(scene, rigid_body_a, rigid_body_b, env_idx=0):
     """
     Check whether a weld exists between two links/entities in the given scene/environment.

@@ -10,6 +10,9 @@ from repairs_components.geometry.fasteners import (
     Fastener,
     get_fastener_singleton_name,
 )
+from repairs_components.processing.genesis_utils import (
+    populate_base_link_indices,
+)
 from repairs_components.logic.physical_state import (
     compound_pos_to_sim_pos,
     register_bodies_batch,
@@ -69,10 +72,7 @@ def translate_state_to_genesis_scene(
 
     physical_info = sim_info.physical_info
 
-    # Preallocate base link index lists aligned by integer ids
-    physical_info.body_base_link_idx = torch.zeros(
-        (len(physical_info.body_indices),), dtype=torch.int32, device=sim_state.device
-    )
+    # Base link indices will be populated tensorized after entities are added
 
     # translate each child into genesis entities
     for body_name, body_idx in physical_info.body_indices.items():
@@ -110,17 +110,10 @@ def translate_state_to_genesis_scene(
                 f"Not implemented for translation part type: {p.type}"
             )
 
-        # record base link idx at the correct id slot
-        physical_info.body_base_link_idx[body_idx] = new_entity.base_link.idx
         gs_entities[body_name] = new_entity
 
     singleton_fastener_morphs = {}  # cache to reduce load times.
-    # Preallocate fastener base link indices aligned by fastener id [0..F)
-    physical_info.fastener_base_link_idx = torch.zeros(
-        (sim_state.physical_state.fasteners_attached_to_body.shape[1],),
-        dtype=torch.int32,
-        device=sim_state.device,
-    )
+    # Fastener base link indices will be populated tensorized after entities are added
 
     for fastener_id, attached_to in enumerate(
         sim_state.physical_state.fasteners_attached_to_body[0]
@@ -145,11 +138,17 @@ def translate_state_to_genesis_scene(
 
         # store fastener entity in gs_entities
         gs_entities[Fastener.fastener_name_in_simulation(fastener_id)] = new_entity
-        # record fastener base link index at its id
-        physical_info.fastener_base_link_idx[fastener_id] = new_entity.base_link.idx
+        # index population deferred to tensorized helper
 
         # NOTE: ^ there probably is sense to store fasteners as fasteners id in gs_entities, not as length+height.
         # there is no need for length+height, but there is value in unique id.
+
+    # Populate base-link indices for bodies and fasteners in a vectorized manner
+    populate_base_link_indices(
+        physical_info,
+        gs_entities,
+        num_fasteners=sim_state.physical_state.fasteners_attached_to_body.shape[1],
+    )
 
     # Permanent constraints are now created in precreate_constraints()
 
@@ -161,7 +160,6 @@ def translate_genesis_to_python(  # translate to sim state, really.
     gs_entities: dict[str, RigidEntity],
     sim_state: RepairsSimState,
     sim_info: RepairsSimInfo,
-    device: torch.device | None = None,
 ):
     """
     Get raw values from sim scene.
@@ -173,16 +171,6 @@ def translate_genesis_to_python(  # translate to sim state, really.
     # batch over all environments
     n_envs = scene.n_envs
     env_idx = torch.arange(n_envs)
-
-    # sanity-check tool names
-    # Allow -1 sentinel for "no fastener"; ensure integer dtype
-    if (sim_state.tool_state.tool_ids == ToolsEnum.SCREWDRIVER.value).any():
-        ids = sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
-            sim_state.tool_state.tool_ids == ToolsEnum.SCREWDRIVER.value
-        ]
-        assert ids.dtype == torch.long and (ids >= -1).all(), (
-            "picked_up_fastener_id must be int64 with -1 sentinel for screwdriver"
-        )  # should be a single assertion (was already)
 
     # Use batched solver queries for bodies and fasteners
     physical_device = sim_state.physical_state.device
@@ -197,37 +185,12 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     # Fetch batched positions/quaternions for all bodies
     rigid_solver = scene.sim.rigid_solver
-    pos_batch = rigid_solver.get_links_pos(
+    positions = rigid_solver.get_links_pos(
         links_idx=body_link_idx, envs_idx=env_idx
     )  # expected [B, N, 3]
-    assert hasattr(rigid_solver, "get_links_quat"), (
-        "Genesis API must provide get_links_quat for batched quaternions"
-    )
-    quat_batch = rigid_solver.get_links_quat(
+    rotations = rigid_solver.get_links_quat(
         links_idx=body_link_idx, envs_idx=env_idx
     )  # expected [B, N, 4]
-
-    positions = torch.as_tensor(pos_batch, device=physical_device, dtype=torch.float32)
-    rotations = torch.as_tensor(quat_batch, device=physical_device, dtype=torch.float32)
-
-    # Compute connector terminal relative positions aligned to body_names
-    terminal_rel = torch.full(
-        (N_bodies, 3), float("nan"), dtype=positions.dtype, device=physical_device
-    )
-    for i, name in enumerate(body_names):
-        p = parse_part_label(name)
-        if p.type == PartType.CONNECTOR:
-            assert p.connector_sex in {ConnectorSex.MALE, ConnectorSex.FEMALE}, (
-                f"Connector must encode sex with _male/_female: {p.full}"
-            )
-            connector = Connector.from_name(p.name)
-            if p.connector_sex == ConnectorSex.MALE:
-                rel = connector.terminal_pos_relative_to_center_male / 1000
-            else:  # FEMALE
-                rel = connector.terminal_pos_relative_to_center_female / 1000
-            terminal_rel[i] = torch.as_tensor(
-                rel, dtype=positions.dtype, device=physical_device
-            )
 
     # Perform a single batched update for all bodies
     sim_state.physical_state = update_bodies_batch(
@@ -236,7 +199,6 @@ def translate_genesis_to_python(  # translate to sim state, really.
         body_names,
         positions,
         rotations,
-        terminal_rel,
     )
 
     # --- Fasteners: batch update pos/quat from solver ---
@@ -245,43 +207,60 @@ def translate_genesis_to_python(  # translate to sim state, really.
         fast_pos = rigid_solver.get_links_pos(
             links_idx=fastener_links, envs_idx=env_idx
         )  # [B, F, 3]
-        assert hasattr(rigid_solver, "get_links_quat"), (
-            "Genesis API must provide get_links_quat for batched quaternions"
-        )
         fast_quat = rigid_solver.get_links_quat(
             links_idx=fastener_links, envs_idx=env_idx
         )  # [B, F, 4]
         sim_state.physical_state.fasteners_pos = torch.as_tensor(
-            fast_pos, device=physical_device, dtype=sim_state.physical_state.fasteners_pos.dtype
+            fast_pos,
+            device=physical_device,
+            dtype=sim_state.physical_state.fasteners_pos.dtype,
         )
         sim_state.physical_state.fasteners_quat = torch.as_tensor(
-            fast_quat, device=physical_device, dtype=sim_state.physical_state.fasteners_quat.dtype
+            fast_quat,
+            device=physical_device,
+            dtype=sim_state.physical_state.fasteners_quat.dtype,
         )
 
-    # handle picked up fastener (tip)
-    # fastener_tip_pos
-    for env_id in torch.nonzero(
-        (sim_state.tool_state.tool_ids == ToolsEnum.SCREWDRIVER.value)
-        & sim_state.tool_state.screwdriver_tc.has_picked_up_fastener
-    ).squeeze(1):
-        fastener_name = sim_state.tool_state.screwdriver_tc.picked_up_fastener_name(
-            env_id
+        # handle picked up fastener tip in a vectorized manner.
+        all_fasteners_pos = scene.rigid_solver.get_links_pos(
+            sim_info.physical_info.fastener_base_link_idx
         )
-        assert fastener_name is not None
-        fastener_pos = gs_entities[fastener_name].get_pos(env_id)
-        fastener_quat = gs_entities[fastener_name].get_quat(env_id)
-        # get tip pos
+        all_fasteners_quat = scene.rigid_solver.get_links_quat(
+            sim_info.physical_info.fastener_base_link_idx
+        )
+        env_has_picked_up_fastener = (
+            sim_state.tool_state.tool_ids == ToolsEnum.SCREWDRIVER.value
+        ) & sim_state.tool_state.screwdriver_tc.has_picked_up_fastener
         tip_pos = get_connector_pos(
-            fastener_pos,
-            fastener_quat,
-            Fastener.get_tip_pos_relative_to_center().unsqueeze(0),
+            all_fasteners_pos[
+                env_has_picked_up_fastener,
+                sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
+                    env_has_picked_up_fastener
+                ],
+            ],
+            all_fasteners_quat[
+                env_has_picked_up_fastener,
+                sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
+                    env_has_picked_up_fastener
+                ],
+            ],
+            Fastener.get_tip_pos_relative_to_center(
+                length=sim_info.physical_info.fasteners_length[
+                    env_has_picked_up_fastener
+                ]
+            ),
         )
-        sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[env_id] = (
-            tip_pos
-        )
-        sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[env_id] = (
-            fastener_quat
-        )
+        sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[
+            env_has_picked_up_fastener
+        ] = tip_pos
+        sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[
+            env_has_picked_up_fastener
+        ] = all_fasteners_quat[
+            env_has_picked_up_fastener,
+            sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
+                env_has_picked_up_fastener
+            ],
+        ]
 
     # update holes
     sim_state = update_hole_locs(
@@ -441,6 +420,7 @@ def translate_compound_to_sim_state(
     # Build sim info and set singleton PhysicalStateInfo
     sim_info = RepairsSimInfo()
     sim_info.physical_info = physical_state_info
+
     # Populate mechanical linkage metadata, if provided
     if linked_groups is not None:
         assert isinstance(linked_groups, dict), "linked_groups must be a dict"
@@ -479,7 +459,7 @@ def translate_compound_to_sim_state(
     (
         sim_info.physical_info.starting_hole_positions,
         sim_info.physical_info.starting_hole_quats,
-        sim_info.physical_info.part_hole_depth,
+        sim_info.physical_info.hole_depth,
         sim_info.physical_info.hole_is_through,
         sim_info.physical_info.part_hole_batch,
     ) = get_starting_part_holes(first_compound, first_body_indices, device)
@@ -783,8 +763,8 @@ def get_starting_part_holes(
     """Get the starting part holes as 'per part, relative to 0,0,0 position'"""
     part_holes_pos: torch.Tensor = torch.empty((0, 3))
     part_holes_quat: torch.Tensor = torch.empty((0, 4))
-    part_hole_depth: torch.Tensor = torch.empty((0,))
-    part_hole_is_through: torch.Tensor = torch.empty((0,), dtype=torch.bool)
+    hole_depth: torch.Tensor = torch.empty((0,))
+    hole_is_through: torch.Tensor = torch.empty((0,), dtype=torch.bool)
     part_hole_batch: torch.Tensor = torch.empty((0,), dtype=torch.long)
     all_parts = compound.leaves
     filtered_parts = [
@@ -837,9 +817,9 @@ def get_starting_part_holes(
             # simply cat it because it's easier.
             part_holes_pos = torch.cat([part_holes_pos, fastener_hole_pos], dim=0)
             part_holes_quat = torch.cat([part_holes_quat, fastener_hole_quat], dim=0)
-            part_hole_depth = torch.cat([part_hole_depth, fastener_hole_depths], dim=0)
-            part_hole_is_through = torch.cat(
-                [part_hole_is_through, fastener_hole_is_through], dim=0
+            hole_depth = torch.cat([hole_depth, fastener_hole_depths], dim=0)
+            hole_is_through = torch.cat(
+                [hole_is_through, fastener_hole_is_through], dim=0
             )
             part_hole_batch = torch.cat(
                 [
@@ -856,7 +836,7 @@ def get_starting_part_holes(
     return (
         part_holes_pos.to(device),
         part_holes_quat.to(device),
-        part_hole_depth.to(device),
-        part_hole_is_through.to(device),
+        hole_depth.to(device),
+        hole_is_through.to(device),
         part_hole_batch.to(device),
     )
