@@ -1,7 +1,5 @@
 import genesis as gs
 import torch
-from genesis.engine.entities import RigidEntity
-from genesis.engine.entities.rigid_entity import RigidLink
 
 from repairs_components.geometry.fasteners import (
     attach_picked_up_fastener_to_part,
@@ -20,7 +18,6 @@ from repairs_components.logic.tools.screwdriver import (
 )
 from repairs_components.logic.tools.tool import (
     ToolsEnum,
-    detach_tool_from_arm,
 )
 from repairs_components.processing.translation import (
     get_connector_pos,
@@ -68,11 +65,6 @@ def step_repairs(
     # step screw in or out
     sim_state = step_screw_in_or_out(scene, sim_state, sim_info, actions)
     # create_constraints_based_on_graph(sim_state, gs_entities, scene)
-
-    print(
-        f"Tools: {[ToolsEnum(tool_id.item()).name.lower() for tool_id in sim_state.tool_state.tool_ids]}",
-        f"Pick up fastener tip position: {sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[sim_state.tool_state.screwdriver_tc.has_picked_up_fastener]}",
-    )
 
     return success, total_diff_left, sim_state, diff, burned_component_indices
 
@@ -122,23 +114,17 @@ def step_pick_up_release_tool(
     pick_up_tool_mask = gripper_mask & pick_up_tool_desired
     release_tool_mask = (~gripper_mask) & release_tool_desired
 
-    screwdriver_link: RigidEntity = sim_info.tool_info.tool_base_links_idx[
+    screwdriver_link_idx = sim_info.tool_info.tool_base_link_idx[
         ToolsEnum.SCREWDRIVER.value
     ]
-    # hand, not arm.
-    franka_hand_link: RigidLink = sim_info.tool_info.tool_base_links_idx[
-        ToolsEnum.GRIPPER.value
-    ]
-
-    from repairs_components.logic.tools.tool import ToolsEnum
-    from repairs_components.logic.tools.tools_state import ToolInfo
+    gripper_link_idx = sim_info.tool_info.tool_base_link_idx[ToolsEnum.GRIPPER.value]
 
     grip_pos = get_connector_pos(
-        scene.rigid_solver.get_base_links_pos(screwdriver_link),
-        scene.rigid_solver.get_base_links_quat(screwdriver_link),
-        ToolInfo().TOOLS_GRIPPER_POS[ToolsEnum.SCREWDRIVER.value].unsqueeze(0),
+        scene.rigid_solver.get_links_pos(screwdriver_link_idx),
+        scene.rigid_solver.get_links_quat(screwdriver_link_idx),
+        sim_info.tool_info.TOOLS_GRIPPER_POS[ToolsEnum.SCREWDRIVER.value].unsqueeze(0),
     )
-    hand_pos = franka_hand_link.get_pos().to(actions.device)
+    hand_pos = scene.rigid_solver.get_links_pos(gripper_link_idx).to(actions.device)
 
     dist = torch.full((scene.n_envs,), fill_value=-1.0, device=actions.device)
     # pick up or drop tool
@@ -146,46 +132,23 @@ def step_pick_up_release_tool(
         # TODO logic for more tools.
         dist = torch.norm(hand_pos.squeeze(1) - grip_pos.squeeze(1), dim=-1)
         # TODO: not looking for closest tool, but should look for closest only.
-        # Use ToolInfo property-based API for grip distance
-        from repairs_components.logic.tools.tool import ToolsEnum
-        from repairs_components.logic.tools.tools_state import ToolInfo
+        required_dist = sim_info.tool_info.TOOLS_DIST_FROM_GRIP_LINK[
+            ToolsEnum.SCREWDRIVER.value
+        ].to(actions.device)
+        pick_up_tool_within_reach_mask = pick_up_tool_mask & (dist < required_dist)
 
-        required_dist = (
-            ToolInfo()
-            .TOOLS_DIST_FROM_GRIP_LINK[ToolsEnum.SCREWDRIVER.value]
-            .to(actions.device)
-        )
-        pick_up_tool_mask_and_close = pick_up_tool_mask & (dist < required_dist)
-
-        if pick_up_tool_mask_and_close.any():
-            env_idx = pick_up_tool_mask_and_close.nonzero().squeeze(1)
-            print(f"picking up tool at env_idx: {env_idx.tolist()}")
+        if pick_up_tool_within_reach_mask.any():
+            env_idx = pick_up_tool_within_reach_mask.nonzero().squeeze(1)
             sim_state.tool_state.tool_ids[env_idx] = ToolsEnum.SCREWDRIVER.value
             # attach the screwdriver to the hand
             # device issues?
             from repairs_components.logic.tools.tool import attach_tool_to_arm
-            from repairs_components.logic.tools.tools_state import ToolInfo
 
-            attach_tool_to_arm(
-                scene,
-                screwdriver,
-                franka_hand_link,
-                sim_state.tool_state,
-                ToolInfo(),
-                env_idx,
-            )
+            attach_tool_to_arm(scene, sim_state, sim_info, env_idx)
     if release_tool_mask.any():
         env_idx = release_tool_mask.nonzero().squeeze(1)
-        print(f"releasing tool at env_idx: {env_idx.tolist()}")
         sim_state.tool_state.tool_ids[env_idx] = Gripper().id
-        # detach the screwdriver from the hand
-        detach_tool_from_arm(
-            scene,
-            screwdriver,
-            franka_hand_link,
-            sim_state.tool_state,
-            env_idx,
-        )
+        # Only update tool_ids here; if constraints need removal, handle it in tool utilities.
 
     return sim_state
 
@@ -204,8 +167,6 @@ def step_screw_in_or_out(
     # note:if there are more tools, create an interface, I guess.
 
     picked_up_fastener_ids = tool_state.screwdriver_tc.picked_up_fastener_id
-    # indices must be integer for tensor indexing
-    picked_up_fastener_ids_long = picked_up_fastener_ids.to(torch.long)
     has_picked_up_fastener_mask = tool_state.screwdriver_tc.has_picked_up_fastener
 
     screw_in_desired_mask, screw_out_desired_mask = receive_screw_in_action(
@@ -217,7 +178,7 @@ def step_screw_in_or_out(
         physical_state.fasteners_attached_to_body == -1
     )  # [B, F, 2]
     picked_mask = fastener_disconnected_mask[
-        torch.arange(scene.n_envs), picked_up_fastener_ids_long
+        torch.arange(scene.n_envs), picked_up_fastener_ids
     ]  # [B, 2]
     # fully connected => neither slot is -1
     fastener_fully_connected_mask = ~picked_mask.any(dim=-1)  # [B]
@@ -231,7 +192,7 @@ def step_screw_in_or_out(
         )
     else:
         holes_for_fastener = physical_state.fasteners_attached_to_hole[
-            torch.arange(scene.n_envs), picked_up_fastener_ids_long
+            torch.arange(scene.n_envs), picked_up_fastener_ids
         ]  # [B,2]
         valid_slots = holes_for_fastener != -1
         holes_safe = holes_for_fastener.clone()
@@ -262,100 +223,88 @@ def step_screw_in_or_out(
 
     # step screw insertion
     if has_fastener_and_desired_in.any():
-        # if no holes metadata exists, cannot insert; skip safely
         assert sim_info.physical_info.part_hole_batch.numel() > 0, (
             "part_hole_batch metadata was not set."
         )
-        env_mask = has_fastener_and_desired_in.reshape(-1)
-        env_ids = env_mask.nonzero(as_tuple=False).squeeze(1)
+        env_ids = has_fastener_and_desired_in.nonzero(as_tuple=False).squeeze(1)
 
-        # Process each env independently since check_fastener_possible_insertion currently takes a single fastener_id
-        for env_id in env_ids.tolist():
-            fid = picked_up_fastener_ids_long[env_id]
-            # Determine part to ignore (if already connected in this env)
-            fastener_body_indices = physical_state.fasteners_attached_to_body[
-                env_id, fid
-            ]
-            ignore_part_idx_env = fastener_body_indices.max().view(1)
+        fids = picked_up_fastener_ids[env_ids]
+        # Determine part to ignore per env (if already connected in this env)
+        fastener_body_indices = physical_state.fasteners_attached_to_body[
+            env_ids, fids
+        ]  # [N,2]
+        ignore_part_idx = fastener_body_indices.max(dim=1).values  # [N]
 
-            part_idx_tensor, hole_idx_tensor = check_fastener_possible_insertion(
-                scene,
-                sim_state,
-                sim_info,
-                env_ids=torch.tensor([env_id], dtype=torch.long, device=actions.device),
-                ignore_part_idx=ignore_part_idx_env.to(actions.device),
+        # Batched query for possible insertion
+        part_idx_tensor, hole_idx_tensor = check_fastener_possible_insertion(
+            scene,
+            sim_state,
+            sim_info,
+            env_ids=env_ids,
+            ignore_part_idx=ignore_part_idx,
+        )  # expected [N], [N]
+
+        insertion_selection_mask = (part_idx_tensor >= 0) & (hole_idx_tensor >= 0)
+        if insertion_selection_mask.any():
+            env_ids_insert = env_ids[insertion_selection_mask]
+            fastener_ids_insert = fids[insertion_selection_mask]
+            hole_ids_insert = hole_idx_tensor[insertion_selection_mask]
+
+            # already inserted hole id per env/fastener (or -1)
+            already_inserted_hole_ids = (
+                physical_state.fasteners_attached_to_hole[env_ids_insert, fastener_ids_insert]
+                .max(dim=1)
+                .values
             )
-            hole_id = hole_idx_tensor[0]
-            part_id = part_idx_tensor[0]
-            if part_id < 0 or hole_id < 0:
-                continue  # nothing to insert for this env
 
-            # Already-inserted hole id (or -1) for this env/fastener
-            already_inserted_hole_id_env = physical_state.fasteners_attached_to_hole[
-                env_id, fid
-            ].max()
-
-            # Attach using ID-based API (tensors of shape [1])
+            # Attach batched
             attach_picked_up_fastener_to_part(
                 scene,
                 sim_state,
                 sim_info,
-                hole_id,
-                already_inserted_hole_id_env,
-                env_id,
+                hole_ids_insert,
+                already_inserted_hole_ids,
+                env_ids_insert,
             )
 
-            # Mark attachment in graph state: write body index into first free slot
+            # Update graph state (batched)
             sim_state.physical_state = connect_fastener_to_one_body(
                 sim_state.physical_state,
                 sim_info.physical_info,
-                fid,
-                hole_id,
-                torch.tensor([env_id], device=actions.device),
+                fastener_ids_insert,
+                hole_ids_insert,
+                env_ids_insert,
             )
 
     if has_fastener_and_desired_out.any():
-        env_out_ids = (
-            has_fastener_and_desired_out.reshape(-1)
-            .nonzero(as_tuple=False)
-            .squeeze(1)
-            .tolist()
-        )
-        for env_id in env_out_ids:
-            # problem is that this isn't easily batchable as I need to get different fastener entities on different batches.
-            fastener_id = tool_state.screwdriver_tc.picked_up_fastener_id[env_id]
-            assert fastener_id.item() >= 0
-            # for every non -1, delete weld constraints by IDs
-            fastener_body_indices = physical_state.fasteners_attached_to_body[
-                env_id, fastener_id
-            ]
-            connected_mask = fastener_body_indices != -1
-            if connected_mask.any():
-                part_ids = fastener_body_indices[connected_mask]
-                envs_idx = torch.full(
-                    (part_ids.shape[0],),
-                    env_id,
-                    dtype=torch.long,
-                    device=actions.device,
-                )
-                sim_state = detach_fastener_from_part(
-                    scene, sim_state, sim_info, part_ids, envs_idx
-                )
+        env_out_ids = has_fastener_and_desired_out.nonzero(as_tuple=False).squeeze(1)
+        fids_out = tool_state.screwdriver_tc.picked_up_fastener_id[env_out_ids]
+        assert (fids_out >= 0).all(), "fastener ids must be valid for screw-out"
 
-            # update graph-state to reflect detachment from all bodies/holes in this env
-            sim_state.physical_state.fasteners_attached_to_body[
-                env_id, fastener_id, :
-            ] = -1
-            sim_state.physical_state.fasteners_attached_to_hole[
-                env_id, fastener_id, :
-            ] = -1
-
-            attach_fastener_to_screwdriver(  # reattach the fastener to hand.
-                scene, sim_state, sim_info, fastener_id, env_id
+        body_idx = physical_state.fasteners_attached_to_body[
+            env_out_ids, fids_out
+        ]  # [N,2]
+        connected_mask = body_idx != -1  # [N,2]
+        num_connected_slots_per_env = connected_mask.sum(dim=1)
+        if num_connected_slots_per_env.any():
+            part_ids_flat = body_idx[connected_mask]
+            envs_idx_flat = env_out_ids.repeat_interleave(num_connected_slots_per_env)
+            sim_state = detach_fastener_from_part(
+                scene, sim_state, sim_info, part_ids_flat, envs_idx_flat
             )
 
-    print(f"has_fastener_and_desired_in {has_fastener_and_desired_in}")
-    print(f"has_fastener_and_desired_out {has_fastener_and_desired_out}")
+        # Graph-state: set to -1 for all slots in these envs for these fasteners
+        sim_state.physical_state.fasteners_attached_to_body[
+            env_out_ids, fids_out, :
+        ] = -1
+        sim_state.physical_state.fasteners_attached_to_hole[
+            env_out_ids, fids_out, :
+        ] = -1
+
+        # Reattach to screwdriver (batched)
+        attach_fastener_to_screwdriver(
+            scene, sim_state, sim_info, fids_out, env_out_ids
+        )
 
     return sim_state
 
@@ -387,67 +336,50 @@ def step_fastener_pick_up_release(
     assert pick_up_mask.ndim == release_mask.ndim == 1
 
     if pick_up_mask.any():
-        desired_pick_up_indices = torch.nonzero(pick_up_mask).squeeze(1)
+        env_ids_pick = pick_up_mask.nonzero(as_tuple=False).squeeze(1)
 
         # update screwdriver gripper position
-        screwdriver_pos = tool_state.picked_up_pos[desired_pick_up_indices]
-        screwdriver_quat = tool_state.picked_up_quat[desired_pick_up_indices]
+        screwdriver_pos = tool_state.picked_up_pos[env_ids_pick]
+        screwdriver_quat = tool_state.picked_up_quat[env_ids_pick]
         rel_connector_pos = (
             Screwdriver.fastener_connector_pos_relative_to_center().expand(
                 screwdriver_pos.shape[0], -1
             )
-        )  # [B,3]
+        )  # [N,3]
         screwdriver_gripper_pos = get_connector_pos(
             screwdriver_pos, screwdriver_quat, rel_connector_pos
-        ).unsqueeze(1)  # [B,1,3] so it can be broadcasted to fastener pos [B,F,3]
+        ).unsqueeze(1)  # [N,1,3]
         # calculate positions of fasteners close to screwdriver_gripper_pos
-        fastener_positions = sim_state.physical_state.fasteners_pos[
-            desired_pick_up_indices
-        ]
-        # Distances per env, per fastener -> [B, F]
+        fastener_positions = sim_state.physical_state.fasteners_pos[env_ids_pick]
+        # Distances per env, per fastener -> [N, F]
         dists = torch.norm(fastener_positions - screwdriver_gripper_pos, dim=-1)
-        # Reduce over fasteners -> values [B], indices [B]
+        # Reduce over fasteners -> values [N], indices [N]
         per_env_min_vals, per_env_min_ids = dists.min(dim=1)
-        closest_fastener_id = per_env_min_ids
-        close_enough = per_env_min_vals < max_pick_up_threshold
+        within_pickup_range_mask = per_env_min_vals < max_pick_up_threshold
 
-        print("fastener pick up mask", pick_up_mask, "Close enough:", close_enough)
-
-        valid_mask = close_enough
-        for i, env_id in enumerate(desired_pick_up_indices[valid_mask].tolist()):
-            fid = closest_fastener_id[valid_mask][i]
+        if within_pickup_range_mask.any():
+            env_ids_pickup = env_ids_pick[within_pickup_range_mask]
+            fastener_ids_pickup = per_env_min_ids[within_pickup_range_mask]
             attach_fastener_to_screwdriver(
-                scene,
-                sim_state,
-                sim_info,
-                torch.tensor([fid.item()], dtype=torch.long, device=actions.device),
-                torch.tensor([env_id], dtype=torch.long, device=actions.device),
+                scene, sim_state, sim_info, fastener_ids_pickup, env_ids_pickup
             )
 
-    ##debug
     assert (
-        tool_state.screwdriver_tc.has_picked_up_fastener[
-            screwdriver_with_fastener_mask.nonzero().squeeze(1).tolist()
-        ]
+        tool_state.screwdriver_tc.has_picked_up_fastener[screwdriver_with_fastener_mask]
     ).all(), (
         "screwdriver_with_fastener_mask should be true only for those with fastener picked up"
     )
-    # // # somehow this fails.
 
     if release_mask.any():
-        desired_release_indices = torch.nonzero(release_mask).squeeze(1)
-        for env_id in desired_release_indices.tolist():
-            _fid = tool_state.screwdriver_tc.picked_up_fastener_id[env_id]
-            fastener_id = int(_fid.item()) if torch.is_tensor(_fid) else int(_fid)
-            if fastener_id < 0:
-                # FIXME: this should never happen, and yet somehow it does. I've tried debugging many times at this point.
-                continue
+        env_ids_rel = release_mask.nonzero(as_tuple=False).squeeze(1)
+        fids_rel = tool_state.screwdriver_tc.picked_up_fastener_id[env_ids_rel]
+        valid_release_env_mask = fids_rel >= 0
+        if valid_release_env_mask.any():
             detach_fastener_from_screwdriver(
                 scene,
                 sim_state,
                 sim_info,
-                torch.tensor([env_id], dtype=torch.long, device=actions.device),
+                env_ids_rel[valid_release_env_mask],
             )
-        print("fastener release mask", release_mask)
 
     return sim_state

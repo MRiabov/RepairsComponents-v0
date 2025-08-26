@@ -323,7 +323,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     actions = torch.zeros((1, 10))
     actions[:, 8] = 0.99  # I beleive 8 was for screw in
     repairs_sim_state = step_screw_in_or_out(
-        scene, gs_entities, repairs_sim_state, sim_info, actions
+        scene, repairs_sim_state, sim_info, actions
     )
     # Weld constraint should exist between fastener and first part after screw-in
     assert is_weld_constraint_present(
@@ -354,7 +354,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_one_part(
     actions = torch.zeros((1, 10))
     actions[:, 8] = 0.01
     repairs_sim_state = step_screw_in_or_out(
-        scene, gs_entities, repairs_sim_state, sim_info, actions
+        scene, repairs_sim_state, sim_info, actions
     )
     # Weld constraint should be removed after unscrewing
     assert not is_weld_constraint_present(
@@ -397,11 +397,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     actions = torch.zeros((1, 10))
     actions[:, 8] = 0.99  # I beleive 8 was for screw in
     repairs_sim_state = step_screw_in_or_out(
-        scene,
-        gs_entities,
-        repairs_sim_state,
-        sim_info,
-        actions,
+        scene, repairs_sim_state, sim_info, actions
     )
     # Weld should exist between fastener and first part after first screw-in
     assert is_weld_constraint_present(
@@ -431,7 +427,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     actions = torch.zeros((1, 10))
     actions[:, 8] = 0.99  # screw in to attach second part
     repairs_sim_state = step_screw_in_or_out(
-        scene, gs_entities, repairs_sim_state, sim_info, actions
+        scene, repairs_sim_state, sim_info, actions
     )
     # Welds should exist between fastener and both parts after second screw-in
     assert is_weld_constraint_present(
@@ -462,7 +458,7 @@ def test_step_screw_in_or_out_screws_in_and_unscrews_from_two_parts(
     actions[:, 8] = 0.01
     # screw in from both parts #note: it is desirable to be able to unscrew from only one part.
     repairs_sim_state = step_screw_in_or_out(
-        scene, gs_entities, repairs_sim_state, sim_info, actions
+        scene, repairs_sim_state, sim_info, actions
     )
     # Welds should be removed from both parts after unscrewing
     assert not is_weld_constraint_present(
@@ -505,7 +501,7 @@ def test_step_screw_in_or_out_does_not_screws_in_at_one_part_inserted_and_large_
     actions = torch.zeros((1, 10))
     actions[:, 8] = 0.99  # screw in
     repairs_sim_state = step_screw_in_or_out(
-        scene, gs_entities, repairs_sim_state, sim_info, actions
+        scene, repairs_sim_state, sim_info, actions
     )
     # After first screw-in, weld should exist only with first part
     assert is_weld_constraint_present(
@@ -644,7 +640,7 @@ def test_step_pick_up_release_tool_picks_up_or_releases_tool_when_in_proximity(
     actions[:, 9] = 1.0  # Set pick up tool action to 1.0 (> 0.75 threshold)
 
     repairs_sim_state = step_pick_up_release_tool(
-        scene, gs_entities, repairs_sim_state, actions
+        scene, sim_info, repairs_sim_state, actions
     )
 
     # Assert that tool was picked up (should now have Screwdriver)
@@ -745,12 +741,7 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
 
     # Call step_fastener_pick_up_release with proximity threshold of 0.75
     updated_sim_state = step_fastener_pick_up_release(
-        scene,
-        gs_entities,
-        repairs_sim_state,
-        sim_info,
-        actions,
-        max_pick_up_threshold=0.75,
+        scene, repairs_sim_state, sim_info, actions, max_pick_up_threshold=0.75
     )
 
     # Test 1a: Check that fastener is moved to tool grip position
@@ -790,7 +781,6 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
 
     updated_sim_state = step_fastener_pick_up_release(
         scene,
-        gs_entities,
         updated_sim_state,
         sim_info,
         actions,
@@ -865,8 +855,7 @@ def test_all_bodies_moved_to_desired_pos_results_in_success(
     success, total_diff_left, _, _, _ = step_repairs(
         scene=scene,
         actions=torch.zeros((1, 10)),
-        gs_entities=gs_entities,
-        current_sim_state=repairs_sim_state,
+        sim_state=repairs_sim_state,
         desired_state=desired_sim_state,
         sim_info=sim_info,
     )
