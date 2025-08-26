@@ -40,6 +40,22 @@ class ToolState(SimState):
     "Gripper tool state which has `nan` on all values if it's not picked up. '_tc' because of tensorclass"
     screwdriver_tc: Screwdriver = field(default_factory=Screwdriver)
     "Screwdriver tool state which has `nan` on all values if it's not picked up. '_tc' because of tensorclass"
+    pos: torch.Tensor = field(
+        default_factory=lambda: torch.empty((len(ToolsEnum.__members__), 3))
+    )  # (num_tools, 3)
+    quat: torch.Tensor = field(
+        default_factory=lambda: torch.empty((len(ToolsEnum.__members__), 4))
+    )  # (num_tools, 4)
+
+    @property
+    def picked_up_pos(self):
+        "A convenience wrapper to get pos of picked up tools"
+        return self.pos[:, self.tool_ids]  # : to assume its batched.
+
+    @property
+    def picked_up_quat(self):
+        "A convenience wrapper to get pos of picked up tools"
+        return self.quat[:, self.tool_ids]  # : to assume its batched.
 
     def diff(self, other: "ToolState") -> tuple[dict[str, np.ndarray], int]:
         """Compute differences in tool state between two states."""
