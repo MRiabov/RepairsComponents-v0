@@ -120,7 +120,9 @@ def test_step_electronics_series_vsource_resistor(test_device):
     # Wrap in sim state/info and step electronics
     sim_state = torch.stack([RepairsSimState(device=device)] * B)
     sim_state.electronics_state = estate
-    sim_info = RepairsSimInfo(component_info=cinfo)
+    sim_info = RepairsSimInfo(
+        "test_step_repairs_electronics_series_vsource_resistor", component_info=cinfo
+    )
     sim_state, terminated, burned = step_electronics(sim_state, sim_info)
     st = sim_state.electronics_state
 
@@ -221,7 +223,9 @@ def test_step_electronics_switch_led_series_batched(test_device):
     # Wrap and step
     sim_state = torch.stack([RepairsSimState(device=device)] * B)
     sim_state.electronics_state = estate
-    sim_info = RepairsSimInfo(component_info=cinfo)
+    sim_info = RepairsSimInfo(
+        "test_step_repairs_electronics_switch_led", component_info=cinfo
+    )
     sim_state, terminated, burned = step_electronics(sim_state, sim_info)
     st = sim_state.electronics_state
 
@@ -297,7 +301,9 @@ def test_step_electronics_motor_series(test_device):
     # Wrap and step
     sim_state = torch.stack([RepairsSimState(device=device)] * B)
     sim_state.electronics_state = estate
-    sim_info = RepairsSimInfo(component_info=cinfo)
+    sim_info = RepairsSimInfo(
+        "test_step_repairs_electronics_motor_series", component_info=cinfo
+    )
     sim_state, terminated, burned = step_electronics(sim_state, sim_info)
     st = sim_state.electronics_state
 

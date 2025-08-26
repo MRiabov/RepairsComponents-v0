@@ -128,7 +128,7 @@ def sim_state_for_genesis_fastener_tests(
     scene.reset()
 
     sim_state = RepairsSimState(device=test_device).unsqueeze(0)
-    sim_info = RepairsSimInfo()
+    sim_info = RepairsSimInfo("test_fasteners_genesis")
 
     # Register the two bodies
     part1 = entities["part_with_holes_1@solid"]
@@ -400,9 +400,8 @@ def test_attach_and_detach_fastener_to_part(
     # attach fastener to part using hole id 0 (belongs to part 1)
     attach_picked_up_fastener_to_part(
         scene,
-        sim_state.physical_state,
-        sim_info.physical_info,
-        fastener_id=torch.tensor([0], dtype=torch.long),
+        sim_state,
+        sim_info,
         inserted_into_hole_ids=torch.tensor([0], dtype=torch.long),
         top_hole_id=torch.tensor([-1], dtype=torch.long),  # not yet inserted into top
         envs_idx=torch.tensor([0], dtype=torch.long),
@@ -459,9 +458,10 @@ def test_attach_and_detach_fastener_to_part(
     # detach fastener from part
     detach_fastener_from_part(
         scene,
-        entities["0@fastener"],
-        part_entity=entities["part_with_holes_1@solid"],
-        envs_idx=torch.tensor([0]),
+        sim_state,
+        sim_info,
+        part_ids=torch.tensor([0], dtype=torch.long),
+        envs_idx=torch.tensor([0], dtype=torch.long),
     )
     assert torch.isclose(
         entities["0@fastener"].get_pos(0), expected_fastener_pos
@@ -513,9 +513,8 @@ def test_attach_and_detach_fastener_to_two_parts(
     # attach fasteners to two holes via IDs (0 on part1, 1 on part2)
     attach_picked_up_fastener_to_part(
         scene,
-        sim_state.physical_state,
-        sim_info.physical_info,
-        fastener_id=torch.tensor([0], dtype=torch.long),
+        sim_state,
+        sim_info,
         inserted_into_hole_ids=torch.tensor([0], dtype=torch.long),
         top_hole_id=torch.tensor([-1], dtype=torch.long),
         envs_idx=torch.tensor([0], dtype=torch.long),
@@ -542,9 +541,8 @@ def test_attach_and_detach_fastener_to_two_parts(
     # note: the top hole here is the first hole (as it was the first to be inserted.)
     attach_picked_up_fastener_to_part(
         scene,
-        sim_state.physical_state,
-        sim_info.physical_info,
-        fastener_id=torch.tensor([0], dtype=torch.long),
+        sim_state,
+        sim_info,
         inserted_into_hole_ids=torch.tensor([1], dtype=torch.long),
         top_hole_id=torch.tensor([0], dtype=torch.long),
         envs_idx=torch.tensor([0], dtype=torch.long),
@@ -611,9 +609,10 @@ def test_attach_and_detach_fastener_to_two_parts(
     # detach fastener from parts
     detach_fastener_from_part(
         scene,
-        fastener,
-        part_entity=entities["part_with_holes_1@solid"],
-        envs_idx=torch.tensor([0]),
+        sim_state,
+        sim_info,
+        part_ids=torch.tensor([0], dtype=torch.long),
+        envs_idx=torch.tensor([0], dtype=torch.long),
     )
     # Assert weld fastener<->part1 removed (part2 still attached until next detach)
     assert not is_weld_constraint_present(
@@ -621,9 +620,10 @@ def test_attach_and_detach_fastener_to_two_parts(
     ), "Weld constraint between fastener and part 1 should be removed"
     detach_fastener_from_part(
         scene,
-        fastener,
-        part_entity=entities["part_with_holes_2@solid"],
-        envs_idx=torch.tensor([0]),
+        sim_state,
+        sim_info,
+        part_ids=torch.tensor([1], dtype=torch.long),
+        envs_idx=torch.tensor([0], dtype=torch.long),
     )
     # Assert weld fastener<->part2 removed
     assert not is_weld_constraint_present(
