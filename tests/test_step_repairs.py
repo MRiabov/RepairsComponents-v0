@@ -200,7 +200,7 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
     standard_fastener_name = fastener_data.name
     # populate current sim state
     repairs_sim_state = RepairsSimState(device=test_device).unsqueeze(0)
-    sim_info = RepairsSimInfo()
+    sim_info = RepairsSimInfo("test_step_repairs")
     part_with_holes_1_pos = entities["part_with_holes_1@solid"].get_pos(0)
     part_with_holes_2_pos = entities["part_with_holes_2@solid"].get_pos(0)
 

@@ -132,10 +132,14 @@ def create_env_configs(  # TODO voxelization and other cache carry mid-loops
 
             # create RepairsSimState for both
             starting_sim_state, sim_info = translate_compound_to_sim_state(
-                [starting_scene_geom_], device=device
+                [starting_scene_geom_],
+                env_setup_name=env_setups[scene_idx].__class__.__name__,
+                device=device,
             )
             desired_sim_state, _sim_info = translate_compound_to_sim_state(
-                [desired_state_geom_], device=device
+                [desired_state_geom_],
+                env_setup_name=env_setups[scene_idx].__class__.__name__,
+                device=device,
             )
 
             # Record the environment setup name for persistence/validation

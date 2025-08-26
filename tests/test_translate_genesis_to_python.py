@@ -179,7 +179,9 @@ def scene_with_entities(init_gs, test_device):
         sim_state.physical_state.fasteners_pos.shape[1],
     )
 
-    sim_info = RepairsSimInfo(physical_info=physical_state_info)
+    sim_info = RepairsSimInfo(
+        "test_translate_genesis_to_python", physical_info=physical_state_info
+    )
 
     return scene, entities, sim_state, sim_info
 

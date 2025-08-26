@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import tensordict
 import torch
 from torch_geometric.data import Data
 
@@ -17,6 +18,8 @@ from repairs_components.training_utils.sim_state import SimState
 class RepairsSimInfo:
     "Singleton, meta information about the sim state."
 
+    env_setup_name: str  # note: just updated to not have default values.
+
     component_info: ElectronicsInfo = field(default_factory=ElectronicsInfo)
     physical_info: PhysicalStateInfo = field(default_factory=PhysicalStateInfo)
     tool_info: ToolInfo = field(default_factory=ToolInfo)
@@ -25,9 +28,7 @@ class RepairsSimInfo:
         default_factory=lambda: torch.empty(0, dtype=torch.int32)
     )
     "Cache of fastener links for fastener constraint creation without dict querying."
-    env_setup_name: str = (
-        "env_setup"  # TODO: move to a separate persistence state info.
-    )
+
     # to prevent computation of certain objects if they are not present.
 
     # Mechanical linkage metadata (rigid groups). These are optional and populated
@@ -180,7 +181,7 @@ def merge_global_states(state_list: list[RepairsSimState]):
     assert len(state_list) > 0, "State list can not be zero."
     # FIXME: this should be simple torch.cat now.
     assert all(state.ndim == 1 for state in state_list)
-    return torch.cat(state_list)
+    return tensordict.cat(state_list)
 
 
 def merge_global_states_at_idx(  # note: this is not idx anymore, this is mask.

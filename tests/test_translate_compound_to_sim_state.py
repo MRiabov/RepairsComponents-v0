@@ -94,12 +94,20 @@ class TestEnv(EnvSetup):
 def test_env_geom():
     test_env = TestEnv()
     test_env.validate()
-    return test_env.desired_state_geom(), test_env._positions, test_env._hole_loc
+    test_name = "test_translate_compound_to_sim_state"
+    return (
+        test_env.desired_state_geom(),
+        test_env._positions,
+        test_env._hole_loc,
+        test_name,
+    )
 
 
 def test_translate_compound_to_sim_state(test_env_geom):
-    compound, positions, hole_loc = test_env_geom
-    sim_state, sim_info = translate_compound_to_sim_state([compound])
+    compound, positions, hole_loc, env_setup_name = test_env_geom
+    sim_state, sim_info = translate_compound_to_sim_state(
+        [compound], env_setup_name=env_setup_name
+    )
     expected_num_solids = 5  # solid, fixed solid, solid with hole, two connectors. Fastener is not included.
     expected_num_holes = 1
     expected_num_fasteners = 1
@@ -180,9 +188,11 @@ def test_translate_compound_to_sim_state(test_env_geom):
 
 
 def test_translate_compound_to_sim_state_batch(test_env_geom):
-    compound, positions, hole_loc = test_env_geom
+    compound, positions, hole_loc, env_setup_name = test_env_geom
     batch_dim = 2
-    sim_state, sim_info = translate_compound_to_sim_state([compound] * batch_dim)
+    sim_state, sim_info = translate_compound_to_sim_state(
+        [compound] * batch_dim, env_setup_name=env_setup_name
+    )
     expected_num_solids = 5  # solid, fixed solid, solid with hole, two connectors. Fastener is not included.
     expected_num_holes = 1
     expected_num_fasteners = 1
@@ -250,7 +260,7 @@ def test_translate_compound_to_sim_state_batch(test_env_geom):
 
 
 def test_translate_compound_records_mech_linked_groups(test_env_geom):
-    compound, _positions, _hole_loc = test_env_geom
+    compound, _positions, _hole_loc, env_setup_name = test_env_geom
     # First translate to discover actual europlug connector names
     _sim_state0, sim_info0 = translate_compound_to_sim_state([compound])
     keys = sim_info0.physical_info.body_indices.keys()
@@ -258,7 +268,7 @@ def test_translate_compound_records_mech_linked_groups(test_env_geom):
     female_name = next(k for k in keys if k.endswith("_female@connector"))
     linked = {"mech_linked": ([male_name, female_name])}
     sim_state, sim_info = translate_compound_to_sim_state(
-        [compound], linked_groups=linked
+        [compound], env_setup_name, linked_groups=linked
     )
     # Names recorded as provided
     assert sim_info.mech_linked_groups_names == linked["mech_linked"]
@@ -269,7 +279,7 @@ def test_translate_compound_records_mech_linked_groups(test_env_geom):
 
 
 def test_translate_compound_invalid_linked_name_raises(test_env_geom):
-    compound, _positions, _hole_loc = test_env_geom
+    compound, _positions, _hole_loc, env_setup_name = test_env_geom
     bad = {"mech_linked": (["does_not_exist@solid"],)}
     with pytest.raises(AssertionError):
         translate_compound_to_sim_state([compound], linked_groups=bad)
