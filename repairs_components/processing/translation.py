@@ -157,7 +157,6 @@ def translate_state_to_genesis_scene(
 
 def translate_genesis_to_python(  # translate to sim state, really.
     scene: gs.Scene,
-    gs_entities: dict[str, RigidEntity],
     sim_state: RepairsSimState,
     sim_info: RepairsSimInfo,
 ):
@@ -167,30 +166,24 @@ def translate_genesis_to_python(  # translate to sim state, really.
     Returns:
         sim_state: RepairsSimState with active bodies in the physical state.
     """
-    assert len(gs_entities) > 0, "Genesis entities can not be empty"
     # batch over all environments
     n_envs = scene.n_envs
     env_idx = torch.arange(n_envs)
 
     # Use batched solver queries for bodies and fasteners
     physical_device = sim_state.physical_state.device
+    rigid_solver = scene.sim.rigid_solver
+
+    all_links_pos = rigid_solver.get_links_pos(envs_idx=env_idx)
+    all_links_quat = rigid_solver.get_links_quat(envs_idx=env_idx)
 
     # --- Bodies: build ordered names and link indices ---
     N_bodies = sim_state.physical_state.position.shape[1]
-    assert N_bodies == len(sim_info.physical_info.body_indices)
-    body_names: list[str] = [
-        sim_info.physical_info.inverse_body_indices[i] for i in range(N_bodies)
-    ]
     body_link_idx = sim_info.physical_info.body_base_link_idx  # [N]
 
     # Fetch batched positions/quaternions for all bodies
-    rigid_solver = scene.sim.rigid_solver
-    positions = rigid_solver.get_links_pos(
-        links_idx=body_link_idx, envs_idx=env_idx
-    )  # expected [B, N, 3]
-    rotations = rigid_solver.get_links_quat(
-        links_idx=body_link_idx, envs_idx=env_idx
-    )  # expected [B, N, 4]
+    positions = all_links_pos[:, body_link_idx]  # expected [B, N, 3]
+    rotations = all_links_quat[:, body_link_idx]  # expected [B, N, 4]
 
     # Perform a single batched update for all bodies
     sim_state.physical_state = update_bodies_batch(
@@ -203,12 +196,8 @@ def translate_genesis_to_python(  # translate to sim state, really.
     # --- Fasteners: batch update pos/quat from solver ---
     if sim_state.physical_state.fasteners_pos.numel() > 0:
         fastener_links = sim_info.physical_info.fastener_base_link_idx  # [F]
-        fast_pos = rigid_solver.get_links_pos(
-            links_idx=fastener_links, envs_idx=env_idx
-        )  # [B, F, 3]
-        fast_quat = rigid_solver.get_links_quat(
-            links_idx=fastener_links, envs_idx=env_idx
-        )  # [B, F, 4]
+        fast_pos = all_links_pos[:, fastener_links]  # [B, F, 3]
+        fast_quat = all_links_quat[:, fastener_links]  # [B, F, 4]
         sim_state.physical_state.fasteners_pos = torch.as_tensor(
             fast_pos,
             device=physical_device,
@@ -255,6 +244,15 @@ def translate_genesis_to_python(  # translate to sim state, really.
         sim_info.physical_info.part_hole_batch,
     )  # would be ideal if starting_hole_positions, hole_quats and hole_batch were batched already.
     max_pos = sim_state.physical_state[0].fasteners_pos.max()
+
+    # update tool positions:
+    sim_state.tool_state.pos = all_links_pos[
+        :, sim_info.tool_info.tool_base_links_idx[sim_state.tool_state.tool_ids]
+    ]
+    sim_state.tool_state.quat = all_links_quat[
+        :, sim_info.tool_info.tool_base_links_idx[sim_state.tool_state.tool_ids]
+    ]
+    # convenience: update picked up tool positions
     assert max_pos <= 50, f"massive out of bounds, at env_id 0, max_pos {max_pos}"
     return sim_state
 
@@ -600,7 +598,6 @@ def translate_compound_to_sim_state(
 def precreate_constraints(
     sim_state: RepairsSimState,
     sim_info: RepairsSimInfo,
-    gs_entities: dict[str, RigidEntity],
     scene: gs.Scene,
     env_idx: torch.Tensor | None = None,
 ):
