@@ -82,6 +82,8 @@ class RepairsEnv(gym.Env):
             "cuda:0" if torch.cuda.is_available() else "cpu"
         )  # can be changed to CPU.
         self.dt = env_cfg.get("dt", 0.02)  # Default to 50Hz if not specified
+        # Number of Genesis substeps to execute per high-level action
+        self.num_steps_per_action = int(env_cfg.get("num_steps_per_action", 10))
         self.tasks = tasks
         self.env_setups = env_setups
         self.num_scenes_per_task = num_scenes_per_task
@@ -375,7 +377,7 @@ class RepairsEnv(gym.Env):
                 gripper_force=gripper_force,
                 render=True,
                 keypoint_distance=0.1,  # 10cm as suggested
-                num_steps_between_keypoints=self.env_cfg["num_steps_per_action"],
+                num_steps_between_keypoints=self.num_steps_per_action,
             )
             _dt = time.perf_counter() - _t0
             t_motion_total += _dt
@@ -383,7 +385,7 @@ class RepairsEnv(gym.Env):
                 print(
                     "Motion planning and exec time:",
                     _dt,
-                    f"s, which equals to {self.env_cfg['num_steps_per_action']} Genesis steps.",
+                    f"s, which equals to {self.num_steps_per_action} Genesis steps.",
                 )
 
             # Update the current simulation state based on the scene
@@ -411,7 +413,9 @@ class RepairsEnv(gym.Env):
             # Compute reward based on progress toward the goal
             _t2 = time.perf_counter()
             dones = total_diff_left == 0  # note: pretty expensive.
-            rewards = scene_data.reward_history.calculate_reward_this_timestep(scene_data)
+            rewards = scene_data.reward_history.calculate_reward_this_timestep(
+                scene_data
+            )
             t_reward_total += time.perf_counter() - _t2
 
             # check if any entity is out of bounds

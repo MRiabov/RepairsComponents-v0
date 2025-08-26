@@ -247,10 +247,10 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
     # update tool positions:
     sim_state.tool_state.pos = all_links_pos[
-        :, sim_info.tool_info.tool_base_links_idx[sim_state.tool_state.tool_ids]
+        :, sim_info.tool_info.tool_base_link_idx[sim_state.tool_state.tool_ids]
     ]
     sim_state.tool_state.quat = all_links_quat[
-        :, sim_info.tool_info.tool_base_links_idx[sim_state.tool_state.tool_ids]
+        :, sim_info.tool_info.tool_base_link_idx[sim_state.tool_state.tool_ids]
     ]
     # convenience: update picked up tool positions
     assert max_pos <= 50, f"massive out of bounds, at env_id 0, max_pos {max_pos}"
@@ -259,6 +259,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
 
 def translate_compound_to_sim_state(
     batch_b123d_compounds: list[Compound],
+    env_setup_name: str,
     device: torch.device | None = None,  # device to create RepairsSimState on.
     connected_bodies: list[list[str]] = [],
     linked_groups: dict[str, tuple[list[str]]] | None = None,
@@ -401,7 +402,7 @@ def translate_compound_to_sim_state(
     sim_state.physical_state = physical_state
 
     # Build sim info and set singleton PhysicalStateInfo
-    sim_info = RepairsSimInfo()
+    sim_info = RepairsSimInfo(env_setup_name)
     sim_info.physical_info = physical_state_info
 
     # Populate mechanical linkage metadata, if provided

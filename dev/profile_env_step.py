@@ -110,7 +110,16 @@ def get_default_configs(debug: bool = True):
 
     ml_batch_dim = 1
 
-    return env_setups, tasks, env_cfg, obs_cfg, io_cfg, reward_cfg, command_cfg, ml_batch_dim
+    return (
+        env_setups,
+        tasks,
+        env_cfg,
+        obs_cfg,
+        io_cfg,
+        reward_cfg,
+        command_cfg,
+        ml_batch_dim,
+    )
 
 
 def main():
@@ -193,7 +202,11 @@ def main():
             print(f"  {k:20s} {means[k]:.6f} s  ({pct:5.1f}%)")
 
         # Top 3 contributors
-        top = sorted(((k, v) for k, v in means.items() if k != "total_step_s"), key=lambda kv: kv[1], reverse=True)[:3]
+        top = sorted(
+            ((k, v) for k, v in means.items() if k != "total_step_s"),
+            key=lambda kv: kv[1],
+            reverse=True,
+        )[:3]
         print("\nTop contributors:")
         for k, v in top:
             pct = (v / total * 100.0) if total > 0 else 0.0

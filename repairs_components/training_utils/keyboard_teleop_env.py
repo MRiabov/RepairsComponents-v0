@@ -259,7 +259,7 @@ def main():
     # Init Genesis (no viewer). Honor available backend.
     gs.init(
         backend=gs.cuda if torch.cuda.is_available() else gs.cpu,
-        logging_level="warning",
+        logging_level="debug",
     )
 
     (

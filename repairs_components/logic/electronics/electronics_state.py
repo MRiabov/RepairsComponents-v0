@@ -693,7 +693,9 @@ def connect_terminal_to_net_or_create_new(
                 group_first_pos = torch.nonzero(start_flags, as_tuple=False).flatten()
                 group_id = torch.cumsum(start_flags.to(torch.long), dim=0) - 1
                 first_idx_per_elem = group_first_pos[group_id]
-                rank_sorted = torch.arange(b_sorted.numel(), device=device) - first_idx_per_elem
+                rank_sorted = (
+                    torch.arange(b_sorted.numel(), device=device) - first_idx_per_elem
+                )
                 new_ids_sorted = base_next[b_sorted] + rank_sorted
                 inv = torch.empty_like(order)
                 inv[order] = torch.arange(order.numel(), device=device)
@@ -712,7 +714,9 @@ def connect_terminal_to_net_or_create_new(
                 u = torch.minimum(g1[merge_mask], g2[merge_mask])
                 v = torch.maximum(g1[merge_mask], g2[merge_mask])
                 bb = b[merge_mask]
-                merges = torch.unique(torch.stack([bb.to(torch.long), u, v], dim=1), dim=0)
+                merges = torch.unique(
+                    torch.stack([bb.to(torch.long), u, v], dim=1), dim=0
+                )
                 # Apply merges (loop over unique pairs, not per-batch)
                 for i in range(int(merges.shape[0])):
                     bb_i = int(merges[i, 0].item())
@@ -738,7 +742,9 @@ def connect_terminal_to_net_or_create_new(
                 u = torch.minimum(g1[merge_mask], tnet[merge_mask])
                 v = torch.maximum(g1[merge_mask], tnet[merge_mask])
                 bb = b[merge_mask]
-                merges = torch.unique(torch.stack([bb.to(torch.long), u, v], dim=1), dim=0)
+                merges = torch.unique(
+                    torch.stack([bb.to(torch.long), u, v], dim=1), dim=0
+                )
                 for i in range(int(merges.shape[0])):
                     bb_i = int(merges[i, 0].item())
                     uu = int(merges[i, 1].item())

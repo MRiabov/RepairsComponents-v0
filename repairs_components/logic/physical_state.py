@@ -623,9 +623,10 @@ class PhysicalState(TensorClass):
         self, part_ids: torch.Tensor, data_a: "PhysicalState", data_b: "PhysicalState"
     ) -> torch.Tensor:
         """Check if a part or a number thereof (part_id) is in its desired position (within thresholds).
-        self, part_id: int, data_a: "PhysicalState", data_b: "PhysicalState"
-    ) -> bool:
-        """Check if a part (part_id) is in its desired position (within thresholds)."""
+
+        Returns:
+         - Bool tensor of part being in the desired position."""
+        # TODO should return shape of [B, part_id.shape[0]]!
         # Compute node feature diffs (position & orientation) between data_a and data_b
         diff_dict, _ = _diff_body_features(data_a, data_b)
         changed = diff_dict["changed_indices"]
@@ -1509,8 +1510,6 @@ def update_terminal_def_pos_batch(
     # Split by sex using tensorized encoding
     male_mask = sexes == 1  # 1=MALE
     female_mask = sexes == 0  # 0=FEMALE
-    male_indices = torch.nonzero(male_mask, as_tuple=False).squeeze(1).tolist()
-    female_indices = torch.nonzero(female_mask, as_tuple=False).squeeze(1).tolist()
 
     # Validate relative positions are reasonable
     assert (terminal_positions_relative_to_center.abs() < 5).all(), (
@@ -1528,32 +1527,15 @@ def update_terminal_def_pos_batch(
         B, -1, -1
     )  # [B, num_connectors, 3]
 
-    # Calculate terminal positions using get_connector_pos for each connector
-    all_terminal_positions = torch.zeros_like(positions)  # [B, num_connectors, 3]
+    # Calculate terminal positions using get_connector_pos for all connectors in batch
+    all_terminal_positions = get_connector_pos(
+        positions,  # [B, num_connectors, 3]
+        rotations,  # [B, num_connectors, 4]
+        terminal_rel_expanded,  # [B, num_connectors, 3]
+    )  # [B, num_connectors, 3]
 
-    for i in range(num_connectors):
-        terminal_pos = get_connector_pos(
-            positions[:, i],  # [B, 3]
-            rotations[:, i],  # [B, 4]
-            terminal_rel_expanded[:, i],  # [B, 3]
-        )
-        all_terminal_positions[:, i] = terminal_pos
-
-    # male_indices and female_indices are already computed from the sexes tensor above
-
-    if male_indices:
-        male_terminal_positions = all_terminal_positions[
-            :, male_indices
-        ]  # [B, num_male, 3]
-    else:
-        male_terminal_positions = torch.empty((B, 0, 3), device=device)
-
-    if female_indices:
-        female_terminal_positions = all_terminal_positions[
-            :, female_indices
-        ]  # [B, num_female, 3]
-    else:
-        female_terminal_positions = torch.empty((B, 0, 3), device=device)
+    male_terminal_positions = all_terminal_positions[:, male_mask]
+    female_terminal_positions = all_terminal_positions[:, female_mask]
 
     return male_terminal_positions, female_terminal_positions
 

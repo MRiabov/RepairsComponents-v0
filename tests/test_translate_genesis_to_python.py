@@ -234,13 +234,7 @@ def test_translate_genesis_to_python(scene_with_entities, sample_hole_data):
     sim_info.physical_info.part_hole_batch = part_hole_batch
 
     # Call the translation function
-    translate_genesis_to_python(
-        scene=scene,
-        gs_entities=entities,
-        sim_state=sim_state,
-        sim_info=sim_info,
-        device=starting_hole_positions.device,
-    )
+    translate_genesis_to_python(scene=scene, sim_state=sim_state, sim_info=sim_info)
 
     # test solid bodies translated (pos and quat)
     graph_device = sim_state.physical_state.position.device
