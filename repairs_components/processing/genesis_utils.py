@@ -2,6 +2,7 @@ import torch
 from genesis.engine.entities import RigidEntity
 
 from repairs_components.geometry.fasteners import Fastener
+from repairs_components.training_utils.sim_state_global import PhysicalStateInfo
 
 
 def get_links_idx_from_names(names: list[str], gs_entities: dict[str, RigidEntity]):
@@ -31,7 +32,7 @@ def get_links_idx_from_fastener_ids(
 
 
 def populate_base_link_indices(
-    physical_state_info,
+    physical_state_info: PhysicalStateInfo,
     gs_entities: dict[str, RigidEntity],
     num_fasteners: int,
 ):

@@ -16,9 +16,7 @@ import torch
 from tensordict import TensorClass
 from torch_geometric.data import Data
 
-from repairs_components.geometry.fasteners import (
-    get_fastener_params_from_name,
-)
+from repairs_components.logic.tools.tool import ToolsEnum
 from repairs_components.processing.geom_utils import (
     are_quats_within_angle,
     get_connector_pos,
@@ -267,6 +265,14 @@ class PhysicalState(TensorClass):
         default_factory=lambda: torch.empty((0, 4))
     )  # [H, 4]
     """Hole quats per part, batched with hole_indices_batch."""
+
+    # tools
+    tool_pos: torch.Tensor = field(
+        default_factory=lambda: torch.zeros(len(ToolsEnum.__members__), 3)
+    )
+    tool_quat: torch.Tensor = field(
+        default_factory=lambda: torch.zeros(len(ToolsEnum.__members__), 4)
+    )  # TODO test these during translate_genesis_to_python
 
     # next: there is something that needs to be figured out with data storage and reconstruction.
     # So 1. I do save STL/gltf files,
@@ -614,6 +620,9 @@ class PhysicalState(TensorClass):
     # TODO: this should be refactored to "are two parts connected" which is what it does.
 
     def check_if_part_in_desired_pos(
+        self, part_ids: torch.Tensor, data_a: "PhysicalState", data_b: "PhysicalState"
+    ) -> torch.Tensor:
+        """Check if a part or a number thereof (part_id) is in its desired position (within thresholds).
         self, part_id: int, data_a: "PhysicalState", data_b: "PhysicalState"
     ) -> bool:
         """Check if a part (part_id) is in its desired position (within thresholds)."""
@@ -624,7 +633,7 @@ class PhysicalState(TensorClass):
 
         # FIXME: this does not account for a) batch of environments, b) batch of parts.
         # ^batch of environments would be cool, but batch of parts would barely ever happen.
-        return (changed == part_id).any()
+        return (changed == part_ids).any()
 
     def _build_fastener_edge_attr_and_index(self, physical_info: PhysicalStateInfo):
         # cat shapes: 1,1,3,4,2 = 11
@@ -1381,6 +1390,8 @@ def register_fasteners_batch(
     physical_info.fasteners_length = torch.full(
         (num_fasteners,), fill_value=-1.0, dtype=torch.float32, device=device
     )  # fill with -1 just in case
+    from repairs_components.geometry.fasteners import get_fastener_params_from_name
+
     for i, name in enumerate(fastener_compound_names):
         diam, length = get_fastener_params_from_name(name)
         # get_fastener_params_from_name returns values in millimeters.
@@ -1550,9 +1561,8 @@ def update_terminal_def_pos_batch(
 def connect_fastener_to_one_body(
     physical_state: PhysicalState,
     physical_info: PhysicalStateInfo,
-    fastener_id: int,
-    body_name: str,
-    hole_id: int,
+    fastener_id: torch.Tensor,
+    hole_id: torch.Tensor,
     env_idx: torch.Tensor,
 ):
     """Connect a fastener to a body and a specific hole.
@@ -1568,16 +1578,10 @@ def connect_fastener_to_one_body(
         physical_state.fasteners_attached_to_body[env_idx, fastener_id] == -1
     ).any(), "Fastener is already connected to two bodies."
 
+    target_body_idx = physical_info.part_hole_batch[hole_id]
     # Validate hole_id
     H = int(physical_info.part_hole_batch.shape[0])
     assert 0 <= hole_id < H, f"hole_id out of range: {hole_id} not in [0, {H})"
-
-    # Validate hole belongs to the target body
-    target_body_idx = physical_info.body_indices[body_name]
-    assert physical_info.part_hole_batch[hole_id].item() == target_body_idx, (
-        f"Hole {hole_id} does not belong to body '{body_name}' (expected part index {target_body_idx}, "
-        f"got {int(physical_info.part_hole_batch[hole_id].item())})"
-    )
 
     # Assert hole/fastener diameter closeness in meters
     # Note: diameters are stored in meters across the project

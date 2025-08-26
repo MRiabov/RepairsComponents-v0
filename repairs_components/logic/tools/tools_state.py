@@ -21,6 +21,13 @@ class ToolInfo:
             [tool.dist_from_grip_link for tool in [Gripper(), Screwdriver()]]
         )
     )
+    tool_base_link_idx: torch.Tensor = field(
+        default_factory=lambda: torch.empty(
+            (len(ToolsEnum.__members__)), dtype=torch.int32
+        )
+    )  # note: there may be an issue if there are multiple tools to grip e.g. in a multimeter.
+    """Base link indices for each tool, aligned with tool_ids' integer ids.
+    Gripper (at [0]), has its link set as franka's hand."""
 
 
 class ToolState(SimState):

@@ -196,7 +196,6 @@ def translate_genesis_to_python(  # translate to sim state, really.
     sim_state.physical_state = update_bodies_batch(
         sim_state.physical_state,
         sim_info.physical_info,
-        body_names,
         positions,
         rotations,
     )
@@ -231,23 +230,14 @@ def translate_genesis_to_python(  # translate to sim state, really.
         env_has_picked_up_fastener = (
             sim_state.tool_state.tool_ids == ToolsEnum.SCREWDRIVER.value
         ) & sim_state.tool_state.screwdriver_tc.has_picked_up_fastener
+        picked_ids = sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
+            env_has_picked_up_fastener
+        ].to(dtype=torch.long)
         tip_pos = get_connector_pos(
-            all_fasteners_pos[
-                env_has_picked_up_fastener,
-                sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
-                    env_has_picked_up_fastener
-                ],
-            ],
-            all_fasteners_quat[
-                env_has_picked_up_fastener,
-                sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
-                    env_has_picked_up_fastener
-                ],
-            ],
+            all_fasteners_pos[env_has_picked_up_fastener, picked_ids],
+            all_fasteners_quat[env_has_picked_up_fastener, picked_ids],
             Fastener.get_tip_pos_relative_to_center(
-                length=sim_info.physical_info.fasteners_length[
-                    env_has_picked_up_fastener
-                ]
+                length=sim_info.physical_info.fasteners_length[picked_ids]
             ),
         )
         sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[
@@ -255,12 +245,7 @@ def translate_genesis_to_python(  # translate to sim state, really.
         ] = tip_pos
         sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[
             env_has_picked_up_fastener
-        ] = all_fasteners_quat[
-            env_has_picked_up_fastener,
-            sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
-                env_has_picked_up_fastener
-            ],
-        ]
+        ] = all_fasteners_quat[env_has_picked_up_fastener, picked_ids]
 
     # update holes
     sim_state = update_hole_locs(

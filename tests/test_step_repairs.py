@@ -12,7 +12,10 @@ from repairs_components.logic.physical_state import (
 )
 from repairs_components.logic.tools.screwdriver import Screwdriver
 from repairs_components.logic.tools.tool import ToolsEnum
-from repairs_components.processing.genesis_utils import is_weld_constraint_present
+from repairs_components.processing.genesis_utils import (
+    is_weld_constraint_present,
+    populate_base_link_indices,
+)
 from repairs_components.processing.translation import update_hole_locs
 from repairs_components.training_utils.sim_state_global import (
     RepairsSimInfo,
@@ -241,6 +244,9 @@ def fresh_scene_with_fastener_screwdriver_and_two_parts(
         torch.tensor([[-1]]),  # init hole b
         fastener_compound_names=[standard_fastener_name],
     )
+
+    # Populate base link indices required by ID-based fastener API
+    populate_base_link_indices(sim_info.physical_info, entities, num_fasteners=1)
 
     # populate desired state
     desired_sim_state = RepairsSimState(device=test_device).unsqueeze(0)
@@ -739,7 +745,12 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
 
     # Call step_fastener_pick_up_release with proximity threshold of 0.75
     updated_sim_state = step_fastener_pick_up_release(
-        scene, gs_entities, repairs_sim_state, actions, max_pick_up_threshold=0.75
+        scene,
+        gs_entities,
+        repairs_sim_state,
+        sim_info,
+        actions,
+        max_pick_up_threshold=0.75,
     )
 
     # Test 1a: Check that fastener is moved to tool grip position
@@ -778,7 +789,12 @@ def test_step_fastener_pick_up_release_picks_up_and_releases_fastener(
     actions[:, 7] = 0.0  # Release action
 
     updated_sim_state = step_fastener_pick_up_release(
-        scene, gs_entities, updated_sim_state, actions, max_pick_up_threshold=0.75
+        scene,
+        gs_entities,
+        updated_sim_state,
+        sim_info,
+        actions,
+        max_pick_up_threshold=0.75,
     )
 
     # Test 2a: After release, picked_up_fastener_id should be -1
@@ -846,7 +862,7 @@ def test_all_bodies_moved_to_desired_pos_results_in_success(
             desired_sim_state.physical_state.quat[0, body_idx].unsqueeze(0)
         )
 
-    success, total_diff_left, _, _ = step_repairs(
+    success, total_diff_left, _, _, _ = step_repairs(
         scene=scene,
         actions=torch.zeros((1, 10)),
         gs_entities=gs_entities,

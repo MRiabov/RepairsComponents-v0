@@ -10,6 +10,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from repairs_components.logic.tools.tool import ToolsEnum
+from repairs_components.training_utils.sim_state_global import (
+    RepairsSimInfo,
+    RepairsSimState,
+)
 
 if TYPE_CHECKING:  # circular dep.
     from repairs_components.logic.tools.tools_state import ToolState
@@ -199,26 +203,22 @@ class Fastener(Component):
 
 
 def check_fastener_possible_insertion(
-    active_fastener_tip_position: torch.Tensor,  # [B,3]
-    active_fastener_quat: torch.Tensor,  # [B,4]
-    part_hole_positions: torch.Tensor,  # [B,num_holes,3]
-    part_hole_quats: torch.Tensor,  # [B,num_holes,4]
-    part_hole_batch: torch.Tensor,  # [num_holes] #NOTE: part_hole_batch is static amongst batch!
+    scene: gs.Scene,
+    sim_state: RepairsSimState,
+    sim_info: RepairsSimInfo,
     connection_dist_threshold: float = 0.75,  # meters (!)
     connection_angle_threshold: torch.Tensor = torch.full(
         (1,), 30
     ),  # either [1] or [B]  # degrees
     ignore_part_idx: torch.Tensor | None = None,  # [B]
+    env_ids: torch.Tensor | None = None,  # [B]
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
+    Check if a currently picked up fastener can be inserted.
     Args:
-    active_fastener_tip_position: [B,3] tensor of tip positions
-    active_fastener_quat: [B,4] tensor of picked up fastener quaternions.
-    part_hole_positions: torch.Tensor of hole positions - per every hole, a tensor of shape [B, num_holes,3]
-    part_hole_quats: torch.Tensor of hole quaternions - per every hole, a tensor of shape [B, num_holes,4]
-    part_hole_batch: torch.Tensor of hole batch indices - per every hole, it's corresponding part index. Static amongst batch. [num_holes]
-    connection_threshold: float
-    ignore_part_idx: torch.Tensor, indices of the part to ignore (if fastener is already inserted in that part in that batch, ignore.) [B]
+    - env_ids: [B] tensor of environment indices.
+    - connection_threshold: float
+    - ignore_part_idx: torch.Tensor, indices of the part to ignore (if fastener is already inserted in that part in that batch, ignore.) [B]
 
     Batch check: for each env, find first hole within threshold or -1. If part_hole_quats is not None, check that the hole is not rotated too much.
     Returns:
@@ -226,19 +226,16 @@ def check_fastener_possible_insertion(
     """
     from repairs_components.processing.geom_utils import are_quats_within_angle
 
-    assert part_hole_positions.shape[1] == part_hole_batch.shape[0], (
-        f"part_hole_positions, part_hole_batch must have the same number of holes.\n"
-        f"part_hole_positions: {part_hole_positions.shape}, part_hole_batch: {part_hole_batch.shape}"
-    )
-    assert part_hole_batch.ndim == 1, (
-        f"part_hole_batch must be a 1D tensor of shape [H], got {part_hole_batch.shape}"
-    )
     dist = torch.norm(
-        part_hole_positions - active_fastener_tip_position, dim=-1
+        sim_state.physical_state.hole_positions
+        - sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position,
+        dim=-1,
     )  # [B, H]
     # ignore holes that this fastener is already attached to
     if ignore_part_idx is not None:
-        assert ignore_part_idx.shape == (part_hole_positions.shape[0],), (
+        assert ignore_part_idx.shape == (
+            sim_state.physical_state.hole_positions.shape[0],
+        ), (
             f"ignore_part_idx must be a 1D tensor of shape [B], got {ignore_part_idx.shape}"
         )
         mask = ignore_part_idx != -1
@@ -250,12 +247,9 @@ def check_fastener_possible_insertion(
 
     # mask out holes that are not within angle threshold
 
-    assert part_hole_quats.shape[:2] == part_hole_positions.shape[:2], (
-        "part_hole_quats, part_hole_positions must have the same batch and hole counts"
-    )
     angle_mask = are_quats_within_angle(
-        part_hole_quats,
-        active_fastener_quat,
+        sim_state.physical_state.hole_quats,
+        sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat,
         connection_angle_threshold,
     )
     dist[~angle_mask] = float("inf")
@@ -266,7 +260,9 @@ def check_fastener_possible_insertion(
     # if it's not close enough, return -1
     hole_idx = torch.where(close_enough, hole_min.indices, -1)
     part_idx = torch.where(
-        hole_idx != -1, part_hole_batch[hole_idx], torch.full_like(hole_idx, -1)
+        hole_idx != -1,
+        sim_info.physical_info.part_hole_batch[hole_idx],
+        torch.full_like(hole_idx, -1),
     )
 
     return part_idx, hole_idx
@@ -274,208 +270,275 @@ def check_fastener_possible_insertion(
 
 def attach_fastener_to_screwdriver(
     scene: gs.Scene,
-    fastener_entity: RigidEntity,
-    screwdriver_entity: RigidEntity,
-    tool_state_to_update: "ToolState",  # full tool state
-    fastener_id: int,  # currently int, will be Tensor [B] soon.
-    env_ids: torch.Tensor,  # [B]
+    sim_state: RepairsSimState,
+    sim_info: RepairsSimInfo,
+    fastener_id: torch.Tensor,  # tensor [B]
+    env_ids: torch.Tensor | None,  # [B]
 ):
+    """Attach a fastener to the screwdriver using IDs.
+
+    Args:
+        scene: Genesis scene.
+        sim_state: Batched simulation state. Used to update screwdriver tool state.
+        sim_info: Singleton metadata. Used to resolve Genesis base link indices.
+        fastener_id: Integer IDs of the fastener to attach (batched).
+        env_ids: Tensor of environment indices [B] to which this operation applies.
+
+    Behavior:
+        - Computes screwdriver grip pose for env_ids.
+        - Aligns fastener base link to screwdriver and adds a weld constraint.
+        - Writes picked up fastener position, orientation and ID into `sim_state.tool_state.screwdriver_tc`.
+    """
     # avoid circular import
     from repairs_components.logic.tools.screwdriver import Screwdriver
 
-    # ^ note: could be batched, but fastener_entity are not batchable (easily) and it doesn't matter.
+    if env_ids is None:
+        env_ids = torch.arange(scene.n_envs, device=sim_state.device)
+    B = env_ids.shape[0]
+    assert fastener_id.shape == env_ids.shape, "Fastener id is meant to be batched."
     rigid_solver = scene.sim.rigid_solver
-    screwdriver_link = screwdriver_entity.base_link.idx
-    fastener_head_joint = fastener_entity.base_link.idx
-    # normalize env index to plain int
-    env = int(env_ids) if torch.is_tensor(env_ids) else env_ids
+    # Normalize dtypes/shapes for Genesis API
+    env_ids_i32 = env_ids.to(torch.int32)
+    fastener_head_joint = sim_info.physical_info.fastener_base_link_idx[fastener_id].to(
+        torch.int32
+    )
+    screwdriver_link_idx = int(
+        sim_info.tool_info.tool_base_link_idx[ToolsEnum.SCREWDRIVER.value]
+    )
+    screwdriver_links = torch.full(
+        (B,), screwdriver_link_idx, dtype=torch.int32, device=env_ids_i32.device
+    )
     # compute screwdriver grip position for the base link only -> shape [3]
-    screwdriver_xyz_all = screwdriver_entity.get_pos(env)  # [L,3]
-    screwdriver_quat_all = screwdriver_entity.get_quat(env)  # [L,4]
+    screwdriver_xyz = sim_state.physical_state.tool_pos[
+        env_ids, ToolsEnum.SCREWDRIVER.value
+    ]
+    screwdriver_quat = sim_state.physical_state.tool_quat[
+        env_ids, ToolsEnum.SCREWDRIVER.value
+    ]
     rel_vec = Screwdriver.fastener_connector_pos_relative_to_center().expand(
-        screwdriver_xyz_all.shape[0], -1
+        screwdriver_xyz.shape[0], -1
     )
-    grip_all = get_connector_pos(
-        screwdriver_xyz_all,
-        screwdriver_quat_all,
-        rel_vec,
-    )  # [L,3]
-    screwdriver_grip_xyz = grip_all[0]
-    screwdriver_quat0 = screwdriver_quat_all[0]
+    grip_pos = get_connector_pos(screwdriver_xyz, screwdriver_quat, rel_vec)
+    # calc fastener offset
+    fasteners_offset = torch.zeros(
+        (sim_info.physical_info.fasteners_length.shape[0], 3),
+        dtype=torch.float32,
+        device=sim_info.physical_info.fastener_base_link_idx.device,
+    )
+    fasteners_offset[:, 2] = sim_info.physical_info.fasteners_length
 
-    # Align the fastener before constraining
-    fastener_entity.set_pos(screwdriver_grip_xyz, env)
-    fastener_entity.set_quat(screwdriver_quat0, env)
-    rigid_solver.add_weld_constraint(
-        fastener_head_joint, screwdriver_link, env
-    )  # works is genesis's examples.
-    tool_state_to_update.screwdriver_tc.picked_up_fastener_tip_position[env] = (
-        screwdriver_grip_xyz
+    fastener_tip_pos = get_connector_pos(
+        screwdriver_xyz,
+        screwdriver_quat,
+        Fastener.get_tip_pos_relative_to_center().expand(screwdriver_xyz.shape[0], -1),
     )
-    tool_state_to_update.screwdriver_tc.picked_up_fastener_quat[env] = screwdriver_quat0
+
+    # Align the fastener before constraining: set pose for the target fastener links
+    rigid_solver.set_base_links_pos(grip_pos, fastener_head_joint, env_ids_i32)
+    rigid_solver.set_base_links_quat(screwdriver_quat, fastener_head_joint, env_ids_i32)
+    # Idempotent: remove any existing weld before adding
+    rigid_solver.delete_weld_constraint(
+        fastener_head_joint, screwdriver_links, env_ids_i32
+    )  # FIXME: but this should never happen as we ignore it!
+    rigid_solver.add_weld_constraint(
+        fastener_head_joint, screwdriver_links, env_ids_i32
+    )  # works in genesis examples.
+    sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[env_ids] = (
+        fastener_tip_pos
+    )
+    sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[env_ids] = (
+        screwdriver_quat
+    )
     # Also store numeric id for batched processing; use int with -1 sentinel for none
-    tool_state_to_update.screwdriver_tc.picked_up_fastener_id[env] = fastener_id
+    sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[env_ids] = fastener_id
 
 
 def detach_fastener_from_screwdriver(
     scene: gs.Scene,
-    fastener_entity: RigidEntity,
-    screwdriver_entity: RigidEntity,
-    tool_state_to_update: "ToolState",  # full tool state
-    env_ids: torch.Tensor,  # [B]
+    sim_state: RepairsSimState,
+    sim_info: RepairsSimInfo,
+    env_ids: torch.Tensor | None = None,  # [B]
 ):
-    env = int(env_ids) if torch.is_tensor(env_ids) else env_ids
-    rigid_solver = scene.sim.rigid_solver
-    hand_link = screwdriver_entity.base_link.idx
-    fastener_head_joint = fastener_entity.base_link.idx
-    rigid_solver.delete_weld_constraint(
-        fastener_head_joint, hand_link, env
-    )  # works in genesis's examples. #[env_id] because it wants a collection.
-    assert tool_state_to_update.tool_ids[env] == ToolsEnum.SCREWDRIVER.value, (
-        "Tool must be a Screwdriver"
-    )
-    tool_state_to_update.screwdriver_tc.picked_up_fastener_tip_position[env] = torch.nan
-    tool_state_to_update.screwdriver_tc.picked_up_fastener_quat[env] = torch.nan
-    tool_state_to_update.screwdriver_tc.picked_up_fastener_id[env] = -1
-
-
-def attach_fastener_to_part(
-    scene: gs.Scene,
-    fastener_entity: RigidEntity,
-    inserted_into_hole_pos: torch.Tensor,
-    inserted_into_hole_quat: torch.Tensor,
-    inserted_to_hole_depth: torch.Tensor,
-    inserted_into_part_entity: RigidEntity,
-    inserted_into_hole_is_through: torch.Tensor,
-    top_hole_is_through: torch.Tensor,  # only for assertion.
-    already_inserted_into_one_hole: torch.Tensor,
-    top_hole_depth: torch.Tensor,
-    fastener_length: torch.Tensor,
-    envs_idx: torch.Tensor,
-):
-    """Attach a fastener to a part at a target hole and add a weld constraint.
-
-    This is invoked from `step_repairs -> step_screw_in_or_out` when the policy decides to
-    screw in. It computes the fastener pose from the target hole world pose and depth, taking
-    into account whether the hole is through/blind and any existing partial insertion into a
-    previously connected ("top") hole in the same environment.
-
-    Behavior:
-    - Position is computed via `recalculate_fastener_pos_with_offset_to_hole(...)`, which:
-      * for a through hole with no prior insertion: aligns the fastener head with the hole top
-      * for a blind hole with no prior insertion: offsets by (fastener_length - hole_depth)
-        along the hole axis
-      * for a second connection when partially inserted into a top hole: offsets by
-        (fastener_length - top_hole_depth)
-    - Orientation is set equal to `inserted_into_hole_quat`.
-    - A rigid weld constraint is added between the fastener base link and the part base link
-      (temporary simplification; will be replaced by a revolute/cylindrical joint later).
+    """Detach the currently attached fastener from the screwdriver over env_ids.
 
     Args:
-        scene (gs.Scene): Genesis scene.
-        fastener_entity (RigidEntity): The fastener to attach.
-        inserted_into_hole_pos (torch.Tensor): World-frame position of the target hole.
-            Shape [B, 3] where B == len(envs_idx). In `step_repairs` this is passed for a
-            single environment (B=1).
-        inserted_into_hole_quat (torch.Tensor): World-frame quaternion [w, x, y, z] of the
-            target hole. Shape [B, 4].
-        inserted_to_hole_depth (torch.Tensor): Target hole depth in meters (> 0). Shape [B].
-        inserted_into_part_entity (RigidEntity): Part owning the target hole.
-        inserted_into_hole_is_through (torch.Tensor): Whether the target hole is through.
-            Shape [B] (bool).
-        top_hole_is_through (torch.Tensor): Whether the already-connected "top" hole is through.
-            Used only for validation. Where `already_inserted_into_one_hole` is True, all entries
-            must be True. Shape [B] (bool).
-        already_inserted_into_one_hole (torch.Tensor): Whether the fastener is already inserted
-            into a (top) hole in the same environment. Shape [B] (bool).
-        top_hole_depth (torch.Tensor): Depth inserted into the top hole in meters (>= 0). If
-            `already_inserted_into_one_hole` is True and the top hole is through, must be 0;
-            otherwise (when not already inserted) must be 0. Shape [B].
-        fastener_length (torch.Tensor): Total fastener length in meters (> 0). Shape [B].
-        envs_idx (torch.Tensor): Indices of environments to apply the update to. Shape [B].
+        scene: Genesis scene.
+        sim_state: Batched simulation state. Used to clear screwdriver tool state.
+        sim_info: Singleton metadata. Used to resolve Genesis base link indices.
+        fastener_id: Integer ID of the fastener to detach.
+        env_ids: Tensor of environment indices [B].
+
+    Side effects:
+        - Removes weld constraint fastener<->screwdriver for env_ids.
+        - Clears picked-up fastener pose and sets picked_up_fastener_id to -1 in tool state.
+    """
+    assert (
+        sim_state.tool_state.tool_ids[env_ids] == ToolsEnum.SCREWDRIVER.value
+    ).all(), "Tool must be a Screwdriver"
+    assert sim_state.tool_state.screwdriver_tc.has_picked_up_fastener.all(), (
+        "Expected all env_ids to have a picked up fastener!"
+    )
+    if env_ids is None:
+        env_ids = torch.arange(scene.n_envs)
+    env_ids_i32 = env_ids.to(torch.int32)
+    rigid_solver = scene.sim.rigid_solver
+    picked_up_fastener_ids = sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
+        env_ids_i32
+    ]
+    # Delete weld between fastener head and screwdriver base link
+    screwdriver_link_idx = int(
+        sim_info.tool_info.tool_base_link_idx[ToolsEnum.SCREWDRIVER.value]
+    )
+    screwdriver_links = torch.full(
+        (int(env_ids_i32.shape[0]),),
+        screwdriver_link_idx,
+        dtype=torch.int32,
+        device=env_ids_i32.device,
+    )
+    fastener_head_link = sim_info.physical_info.fastener_base_link_idx[
+        picked_up_fastener_ids
+    ].to(torch.int32)
+    rigid_solver.delete_weld_constraint(
+        fastener_head_link, screwdriver_links, env_ids_i32
+    )  # works in genesis examples.
+    sim_state.tool_state.screwdriver_tc.picked_up_fastener_tip_position[env_ids] = (
+        torch.nan
+    )
+    sim_state.tool_state.screwdriver_tc.picked_up_fastener_quat[env_ids] = torch.nan
+    sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[env_ids] = -1
+    return sim_state
+
+
+def attach_picked_up_fastener_to_part(
+    scene: gs.Scene,
+    sim_state: RepairsSimState,
+    sim_info: RepairsSimInfo,
+    inserted_into_hole_ids: torch.Tensor,  # [B], int
+    top_hole_id: torch.Tensor,  # [B], int
+    envs_idx: torch.Tensor,
+):
+    """Attach the picked up fastener to a part by IDs and add a weld constraint.
+
+    ID-based API. All geometry and parameters are resolved internally from `physical_state`
+    and `physical_info` using the provided IDs.
+
+    Args:
+        scene: Genesis scene.
+        physical_state: Batched `PhysicalState` providing current hole poses.
+        physical_info: Singleton `PhysicalStateInfo` providing hole metadata and link indices.
+        fastener_id: Tensor [B] of fastener IDs for each env in `envs_idx`.
+        inserted_into_hole_ids: Tensor [B] of hole IDs (indices into hole arrays) to attach into.
+        top_hole_id: Tensor [B] of the already-connected hole ID for the same fastener in the
+            same env, or -1 if none. When not -1, must refer to a through hole.
+        envs_idx: Tensor [B] of environment indices to apply the update to.
+
+    Behavior:
+        - Computes target fastener position with `recalculate_fastener_pos_with_offset_to_hole(...)`
+          using hole depth/through flags and remaining length if partially inserted from the top.
+        - Sets orientation equal to the target hole quaternion.
+        - Adds a weld constraint between fastener base link and the owning body base link.
 
     Notes:
-        - All tensor arguments must be filtered to the same batch as `envs_idx` (B items).
-        - Units are meters throughout.
-        - Preconditions enforced by assertions:
-            * Where `already_inserted_into_one_hole` is True: `top_hole_is_through` must be True
-              and `top_hole_depth` == 0
-            * Where `already_inserted_into_one_hole` is False: `top_hole_depth` == 0
-            * `inserted_to_hole_depth` > 0 and `fastener_length` > 0
-
-    Returns:
-        None. Side effects: updates the fastener pose and adds a weld constraint to
-        `inserted_into_part_entity` in the specified environments.
+        - Shapes must match B = len(envs_idx). No implicit broadcasting.
+        - Units are meters.
+        - Preconditions (asserted):
+            * If top_hole_id != -1 -> `hole_is_through[top_hole_id]` must be True.
+            * `fasteners_length[fastener_id] > 0`.
+            * `inserted_into_hole_ids` must be in range [0, H).
     """
-    assert (top_hole_is_through[already_inserted_into_one_hole]).all(), (
-        f"Where already inserted, must be inserted into a through hole (can't insert when the top hole is blind).\n"
-        f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_is_through: {top_hole_is_through}"
+    assert inserted_into_hole_ids.shape == top_hole_id.shape == envs_idx.shape, (
+        "Batching failure"
     )
-    # If already inserted into a (top) hole, that top hole must be through, and inserted depth is 0
-    assert (
-        (already_inserted_into_one_hole & top_hole_is_through)
-        == already_inserted_into_one_hole
-    ).all(), (
-        f"Where already inserted, top hole must be through.\n"
-        f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_is_through: {top_hole_is_through}"
-    )
-    assert (top_hole_depth[already_inserted_into_one_hole] == 0).all() and (
-        top_hole_depth[~already_inserted_into_one_hole] == 0
-    ).all(), (
-        f"top_hole_depth must be 0 both when not inserted and when inserted into a through top hole.\n"
-        f"already_inserted_into_one_hole: {already_inserted_into_one_hole}, top_hole_depth: {top_hole_depth}"
-    )
-    assert (fastener_length > 0).all(), (
-        f"Fastener length must be positive. Fastener_length: {fastener_length}"
-    )
-    assert (inserted_to_hole_depth > 0).all(), (
-        f"Inserted to hole depth must be positive. Inserted_to_hole_depth: {inserted_to_hole_depth}"
-    )
+    # Validate input tensor shapes match env batch size
+    B = int(envs_idx.shape[0])
+    assert envs_idx.ndim == 1 and B > 0, "envs_idx must be 1D with length > 0"
 
-    # TODO: make fastener insertion more smooth.
+    # Validate hole id ranges
+    physical_info = sim_info.physical_info
+    H = int(physical_info.part_hole_batch.shape[0])
+    assert ((inserted_into_hole_ids >= 0) & (inserted_into_hole_ids < H)).all(), (
+        f"inserted_into_hole_ids out of range [0,{H})"
+    )
+    assert ((top_hole_id == -1) | ((top_hole_id >= 0) & (top_hole_id < H))).all(), (
+        f"top_hole_id must be -1 (none) or in [0,{H})"
+    )
+    picked_up_fastener_id = sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
+        envs_idx
+    ]
+
+    # Where a top hole is specified, it must be through
+    has_top = top_hole_id != -1
+    if has_top.any():
+        assert physical_info.hole_is_through[top_hole_id[has_top]].all(), (
+            "Top hole must be through when specified"
+        )
+    physical_state = sim_state.physical_state
+
+    inserted_into_part_id = physical_info.part_hole_batch[inserted_into_hole_ids]
+
     rigid_solver = scene.sim.rigid_solver
-    # fastener_pos = fastener_entity.get_pos(envs_idx)
-    # fastener_quat = fastener_entity.get_quat(envs_idx)
-    # fastener_head_joint = np.array(fastener_entity.base_link.idx)
-    fastener_joint = fastener_entity.base_link.idx
-    other_body_link = inserted_into_part_entity.base_link.idx
+    fastener_links = physical_info.fastener_base_link_idx[picked_up_fastener_id]
+    other_body_links = physical_info.body_base_link_idx[inserted_into_part_id]
 
-    # TODO: This needs to be updated to pass proper hole_is_through and top_hole_depth values
-    # For now, assuming blind holes with no partial insertion
-    # top_hole_depth = torch.zeros_like(hole_depth)  # No partial insertion
+    # Prepare top_hole_depth: zero where top_hole_id == -1 (no top insertion)
+    top_depth = torch.zeros_like(
+        inserted_into_hole_ids, dtype=physical_info.hole_depth.dtype
+    )
+    has_top_mask = top_hole_id != -1
+    top_depth[has_top_mask] = physical_info.hole_depth[top_hole_id[has_top_mask]]
+
+    # Select per-env hole pose using advanced indexing [B, 3] / [B, 4]
+    hole_pos_env = physical_state.hole_positions[envs_idx, inserted_into_hole_ids]
+    hole_quat_env = physical_state.hole_quats[envs_idx, inserted_into_hole_ids]
 
     fastener_pos = recalculate_fastener_pos_with_offset_to_hole(
-        inserted_into_hole_pos,
-        inserted_into_hole_quat,
-        inserted_to_hole_depth,
-        inserted_into_hole_is_through,
-        fastener_length,
-        top_hole_depth,
+        hole_pos_env,
+        hole_quat_env,
+        physical_info.hole_depth[inserted_into_hole_ids],
+        physical_info.hole_is_through[inserted_into_hole_ids],
+        physical_info.fasteners_length[picked_up_fastener_id],
+        top_depth,
     )
 
-    fastener_entity.set_pos(fastener_pos, envs_idx)
-    fastener_entity.set_quat(inserted_into_hole_quat, envs_idx)
+    scene.rigid_solver.set_base_links_pos(fastener_pos, fastener_links, envs_idx)
+    scene.rigid_solver.set_base_links_quat(hole_quat_env, fastener_links, envs_idx)
 
     # Make idempotent: remove existing weld if present before adding
-    rigid_solver.delete_weld_constraint(fastener_joint, other_body_link, envs_idx)
+    rigid_solver.delete_weld_constraint(fastener_links, other_body_links, envs_idx)
     rigid_solver.add_weld_constraint(
-        fastener_joint, other_body_link, envs_idx
+        fastener_links, other_body_links, envs_idx
     )  # works in genesis's examples.
     # FIXME: rigid weld constraint would make screwing the other part impossible. it should be a circular joint first.
 
 
 def detach_fastener_from_part(
     scene: gs.Scene,
-    fastener_entity: RigidEntity,
-    part_entity: RigidEntity,
+    sim_state: RepairsSimState,
+    sim_info: RepairsSimInfo,
+    part_ids: torch.Tensor,
     envs_idx: torch.Tensor,
 ):
+    assert envs_idx.shape == part_ids.shape, "Improper batching."
     rigid_solver = scene.sim.rigid_solver
-    fastener_head_joint = fastener_entity.base_link.idx
-    other_body_hole_link = part_entity.base_link.idx
+    picked_up_fastener_id = sim_state.tool_state.screwdriver_tc.picked_up_fastener_id[
+        envs_idx
+    ]
+    fastener_head_joint = sim_info.physical_info.fastener_base_link_idx[
+        picked_up_fastener_id
+    ]
+    other_body_hole_link = sim_info.physical_info.body_base_link_idx[part_ids]
     rigid_solver.delete_weld_constraint(
         fastener_head_joint, other_body_hole_link, envs_idx
     )  # works in genesis's examples.
+    # set as fasteners as detached
+    sim_state.physical_state.fasteners_attached_to_body[
+        envs_idx, picked_up_fastener_id, :
+    ] = -1
+    sim_state.physical_state.fasteners_attached_to_hole[
+        envs_idx, picked_up_fastener_id, :
+    ] = -1
+
+    return sim_state
 
 
 class FastenerHolder(Component):
